@@ -26,20 +26,9 @@
 
 ---
 
-## 二、首次执行数据库迁移
+## 二、数据库迁移（已自动执行）
 
-表结构需在首次部署后执行一次迁移脚本。
-
-1. 安装 [Railway CLI](https://docs.railway.app/develop/cli) 并登录：`railway login`。
-2. 在项目根目录执行 `railway link`，选择刚创建的 Railway 项目。
-3. 进入后端目录并执行迁移（会使用当前链接项目中的 `DATABASE_URL`）：
-
-```bash
-cd backend
-railway run python scripts/run_migrations.py
-```
-
-看到 “All migrations completed.” 即表示建表成功。
+表结构在**每次容器启动时**会自动执行迁移（`Dockerfile` 中已配置：先跑 `scripts/run_migrations.py` 再启动 uvicorn）。无需在本地安装 Railway CLI 或手动执行迁移。若需在本地用 Railway 环境跑迁移，可执行：`railway login` → `railway link` → `cd backend` → `railway run python scripts/run_migrations.py`。
 
 ---
 
@@ -52,7 +41,7 @@ railway run python scripts/run_migrations.py
 | API 文档   | `https://你的域名/docs` |
 | 创建 IP 示例 | `POST https://你的域名/api/v1/ip`，Body: `{"ip_id":"test_001","name":"测试IP","owner_user_id":"user_001"}` |
 
-若你尚未执行 **二、首次执行数据库迁移**，创建 IP、配置与素材录入等接口会因表不存在而报错，请先完成迁移再联调。
+迁移已在部署时自动执行；若曾部署过早于“自动迁移”的版本，可触发一次重新部署以完成建表。
 
 ---
 

@@ -2,6 +2,8 @@
 
 本后端通过 **Railway** 从 GitHub 自动构建并部署，无需本地 Docker，部署后获得公网 HTTPS 地址，便于第三方联调测试。
 
+**当前部署范围**：仅 **后端 API 服务**。打开公网域名会看到产品说明页（含 API 文档入口）；完整的「Agent 配置中心」前端界面为后续规划，尚未一并部署。
+
 ---
 
 ## 前提
@@ -45,9 +47,12 @@ railway run python scripts/run_migrations.py
 
 | 用途       | 地址 |
 |------------|------|
+| 产品说明页（首页） | `https://你的域名/` |
 | 健康检查   | `https://你的域名/health` |
 | API 文档   | `https://你的域名/docs` |
 | 创建 IP 示例 | `POST https://你的域名/api/v1/ip`，Body: `{"ip_id":"test_001","name":"测试IP","owner_user_id":"user_001"}` |
+
+若你尚未执行 **二、首次执行数据库迁移**，创建 IP、配置与素材录入等接口会因表不存在而报错，请先完成迁移再联调。
 
 ---
 

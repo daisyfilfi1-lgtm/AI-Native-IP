@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<!-- saved from url=(0062)blob:https://www.kimi.com/e20aac2f-481e-40af-aae2-89ce0aa80f14 -->
+<html lang="zh-CN"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Native IP工厂 - 智能内容生产系统</title>
+    <script src="https://cdn.tailwindcss.com/"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+
+        /* 动画定义 */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            100% { transform: scale(1.2); opacity: 0; }
+        }
+
+        @keyframes flow-line {
+            0% { stroke-dashoffset: 100; }
+            100% { stroke-dashoffset: 0; }
+        }
+
+        @keyframes agent-blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .agent-active::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 2px solid #00B894;
+            animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #00B894 0%, #00CEC9 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .workflow-line {
+            stroke-dasharray: 5,5;
+            animation: flow-line 20s linear infinite;
+        }
+
+        /* 滚动条美化 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px -10px rgba(0,0,0,0.1);
+        }
+    </style>
+<!--<base target="_blank">--><base href="." target="_blank">
+<style>*, ::before, ::after{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgb(59 130 246 / 0.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }::backdrop{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgb(59 130 246 / 0.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }/* ! tailwindcss v3.4.17 | MIT License | https://tailwindcss.com */*,::after,::before{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e5e7eb}::after,::before{--tw-content:''}:host,html{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;tab-size:4;font-family:ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent}body{margin:0;line-height:inherit}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,pre,samp{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;font-feature-settings:normal;font-variation-settings:normal;font-size:1em}small{font-size:80%}sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:baseline}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}button,input,optgroup,select,textarea{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}button,select{text-transform:none}button,input:where([type=button]),input:where([type=reset]),input:where([type=submit]){-webkit-appearance:button;background-color:transparent;background-image:none}:-moz-focusring{outline:auto}:-moz-ui-invalid{box-shadow:none}progress{vertical-align:baseline}::-webkit-inner-spin-button,::-webkit-outer-spin-button{height:auto}[type=search]{-webkit-appearance:textfield;outline-offset:-2px}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}summary{display:list-item}blockquote,dd,dl,figure,h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}fieldset{margin:0;padding:0}legend{padding:0}menu,ol,ul{list-style:none;margin:0;padding:0}dialog{padding:0}textarea{resize:vertical}input::placeholder,textarea::placeholder{opacity:1;color:#9ca3af}[role=button],button{cursor:pointer}:disabled{cursor:default}audio,canvas,embed,iframe,img,object,svg,video{display:block;vertical-align:middle}img,video{max-width:100%;height:auto}[hidden]:where(:not([hidden=until-found])){display:none}.fixed{position:fixed}.absolute{position:absolute}.relative{position:relative}.sticky{position:sticky}.inset-0{inset:0px}.bottom-24{bottom:6rem}.bottom-8{bottom:2rem}.left-0{left:0px}.right-8{right:2rem}.top-0{top:0px}.top-8{top:2rem}.z-10{z-index:10}.z-50{z-index:50}.mx-auto{margin-left:auto;margin-right:auto}.mb-1{margin-bottom:0.25rem}.mb-2{margin-bottom:0.5rem}.mb-3{margin-bottom:0.75rem}.mb-4{margin-bottom:1rem}.mb-8{margin-bottom:2rem}.ml-auto{margin-left:auto}.mr-1{margin-right:0.25rem}.mt-1{margin-top:0.25rem}.mt-3{margin-top:0.75rem}.mt-4{margin-top:1rem}.mt-6{margin-top:1.5rem}.flex{display:flex}.inline-flex{display:inline-flex}.grid{display:grid}.hidden{display:none}.h-12{height:3rem}.h-16{height:4rem}.h-2{height:0.5rem}.h-24{height:6rem}.h-3{height:0.75rem}.h-8{height:2rem}.h-full{height:100%}.max-h-\[80vh\]{max-height:80vh}.w-12{width:3rem}.w-2{width:0.5rem}.w-3{width:0.75rem}.w-8{width:2rem}.w-80{width:20rem}.w-full{width:100%}.max-w-2xl{max-width:42rem}.max-w-7xl{max-width:80rem}.flex-1{flex:1 1 0%}.flex-shrink-0{flex-shrink:0}@keyframes ping{75%, 100%{transform:scale(2);opacity:0}}.animate-ping{animation:ping 1s cubic-bezier(0, 0, 0.2, 1) infinite}@keyframes pulse{50%{opacity:.5}}.animate-pulse{animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite}.cursor-pointer{cursor:pointer}.resize-none{resize:none}.grid-cols-1{grid-template-columns:repeat(1, minmax(0, 1fr))}.grid-cols-7{grid-template-columns:repeat(7, minmax(0, 1fr))}.grid-cols-2{grid-template-columns:repeat(2, minmax(0, 1fr))}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.items-start{align-items:flex-start}.items-center{align-items:center}.justify-center{justify-content:center}.justify-between{justify-content:space-between}.gap-1{gap:0.25rem}.gap-2{gap:0.5rem}.gap-3{gap:0.75rem}.gap-4{gap:1rem}.gap-6{gap:1.5rem}.gap-8{gap:2rem}.space-y-2 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(0.5rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(0.5rem * var(--tw-space-y-reverse))}.space-y-3 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(0.75rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(0.75rem * var(--tw-space-y-reverse))}.space-y-4 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(1rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(1rem * var(--tw-space-y-reverse))}.space-y-6 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(1.5rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(1.5rem * var(--tw-space-y-reverse))}.divide-y > :not([hidden]) ~ :not([hidden]){--tw-divide-y-reverse:0;border-top-width:calc(1px * calc(1 - var(--tw-divide-y-reverse)));border-bottom-width:calc(1px * var(--tw-divide-y-reverse))}.divide-gray-100 > :not([hidden]) ~ :not([hidden]){--tw-divide-opacity:1;border-color:rgb(243 244 246 / var(--tw-divide-opacity, 1))}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.rounded{border-radius:0.25rem}.rounded-2xl{border-radius:1rem}.rounded-full{border-radius:9999px}.rounded-lg{border-radius:0.5rem}.rounded-xl{border-radius:0.75rem}.border{border-width:1px}.border-b{border-bottom-width:1px}.border-b-2{border-bottom-width:2px}.border-l{border-left-width:1px}.border-t{border-top-width:1px}.border-blue-200{--tw-border-opacity:1;border-color:rgb(191 219 254 / var(--tw-border-opacity, 1))}.border-emerald-200{--tw-border-opacity:1;border-color:rgb(167 243 208 / var(--tw-border-opacity, 1))}.border-emerald-500{--tw-border-opacity:1;border-color:rgb(16 185 129 / var(--tw-border-opacity, 1))}.border-gray-100{--tw-border-opacity:1;border-color:rgb(243 244 246 / var(--tw-border-opacity, 1))}.border-gray-200{--tw-border-opacity:1;border-color:rgb(229 231 235 / var(--tw-border-opacity, 1))}.border-purple-200{--tw-border-opacity:1;border-color:rgb(233 213 255 / var(--tw-border-opacity, 1))}.border-transparent{border-color:transparent}.bg-gray-50{--tw-bg-opacity:1;background-color:rgb(249 250 251 / var(--tw-bg-opacity, 1))}.bg-black{--tw-bg-opacity:1;background-color:rgb(0 0 0 / var(--tw-bg-opacity, 1))}.bg-blue-50{--tw-bg-opacity:1;background-color:rgb(239 246 255 / var(--tw-bg-opacity, 1))}.bg-blue-500{--tw-bg-opacity:1;background-color:rgb(59 130 246 / var(--tw-bg-opacity, 1))}.bg-emerald-50{--tw-bg-opacity:1;background-color:rgb(236 253 245 / var(--tw-bg-opacity, 1))}.bg-emerald-500{--tw-bg-opacity:1;background-color:rgb(16 185 129 / var(--tw-bg-opacity, 1))}.bg-emerald-600{--tw-bg-opacity:1;background-color:rgb(5 150 105 / var(--tw-bg-opacity, 1))}.bg-gray-100{--tw-bg-opacity:1;background-color:rgb(243 244 246 / var(--tw-bg-opacity, 1))}.bg-gray-200{--tw-bg-opacity:1;background-color:rgb(229 231 235 / var(--tw-bg-opacity, 1))}.bg-gray-900{--tw-bg-opacity:1;background-color:rgb(17 24 39 / var(--tw-bg-opacity, 1))}.bg-green-400{--tw-bg-opacity:1;background-color:rgb(74 222 128 / var(--tw-bg-opacity, 1))}.bg-green-50{--tw-bg-opacity:1;background-color:rgb(240 253 244 / var(--tw-bg-opacity, 1))}.bg-green-500{--tw-bg-opacity:1;background-color:rgb(34 197 94 / var(--tw-bg-opacity, 1))}.bg-orange-50{--tw-bg-opacity:1;background-color:rgb(255 247 237 / var(--tw-bg-opacity, 1))}.bg-purple-50{--tw-bg-opacity:1;background-color:rgb(250 245 255 / var(--tw-bg-opacity, 1))}.bg-red-100{--tw-bg-opacity:1;background-color:rgb(254 226 226 / var(--tw-bg-opacity, 1))}.bg-white{--tw-bg-opacity:1;background-color:rgb(255 255 255 / var(--tw-bg-opacity, 1))}.bg-yellow-200{--tw-bg-opacity:1;background-color:rgb(254 240 138 / var(--tw-bg-opacity, 1))}.bg-yellow-50{--tw-bg-opacity:1;background-color:rgb(254 252 232 / var(--tw-bg-opacity, 1))}.bg-emerald-100{--tw-bg-opacity:1;background-color:rgb(209 250 229 / var(--tw-bg-opacity, 1))}.bg-blue-100{--tw-bg-opacity:1;background-color:rgb(219 234 254 / var(--tw-bg-opacity, 1))}.bg-opacity-50{--tw-bg-opacity:0.5}.bg-gradient-to-br{background-image:linear-gradient(to bottom right, var(--tw-gradient-stops))}.bg-gradient-to-r{background-image:linear-gradient(to right, var(--tw-gradient-stops))}.from-emerald-400{--tw-gradient-from:#34d399 var(--tw-gradient-from-position);--tw-gradient-to:rgb(52 211 153 / 0) var(--tw-gradient-to-position);--tw-gradient-stops:var(--tw-gradient-from), var(--tw-gradient-to)}.from-emerald-500{--tw-gradient-from:#10b981 var(--tw-gradient-from-position);--tw-gradient-to:rgb(16 185 129 / 0) var(--tw-gradient-to-position);--tw-gradient-stops:var(--tw-gradient-from), var(--tw-gradient-to)}.to-cyan-400{--tw-gradient-to:#22d3ee var(--tw-gradient-to-position)}.to-cyan-500{--tw-gradient-to:#06b6d4 var(--tw-gradient-to-position)}.p-2{padding:0.5rem}.p-3{padding:0.75rem}.p-4{padding:1rem}.p-6{padding:1.5rem}.px-1{padding-left:0.25rem;padding-right:0.25rem}.px-1\.5{padding-left:0.375rem;padding-right:0.375rem}.px-2{padding-left:0.5rem;padding-right:0.5rem}.px-3{padding-left:0.75rem;padding-right:0.75rem}.px-4{padding-left:1rem;padding-right:1rem}.px-6{padding-left:1.5rem;padding-right:1.5rem}.py-0\.5{padding-top:0.125rem;padding-bottom:0.125rem}.py-1{padding-top:0.25rem;padding-bottom:0.25rem}.py-1\.5{padding-top:0.375rem;padding-bottom:0.375rem}.py-2{padding-top:0.5rem;padding-bottom:0.5rem}.py-3{padding-top:0.75rem;padding-bottom:0.75rem}.py-4{padding-top:1rem;padding-bottom:1rem}.py-8{padding-top:2rem;padding-bottom:2rem}.pl-4{padding-left:1rem}.pt-1{padding-top:0.25rem}.pt-3{padding-top:0.75rem}.text-center{text-align:center}.text-right{text-align:right}.text-2xl{font-size:1.5rem;line-height:2rem}.text-\[10px\]{font-size:10px}.text-lg{font-size:1.125rem;line-height:1.75rem}.text-sm{font-size:0.875rem;line-height:1.25rem}.text-xl{font-size:1.25rem;line-height:1.75rem}.text-xs{font-size:0.75rem;line-height:1rem}.font-bold{font-weight:700}.font-medium{font-weight:500}.font-semibold{font-weight:600}.tracking-tight{letter-spacing:-0.025em}.text-gray-800{--tw-text-opacity:1;color:rgb(31 41 55 / var(--tw-text-opacity, 1))}.text-blue-500{--tw-text-opacity:1;color:rgb(59 130 246 / var(--tw-text-opacity, 1))}.text-blue-600{--tw-text-opacity:1;color:rgb(37 99 235 / var(--tw-text-opacity, 1))}.text-blue-700{--tw-text-opacity:1;color:rgb(29 78 216 / var(--tw-text-opacity, 1))}.text-emerald-100{--tw-text-opacity:1;color:rgb(209 250 229 / var(--tw-text-opacity, 1))}.text-emerald-500{--tw-text-opacity:1;color:rgb(16 185 129 / var(--tw-text-opacity, 1))}.text-emerald-600{--tw-text-opacity:1;color:rgb(5 150 105 / var(--tw-text-opacity, 1))}.text-emerald-700{--tw-text-opacity:1;color:rgb(4 120 87 / var(--tw-text-opacity, 1))}.text-gray-400{--tw-text-opacity:1;color:rgb(156 163 175 / var(--tw-text-opacity, 1))}.text-gray-500{--tw-text-opacity:1;color:rgb(107 114 128 / var(--tw-text-opacity, 1))}.text-gray-600{--tw-text-opacity:1;color:rgb(75 85 99 / var(--tw-text-opacity, 1))}.text-gray-700{--tw-text-opacity:1;color:rgb(55 65 81 / var(--tw-text-opacity, 1))}.text-gray-900{--tw-text-opacity:1;color:rgb(17 24 39 / var(--tw-text-opacity, 1))}.text-green-500{--tw-text-opacity:1;color:rgb(34 197 94 / var(--tw-text-opacity, 1))}.text-green-600{--tw-text-opacity:1;color:rgb(22 163 74 / var(--tw-text-opacity, 1))}.text-green-700{--tw-text-opacity:1;color:rgb(21 128 61 / var(--tw-text-opacity, 1))}.text-orange-500{--tw-text-opacity:1;color:rgb(249 115 22 / var(--tw-text-opacity, 1))}.text-orange-600{--tw-text-opacity:1;color:rgb(234 88 12 / var(--tw-text-opacity, 1))}.text-purple-500{--tw-text-opacity:1;color:rgb(168 85 247 / var(--tw-text-opacity, 1))}.text-purple-600{--tw-text-opacity:1;color:rgb(147 51 234 / var(--tw-text-opacity, 1))}.text-purple-700{--tw-text-opacity:1;color:rgb(126 34 206 / var(--tw-text-opacity, 1))}.text-red-500{--tw-text-opacity:1;color:rgb(239 68 68 / var(--tw-text-opacity, 1))}.text-red-600{--tw-text-opacity:1;color:rgb(220 38 38 / var(--tw-text-opacity, 1))}.text-white{--tw-text-opacity:1;color:rgb(255 255 255 / var(--tw-text-opacity, 1))}.text-yellow-500{--tw-text-opacity:1;color:rgb(234 179 8 / var(--tw-text-opacity, 1))}.text-yellow-600{--tw-text-opacity:1;color:rgb(202 138 4 / var(--tw-text-opacity, 1))}.line-through{-webkit-text-decoration-line:line-through;text-decoration-line:line-through}.opacity-75{opacity:0.75}.shadow{--tw-shadow:0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);--tw-shadow-colored:0 1px 3px 0 var(--tw-shadow-color), 0 1px 2px -1px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow)}.shadow-2xl{--tw-shadow:0 25px 50px -12px rgb(0 0 0 / 0.25);--tw-shadow-colored:0 25px 50px -12px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow)}.shadow-lg{--tw-shadow:0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);--tw-shadow-colored:0 10px 15px -3px var(--tw-shadow-color), 0 4px 6px -4px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow)}.transition{transition-property:color, background-color, border-color, fill, stroke, opacity, box-shadow, transform, filter, -webkit-text-decoration-color, -webkit-backdrop-filter;transition-property:color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;transition-property:color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter, -webkit-text-decoration-color, -webkit-backdrop-filter;transition-timing-function:cubic-bezier(0.4, 0, 0.2, 1);transition-duration:150ms}.transition-all{transition-property:all;transition-timing-function:cubic-bezier(0.4, 0, 0.2, 1);transition-duration:150ms}.duration-300{transition-duration:300ms}.hover\:border-gray-300:hover{--tw-border-opacity:1;border-color:rgb(209 213 219 / var(--tw-border-opacity, 1))}.hover\:bg-blue-100:hover{--tw-bg-opacity:1;background-color:rgb(219 234 254 / var(--tw-bg-opacity, 1))}.hover\:bg-emerald-100:hover{--tw-bg-opacity:1;background-color:rgb(209 250 229 / var(--tw-bg-opacity, 1))}.hover\:bg-emerald-50:hover{--tw-bg-opacity:1;background-color:rgb(236 253 245 / var(--tw-bg-opacity, 1))}.hover\:bg-emerald-700:hover{--tw-bg-opacity:1;background-color:rgb(4 120 87 / var(--tw-bg-opacity, 1))}.hover\:bg-gray-100:hover{--tw-bg-opacity:1;background-color:rgb(243 244 246 / var(--tw-bg-opacity, 1))}.hover\:bg-gray-200:hover{--tw-bg-opacity:1;background-color:rgb(229 231 235 / var(--tw-bg-opacity, 1))}.hover\:bg-gray-50:hover{--tw-bg-opacity:1;background-color:rgb(249 250 251 / var(--tw-bg-opacity, 1))}.hover\:bg-gray-800:hover{--tw-bg-opacity:1;background-color:rgb(31 41 55 / var(--tw-bg-opacity, 1))}.hover\:bg-purple-100:hover{--tw-bg-opacity:1;background-color:rgb(243 232 255 / var(--tw-bg-opacity, 1))}.hover\:text-emerald-700:hover{--tw-text-opacity:1;color:rgb(4 120 87 / var(--tw-text-opacity, 1))}.hover\:text-gray-600:hover{--tw-text-opacity:1;color:rgb(75 85 99 / var(--tw-text-opacity, 1))}.hover\:text-gray-700:hover{--tw-text-opacity:1;color:rgb(55 65 81 / var(--tw-text-opacity, 1))}.focus\:outline-none:focus{outline:2px solid transparent;outline-offset:2px}.focus\:ring-2:focus{--tw-ring-offset-shadow:var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);--tw-ring-shadow:var(--tw-ring-inset) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color);box-shadow:var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000)}.focus\:ring-emerald-500:focus{--tw-ring-opacity:1;--tw-ring-color:rgb(16 185 129 / var(--tw-ring-opacity, 1))}@media (min-width: 640px){.sm\:block{display:block}.sm\:px-6{padding-left:1.5rem;padding-right:1.5rem}}@media (min-width: 768px){.md\:ml-10{margin-left:2.5rem}.md\:flex{display:flex}.md\:grid-cols-2{grid-template-columns:repeat(2, minmax(0, 1fr))}.md\:space-x-8 > :not([hidden]) ~ :not([hidden]){--tw-space-x-reverse:0;margin-right:calc(2rem * var(--tw-space-x-reverse));margin-left:calc(2rem * calc(1 - var(--tw-space-x-reverse)))}}@media (min-width: 1024px){.lg\:col-span-2{grid-column:span 2 / span 2}.lg\:grid-cols-3{grid-template-columns:repeat(3, minmax(0, 1fr))}.lg\:grid-cols-4{grid-template-columns:repeat(4, minmax(0, 1fr))}.lg\:px-8{padding-left:2rem;padding-right:2rem}}</style></head>
+<body class="bg-gray-50 text-gray-800">
+    <!-- 顶部导航 -->
+    <nav class="bg-white border-b border-gray-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 flex items-center gap-3">
+                        <div class="w-8 h-8 bg-gradient-to-br from-emerald-500 to-cyan-500 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-robot text-white text-sm"></i>
+                        </div>
+                        <span class="font-bold text-xl tracking-tight text-gray-900">AI-Native <span class="gradient-text">IP工厂</span></span>
+                    </div>
+                    <div class="hidden md:ml-10 md:flex md:space-x-8">
+                        <a href="blob:https://www.kimi.com/e20aac2f-481e-40af-aae2-89ce0aa80f14#" class="border-emerald-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                            工作台
+                        </a>
+                        <a href="blob:https://www.kimi.com/e20aac2f-481e-40af-aae2-89ce0aa80f14#" class="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                            Agent管理
+                        </a>
+                        <a href="blob:https://www.kimi.com/e20aac2f-481e-40af-aae2-89ce0aa80f14#" class="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                            数据复盘
+                        </a>
+                        <a href="blob:https://www.kimi.com/e20aac2f-481e-40af-aae2-89ce0aa80f14#" class="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                            系统配置
+                        </a>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2 text-sm text-gray-500">
+                        <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                        系统运行中
+                    </div>
+                    <div class="flex items-center gap-3 pl-4 border-l border-gray-200">
+                        <div class="text-right hidden sm:block">
+                            <div class="text-sm font-medium text-gray-900">张凯 IP</div>
+                            <div class="text-xs text-gray-500">商业博主</div>
+                        </div>
+                        <div class="h-8 w-8 rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 flex items-center justify-center text-white font-bold text-sm">
+                            ZK
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- 核心指标卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="metric-card bg-white rounded-xl p-6 border border-gray-100 transition-all duration-300 cursor-pointer" onclick="showDetail(&#39;产能&#39;)">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-2 bg-emerald-50 rounded-lg">
+                        <i class="fas fa-bolt text-emerald-600"></i>
+                    </div>
+                    <span class="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">+240%</span>
+                </div>
+                <div class="text-2xl font-bold text-gray-900">287</div>
+                <div class="text-sm text-gray-500 mb-1">今日产出内容</div>
+                <div class="text-xs text-gray-400">目标: 300条/天</div>
+            </div>
+
+            <div class="metric-card bg-white rounded-xl p-6 border border-gray-100 transition-all duration-300 cursor-pointer" onclick="showDetail(&#39;爆款率&#39;)">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-2 bg-blue-50 rounded-lg">
+                        <i class="fas fa-fire text-blue-600"></i>
+                    </div>
+                    <span class="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-full">+3.2%</span>
+                </div>
+                <div class="text-2xl font-bold text-gray-900">18.4%</div>
+                <div class="text-sm text-gray-500 mb-1">爆款率</div>
+                <div class="text-xs text-gray-400">行业平均: 12%</div>
+            </div>
+
+            <div class="metric-card bg-white rounded-xl p-6 border border-gray-100 transition-all duration-300 cursor-pointer" onclick="showDetail(&#39;成本&#39;)">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-2 bg-purple-50 rounded-lg">
+                        <i class="fas fa-dollar-sign text-purple-600"></i>
+                    </div>
+                    <span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-1 rounded-full">-76%</span>
+                </div>
+                <div class="text-2xl font-bold text-gray-900">¥48</div>
+                <div class="text-sm text-gray-500 mb-1">单条内容成本</div>
+                <div class="text-xs text-gray-400">传统: ¥1,333</div>
+            </div>
+
+            <div class="metric-card bg-white rounded-xl p-6 border border-gray-100 transition-all duration-300 cursor-pointer" onclick="showDetail(&#39;时间&#39;)">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-2 bg-orange-50 rounded-lg">
+                        <i class="fas fa-clock text-orange-600"></i>
+                    </div>
+                    <span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-1 rounded-full">-90%</span>
+                </div>
+                <div class="text-2xl font-bold text-gray-900">45min</div>
+                <div class="text-sm text-gray-500 mb-1">IP每日投入时间</div>
+                <div class="text-xs text-gray-400">传统: 8小时</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- 左侧：实时工作流可视化 -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Agent状态看板 -->
+                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-gray-900">7-Agent协作流水线</h3>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-gray-500">实时状态</span>
+                            <span class="relative flex h-3 w-3">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <!-- 流水线可视化 -->
+                        <div class="relative">
+                            <!-- 连接线 SVG -->
+                            <svg class="absolute top-8 left-0 w-full h-2" style="z-index: 0;">
+                                <line x1="0" y1="1" x2="100%" y2="1" stroke="#E5E7EB" stroke-width="2"></line>
+                                <line x1="0" y1="1" x2="60%" y2="1" stroke="#00B894" stroke-width="2" class="workflow-line" id="progress-line"></line>
+                            </svg>
+
+                            <!-- Agent节点 -->
+                            <div class="grid grid-cols-7 gap-2 relative z-10">
+                                <!-- Agent 1: 策略 -->
+                                <div class="flex flex-col items-center group cursor-pointer" onclick="showAgentDetail(&#39;strategy&#39;)">
+                                    <div class="w-12 h-12 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-xs shadow-lg agent-active relative mb-2">
+                                        <i class="fas fa-brain"></i>
+                                    </div>
+                                    <div class="text-xs font-medium text-gray-900 text-center">策略</div>
+                                    <div class="text-[10px] text-gray-500">2s前活跃</div>
+                                </div>
+
+                                <!-- Agent 2: 记忆 -->
+                                <div class="flex flex-col items-center group cursor-pointer" onclick="showAgentDetail(&#39;memory&#39;)">
+                                    <div class="w-12 h-12 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-xs shadow-lg agent-active relative mb-2">
+                                        <i class="fas fa-database"></i>
+                                    </div>
+                                    <div class="text-xs font-medium text-gray-900 text-center">记忆</div>
+                                    <div class="text-[10px] text-gray-500">检索中...</div>
+                                </div>
+
+                                <!-- Agent 3: 重组 -->
+                                <div class="flex flex-col items-center group cursor-pointer" onclick="showAgentDetail(&#39;remix&#39;)">
+                                    <div class="w-12 h-12 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold text-xs shadow-lg relative mb-2 animate-pulse">
+                                        <i class="fas fa-random"></i>
+                                    </div>
+                                    <div class="text-xs font-medium text-gray-900 text-center">重组</div>
+                                    <div class="text-[10px] text-blue-600 font-medium">正在处理...</div>
+                                </div>
+
+                                <!-- Agent 4: 生成 -->
+                                <div class="flex flex-col items-center group cursor-pointer" onclick="showAgentDetail(&#39;generation&#39;)">
+                                    <div class="w-12 h-12 rounded-full bg-gray-200 text-gray-400 flex items-center justify-center font-bold text-xs shadow mb-2">
+                                        <i class="fas fa-pen-nib"></i>
+                                    </div>
+                                    <div class="text-xs font-medium text-gray-500 text-center">生成</div>
+                                    <div class="text-[10px] text-gray-400">等待中</div>
+                                </div>
+
+                                <!-- Agent 5: 合规 -->
+                                <div class="flex flex-col items-center group cursor-pointer" onclick="showAgentDetail(&#39;compliance&#39;)">
+                                    <div class="w-12 h-12 rounded-full bg-gray-200 text-gray-400 flex items-center justify-center font-bold text-xs shadow mb-2">
+                                        <i class="fas fa-shield-alt"></i>
+                                    </div>
+                                    <div class="text-xs font-medium text-gray-500 text-center">合规</div>
+                                    <div class="text-[10px] text-gray-400">队列: 3</div>
+                                </div>
+
+                                <!-- Agent 6: 视觉 -->
+                                <div class="flex flex-col items-center group cursor-pointer" onclick="showAgentDetail(&#39;visual&#39;)">
+                                    <div class="w-12 h-12 rounded-full bg-gray-200 text-gray-400 flex items-center justify-center font-bold text-xs shadow mb-2">
+                                        <i class="fas fa-video"></i>
+                                    </div>
+                                    <div class="text-xs font-medium text-gray-500 text-center">视觉</div>
+                                    <div class="text-[10px] text-gray-400">等待中</div>
+                                </div>
+
+                                <!-- Agent 7: 分析 -->
+                                <div class="flex flex-col items-center group cursor-pointer" onclick="showAgentDetail(&#39;analytics&#39;)">
+                                    <div class="w-12 h-12 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-xs shadow-lg relative mb-2">
+                                        <i class="fas fa-chart-line"></i>
+                                    </div>
+                                    <div class="text-xs font-medium text-gray-900 text-center">分析</div>
+                                    <div class="text-[10px] text-gray-500">持续监测</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 当前任务详情 -->
+                        <div class="mt-6 bg-gray-50 rounded-lg p-4 border border-gray-200">
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-sm font-medium text-gray-700">当前正在处理</span>
+                                <span class="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded"> draft_0317_089 </span>
+                            </div>
+                            <div class="space-y-2">
+                                <div class="flex items-center gap-3 text-sm">
+                                    <i class="fas fa-check-circle text-emerald-500"></i>
+                                    <span class="text-gray-600">策略Agent: 选题评分 4.6分，批准执行</span>
+                                    <span class="text-xs text-gray-400 ml-auto">12:34:56</span>
+                                </div>
+                                <div class="flex items-center gap-3 text-sm">
+                                    <i class="fas fa-check-circle text-emerald-500"></i>
+                                    <span class="text-gray-600">记忆Agent: 检索到3个相关素材（故事_003, 观点_007, 金句_012）</span>
+                                    <span class="text-xs text-gray-400 ml-auto">12:34:58</span>
+                                </div>
+                                <div class="flex items-center gap-3 text-sm">
+                                    <i class="fas fa-spinner fa-spin text-blue-500"></i>
+                                    <span class="text-gray-900 font-medium">重组Agent: 解构竞品结构 + 观点升维中...</span>
+                                    <span class="text-xs text-blue-600 ml-auto">预计3s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 内容生成预览 -->
+                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-gray-900">AI生成内容预览</h3>
+                        <div class="flex gap-2">
+                            <button onclick="refreshDraft()" class="text-sm text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1">
+                                <i class="fas fa-sync-alt"></i> 重新生成
+                            </button>
+                            <button onclick="approveDraft()" class="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition">
+                                通过并拍摄
+                            </button>
+                        </div>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <!-- 元信息 -->
+                        <div class="flex flex-wrap gap-3 text-xs">
+                            <span class="bg-blue-50 text-blue-700 px-2 py-1 rounded font-medium">B级-流量获客型</span>
+                            <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded">预计完播率: 32%</span>
+                            <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded">原创度: 87%</span>
+                            <span class="bg-green-50 text-green-700 px-2 py-1 rounded">合规: 通过</span>
+                        </div>
+
+                        <!-- 文案内容 -->
+                        <div class="bg-gray-50 rounded-lg p-4 space-y-3">
+                            <div class="flex items-start gap-2">
+                                <span class="text-xs font-bold text-red-500 mt-1">[钩子]</span>
+                                <p class="text-gray-900 font-medium">你知道吗？90%的创业者不是死在没客户，而是死在一个更隐蔽的坑。</p>
+                            </div>
+                            <div class="flex items-start gap-2">
+                                <span class="text-xs font-bold text-blue-500 mt-1">[故事]</span>
+                                <p class="text-gray-700">2020年3月15日，凌晨两点，我账上只剩下237块钱。那天我蹲在办公室的地上，看着窗外的高楼，突然意识到...</p>
+                            </div>
+                            <div class="flex items-start gap-2">
+                                <span class="text-xs font-bold text-purple-500 mt-1">[观点]</span>
+                                <p class="text-gray-700">后来我发现，现金流断裂不是结果，而是症状。真正的病根是——<span class="bg-yellow-200 px-1">没有设计反脆弱的财务结构</span>。</p>
+                            </div>
+                            <div class="flex items-start gap-2">
+                                <span class="text-xs font-bold text-green-500 mt-1">[解决方案]</span>
+                                <p class="text-gray-700">我花了3年时间，测试了47个行业案例，总结出一套"现金流健康度诊断模型"。用这个模型，我们帮300+企业把现金流安全系数提升了3倍。</p>
+                            </div>
+                            <div class="flex items-start gap-2">
+                                <span class="text-xs font-bold text-orange-500 mt-1">[CTA]</span>
+                                <p class="text-gray-900 font-medium text-orange-600">想知道你的企业现金流健康度？评论区扣"诊断"，我发你自测表。</p>
+                            </div>
+                        </div>
+
+                        <!-- 溯源信息 -->
+                        <div class="border-t border-gray-200 pt-3">
+                            <div class="text-xs text-gray-500 mb-2">AI使用了以下IP独家素材：</div>
+                            <div class="flex flex-wrap gap-2">
+                                <span class="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded border border-emerald-200 cursor-pointer hover:bg-emerald-100">
+                                    <i class="fas fa-bookmark mr-1"></i>故事_003：2020破产夜
+                                </span>
+                                <span class="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200 cursor-pointer hover:bg-blue-100">
+                                    <i class="fas fa-lightbulb mr-1"></i>观点_007：反脆弱财务
+                                </span>
+                                <span class="text-xs bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-200 cursor-pointer hover:bg-purple-100">
+                                    <i class="fas fa-database mr-1"></i>数据：300+案例
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：待办与队列 -->
+            <div class="space-y-6">
+                <!-- 快速操作 -->
+                <div class="bg-gradient-to-br from-emerald-500 to-cyan-500 rounded-xl p-6 text-white">
+                    <h3 class="font-bold text-lg mb-2">快速启动工作流</h3>
+                    <p class="text-emerald-100 text-sm mb-4">一键启动AI内容生产流水线</p>
+                    <button onclick="startWorkflow()" class="w-full bg-white text-emerald-600 font-semibold py-3 rounded-lg hover:bg-emerald-50 transition flex items-center justify-center gap-2">
+                        <i class="fas fa-play"></i> 启动新选题
+                    </button>
+                    <div class="mt-4 flex justify-between text-xs text-emerald-100">
+                        <span>队列中: 12个选题</span>
+                        <span>预计耗时: 24分钟</span>
+                    </div>
+                </div>
+
+                <!-- 待审核队列 -->
+                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                        <h4 class="font-semibold text-gray-900">待IP终审</h4>
+                        <span class="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded-full font-medium">3条</span>
+                    </div>
+                    <div class="divide-y divide-gray-100">
+                        <div class="p-4 hover:bg-gray-50 cursor-pointer transition" onclick="reviewDraft(&#39;089&#39;)">
+                            <div class="flex items-start justify-between mb-1">
+                                <span class="text-sm font-medium text-gray-900">现金流诊断模型</span>
+                                <span class="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">B级</span>
+                            </div>
+                            <div class="text-xs text-gray-500 mb-2">评分: 4.6 | 预估完播: 32%</div>
+                            <div class="flex items-center gap-2">
+                                <button class="text-xs text-emerald-600 hover:bg-emerald-50 px-2 py-1 rounded transition">通过</button>
+                                <button class="text-xs text-gray-500 hover:bg-gray-100 px-2 py-1 rounded transition">修改</button>
+                            </div>
+                        </div>
+                        <div class="p-4 hover:bg-gray-50 cursor-pointer transition">
+                            <div class="flex items-start justify-between mb-1">
+                                <span class="text-sm font-medium text-gray-900">为什么90%的IP都死在这个坑</span>
+                                <span class="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">B级</span>
+                            </div>
+                            <div class="text-xs text-gray-500 mb-2">评分: 4.5 | 预估完播: 30%</div>
+                            <div class="flex items-center gap-2">
+                                <button class="text-xs text-emerald-600 hover:bg-emerald-50 px-2 py-1 rounded transition">通过</button>
+                                <button class="text-xs text-gray-500 hover:bg-gray-100 px-2 py-1 rounded transition">修改</button>
+                            </div>
+                        </div>
+                        <div class="p-4 hover:bg-gray-50 cursor-pointer">
+                            <div class="flex items-start justify-between mb-1">
+                                <span class="text-sm font-medium text-gray-400 line-through">揭秘行业黑幕</span>
+                                <span class="text-xs text-yellow-600 bg-yellow-50 px-1.5 py-0.5 rounded">警告</span>
+                            </div>
+                            <div class="text-xs text-red-500 mb-2">合规Agent: 需确认素材授权</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 实时数据监测 -->
+                <div class="bg-white rounded-xl border border-gray-200 p-4">
+                    <h4 class="font-semibold text-gray-900 mb-4">今日实时数据</h4>
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm text-gray-600">已发布</span>
+                            <span class="text-sm font-bold text-gray-900">47条</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="bg-emerald-500 h-2 rounded-full" style="width: 70%"></div>
+                        </div>
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-gray-600">总播放</span>
+                            <span class="font-bold text-gray-900">128.5万</span>
+                        </div>
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-gray-600">新增客资</span>
+                            <span class="font-bold text-emerald-600">+23条</span>
+                        </div>
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-gray-600">平均CPA</span>
+                            <span class="font-bold text-gray-900">¥42</span>
+                        </div>
+                    </div>
+                    <button class="w-full mt-4 text-xs text-gray-500 hover:text-gray-700 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition">
+                        查看完整数据报表
+                    </button>
+                </div>
+
+                <!-- 系统健康度 -->
+                <div class="bg-white rounded-xl border border-gray-200 p-4">
+                    <h4 class="font-semibold text-gray-900 mb-3">系统健康度</h4>
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-gray-600 flex items-center gap-1">
+                                <i class="fas fa-database text-emerald-500"></i> 向量库
+                            </span>
+                            <span class="text-emerald-600 font-medium">正常</span>
+                        </div>
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-gray-600 flex items-center gap-1">
+                                <i class="fas fa-project-diagram text-emerald-500"></i> 知识图谱
+                            </span>
+                            <span class="text-emerald-600 font-medium">正常</span>
+                        </div>
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-gray-600 flex items-center gap-1">
+                                <i class="fas fa-robot text-emerald-500"></i> Claude API
+                            </span>
+                            <span class="text-emerald-600 font-medium">正常</span>
+                        </div>
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-gray-600 flex items-center gap-1">
+                                <i class="fas fa-video text-yellow-500"></i> HeyGen API
+                            </span>
+                            <span class="text-yellow-600 font-medium">队列: 5</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 悬浮反馈按钮 -->
+    <div class="fixed bottom-8 right-8 z-50">
+        <button onclick="toggleFeedback()" class="bg-gray-900 text-white px-4 py-3 rounded-full shadow-lg hover:bg-gray-800 transition flex items-center gap-2">
+            <i class="fas fa-comment-dots"></i>
+            <span class="text-sm font-medium">需求反馈</span>
+        </button>
+    </div>
+
+    <!-- 反馈面板 -->
+    <div id="feedbackPanel" class="fixed bottom-24 right-8 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 p-4 hidden z-50">
+        <div class="flex items-center justify-between mb-3">
+            <h4 class="font-semibold text-gray-900">客户验证反馈</h4>
+            <button onclick="toggleFeedback()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <textarea id="feedbackText" class="w-full h-24 border border-gray-200 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" placeholder="客户对这个功能的需求反馈...（如：希望能看到更多竞品对比数据）"></textarea>
+        <div class="mt-3 flex gap-2">
+            <button onclick="submitFeedback()" class="flex-1 bg-emerald-600 text-white text-sm font-medium py-2 rounded-lg hover:bg-emerald-700 transition">
+                记录反馈
+            </button>
+            <button onclick="exportDemo()" class="flex-1 bg-gray-100 text-gray-700 text-sm font-medium py-2 rounded-lg hover:bg-gray-200 transition">
+                导出演示
+            </button>
+        </div>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <div id="detailModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 id="modalTitle" class="text-xl font-bold text-gray-900">重组Agent</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="modalContent" class="text-gray-600">
+                <div class="space-y-4">
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                            处理中
+                        </span>
+                        <span class="text-sm text-gray-500">进行中</span>
+                    </div>
+                    <p class="text-gray-700">解构竞品结构，IP素材替换，观点升维</p>
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <h4 class="font-medium text-gray-900 mb-2">实时统计</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <div class="text-2xl font-bold text-gray-900">1</div>
+                                <div class="text-xs text-gray-500">已存储资产</div>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-emerald-600">99.8%</div>
+                                <div class="text-xs text-gray-500">成功率</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 模拟数据
+        const mockData = {
+            agents: {
+                strategy: {
+                    name: '策略Agent',
+                    status: 'active',
+                    description: '监控全网低粉爆款，自动评分排序，支持预测性选题',
+                    lastActive: '2秒前',
+                    queue: 12
+                },
+                memory: {
+                    name: '记忆Agent',
+                    status: 'active',
+                    description: '管理IP向量知识库，语义检索，自动标签化',
+                    lastActive: '1秒前',
+                    assets: 2847
+                },
+                remix: {
+                    name: '重组Agent',
+                    status: 'processing',
+                    description: '解构竞品结构，IP素材替换，观点升维',
+                    lastActive: '进行中',
+                    currentTask: 'draft_0317_089'
+                }
+            }
+        };
+
+        // 显示Agent详情
+        function showAgentDetail(agentId) {
+            const agent = mockData.agents[agentId];
+            if (!agent) return;
+
+            document.getElementById('modalTitle').textContent = agent.name;
+            document.getElementById('modalContent').innerHTML = `
+                <div class="space-y-4">
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-1 rounded text-xs font-medium ${agent.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}">
+                            ${agent.status === 'active' ? '运行中' : '处理中'}
+                        </span>
+                        <span class="text-sm text-gray-500">${agent.lastActive}</span>
+                    </div>
+                    <p class="text-gray-700">${agent.description}</p>
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <h4 class="font-medium text-gray-900 mb-2">实时统计</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <div class="text-2xl font-bold text-gray-900">${agent.queue || agent.assets || 1}</div>
+                                <div class="text-xs text-gray-500">${agent.queue ? '待处理队列' : '已存储资产'}</div>
+                            </div>
+                            <div>
+                                <div class="text-2xl font-bold text-emerald-600">99.8%</div>
+                                <div class="text-xs text-gray-500">成功率</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('detailModal').classList.remove('hidden');
+        }
+
+        // 显示指标详情
+        function showDetail(metric) {
+            const content = {
+                '产能': '<div class="space-y-3"><p>传统方式：1个策划日产2条文案</p><p>AI-Native方式：1个策划审核20条AI生成文案</p><div class="bg-emerald-50 p-3 rounded-lg text-emerald-800 text-sm">提升10倍产能，策划从"写"变为"审"</div></div>',
+                '爆款率': '<div class="space-y-3"><p>AI通过分析历史爆款结构，复制"情绪曲线"和"信息密度"</p><p>当前爆款定义：播放量 > 粉丝数 × 3</p></div>',
+                '成本': '<div class="space-y-3"><p>单条成本从¥1,333降至¥48</p><p>主要节省：人力成本（-75%）+ 拍摄成本（-90%，数字人替代）</p></div>',
+                '时间': '<div class="space-y-3"><p>IP每日仅需45分钟终审（传统需8小时拍摄+修改）</p><p>时间释放给高价值工作：私域运营、课程打磨</p></div>'
+            };
+
+            document.getElementById('modalTitle').textContent = metric + '详情';
+            document.getElementById('modalContent').innerHTML = content[metric] || '暂无详情';
+            document.getElementById('detailModal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('detailModal').classList.add('hidden');
+        }
+
+        function toggleFeedback() {
+            const panel = document.getElementById('feedbackPanel');
+            panel.classList.toggle('hidden');
+        }
+
+        function submitFeedback() {
+            const text = document.getElementById('feedbackText').value;
+            if (text.trim()) {
+                alert('反馈已记录：' + text.slice(0, 50) + '...\n\n（实际系统会将此反馈存入产品需求池）');
+                document.getElementById('feedbackText').value = '';
+                toggleFeedback();
+            }
+        }
+
+        function exportDemo() {
+            alert('演示数据导出功能\n\n可生成：\n1. 客户演示PPT（自动截图）\n2. 需求确认单（PDF）\n3. 技术对接文档（API规范）');
+        }
+
+        function startWorkflow() {
+            alert('启动新工作流\n\n1. 策略Agent扫描全网热点...\n2. 发现3个高潜选题（评分>4.0）\n3. 推荐选题：《为什么90%的IP都死在这个坑》（评分4.6）\n4. 是否执行？');
+        }
+
+        function refreshDraft() {
+            const btn = event.target.closest('button');
+            const icon = btn.querySelector('i');
+            icon.classList.add('fa-spin');
+            setTimeout(() => {
+                icon.classList.remove('fa-spin');
+                alert('已重新生成3个版本（愤怒/冷静/幽默），请切换查看');
+            }, 1500);
+        }
+
+        function approveDraft() {
+            alert('已通过终审\n\n后续流程：\n1. 视觉Agent生成分镜脚本（2分钟）\n2. B级内容：数字人自动拍摄（2小时出片）\n3. A级内容：推送到拍摄团队日程\n4. 分析Agent开始监测数据');
+        }
+
+        function reviewDraft(id) {
+            alert('打开详细审核界面\n\n可查看：\n- AI使用的IP素材溯源\n- 竞品对比（原文 vs AI生成）\n- 合规检查结果\n- 预测数据（完播率/互动率）');
+        }
+
+        // 模拟实时更新
+        setInterval(() => {
+            // 随机更新某个Agent状态
+            const agents = document.querySelectorAll('.agent-active');
+            agents.forEach(agent => {
+                if (Math.random() > 0.7) {
+                    agent.classList.add('animate-pulse');
+                    setTimeout(() => agent.classList.remove('animate-pulse'), 1000);
+                }
+            });
+        }, 5000);
+
+        // 点击外部关闭弹窗
+        document.getElementById('detailModal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+    </script>
+
+</body></html>

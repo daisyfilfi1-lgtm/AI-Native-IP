@@ -40,7 +40,7 @@ class IPAsset(Base):
     title = Column(String(255), nullable=True)
     content = Column(Text, nullable=False)
     content_vector_ref = Column(String(128), nullable=True)
-    metadata = Column(JSONB, nullable=False, default=dict)
+    asset_meta = Column("metadata", JSONB, nullable=False, default=dict)  # 列名 metadata，避免与 DeclarativeBase.metadata 冲突
     relations = Column(JSONB, nullable=False, default=list)
     status = Column(String(32), nullable=False, default="active")
     created_at = Column(DateTime, nullable=False, default=now_utc)

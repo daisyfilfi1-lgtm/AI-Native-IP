@@ -82,7 +82,7 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                     title=title,
                     content=content,
                     content_vector_ref=None,
-                    metadata={
+                    asset_meta={
                         "source_task_id": task.task_id,
                         "source_type": task.source_type,
                         "chunk_index": i,

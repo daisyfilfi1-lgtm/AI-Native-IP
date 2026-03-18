@@ -1,0 +1,12 @@
+# 构建时排除，减小上下文与镜像体积
+.git
+.gitignore
+*.md
+backend/.venv
+backend/venv
+backend/.env
+backend/__pycache__
+backend/*.pyc
+backend/.pytest_cache
+backend/.coverage
+backend/htmlcov

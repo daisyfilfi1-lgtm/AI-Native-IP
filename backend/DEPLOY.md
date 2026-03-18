@@ -15,7 +15,9 @@
 
 1. 打开 [Railway Dashboard](https://railway.app/dashboard) → **New Project**。
 2. 选择 **Deploy from GitHub repo**，授权 Railway 访问 GitHub，选中本仓库。
-3. **设置根目录**（必做）：若后端代码在仓库的 `backend/` 目录下，在该 Web 服务的 **Settings → Root Directory** 中填写 **`backend`**，保存。这样构建和运行都会在 `backend/` 下进行，使用其中的 `Procfile` 和 `requirements.txt`。
+3. **构建方式二选一**：  
+   - **方式 A**：在该 Web 服务的 **Settings → Root Directory** 中填写 **`backend`**，保存。构建会使用 `backend/Procfile` 和 `backend/requirements.txt`。  
+   - **方式 B**：不设置 Root Directory，使用仓库根目录的 **Dockerfile**（会从 `backend/` 拷贝并构建），平台会自动识别并完成构建。
 4. **添加 PostgreSQL**：在同一项目里点击 **New → Database → PostgreSQL**。创建后 Railway 会生成数据库，并在项目内暴露 `DATABASE_URL`。若 Web 服务未自动获得该变量，到 Web 服务 **Variables** 中添加：`DATABASE_URL` = `${{Postgres.DATABASE_URL}}`（或按面板上该数据库的变量引用名称填写）。
 5. **部署**：Railway 会识别 `Procfile` 中的 `web: uvicorn app.main:app --host 0.0.0.0 --port $PORT` 并启动服务。首次推送或点击 **Deploy** 后等待构建完成。
 6. **生成公网域名**：在 Web 服务 **Settings → Networking → Generate Domain**，得到类似 `xxx.up.railway.app` 的 HTTPS 地址。

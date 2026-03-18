@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 
 from app.routers import config_memory, ip, memory
 
@@ -8,6 +9,11 @@ def create_app() -> FastAPI:
         title="AI-Native IP Factory - Phase 1",
         version="0.1.0",
     )
+
+    @app.get("/")
+    def root():
+        """根路径跳转到 API 文档，便于浏览器直接打开域名。"""
+        return RedirectResponse(url="/docs", status_code=302)
 
     @app.get("/health")
     def health():

@@ -10,4 +10,5 @@ COPY backend/ .
 
 ENV PORT=8000
 EXPOSE $PORT
-CMD uvicorn app.main:app --host 0.0.0.0 --port $PORT
+# 启动前自动执行数据库迁移（CREATE TABLE IF NOT EXISTS，可重复执行）
+CMD sh -c "python scripts/run_migrations.py && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"

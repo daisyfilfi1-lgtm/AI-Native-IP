@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-from app.routers import config_memory, ip, memory
+from app.routers import config_memory, feishu_sync, ip, memory
 
 ROOT_HTML = """
 <!DOCTYPE html>
@@ -60,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(ip.router, prefix="/api/v1", tags=["ip"])
     app.include_router(memory.router, prefix="/api/v1", tags=["memory"])
     app.include_router(config_memory.router, prefix="/api/v1", tags=["config"])
+    app.include_router(feishu_sync.router, prefix="/api/v1", tags=["integrations"])
 
     return app
 

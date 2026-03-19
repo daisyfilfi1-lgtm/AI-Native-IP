@@ -2,7 +2,8 @@
 
 Phase 1 范围：素材进入 → Memory Agent 结构化。本后端提供 Memory 相关 API 与配置中心接口。
 
-**线上部署（无本地 Docker）**：见 [DEPLOY.md](./DEPLOY.md)，按 **Railway** 方案部署到云平台，便于第三方联调测试。
+**线上部署（无本地 Docker）**：见 [DEPLOY.md](./DEPLOY.md)，按 **Railway** 方案部署到云平台，便于第三方联调测试。  
+**飞书知识库同步**：见 [FEISHU_SYNC.md](./FEISHU_SYNC.md)，配置 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 后即可将知识库同步到 IP Memory。
 
 ## 环境要求
 
@@ -88,3 +89,5 @@ backend/
 | POST | /api/v1/memory/labels/{asset_id} | 提交打标复核 |
 | GET  | /api/v1/config/memory | 读取 Memory 配置 |
 | POST | /api/v1/config/memory | 保存 Memory 配置 |
+| GET  | /api/v1/integrations/feishu/spaces | 列出飞书知识空间 |
+| POST | /api/v1/integrations/feishu/sync | 飞书知识库同步到 IP Memory |

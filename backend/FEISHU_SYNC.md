@@ -1,0 +1,61 @@
+# 飞书知识库同步
+
+将飞书知识库中的文档同步到 AI-Native IP 的 Memory（ip_assets），供后续检索与生成使用。
+
+## 1. 飞书开放平台配置
+
+1. 登录 [飞书开放平台](https://open.feishu.cn)，创建企业自建应用。
+2. **凭证与安全**：在「凭证与基础信息」中获取 **App ID**、**App Secret**，用于环境变量。
+3. **权限**：在「权限管理」中为应用开通（你已开通的即可用）：
+   - `wiki:space:read` 或 `wiki:wiki`：查看知识空间列表
+   - `wiki:node:read` 或 `wiki:wiki`：查看知识空间节点（文档列表）
+   - 获取文档**纯文本内容**还需：
+     - **旧版文档 (doc)**：云文档相关权限（如 `drive:drive:readonly` 或文档只读权限）
+     - **新版文档 (docx)**：若同步时报错无权限，请在开放平台申请 **「查看、评论和下载云空间中所有文件」** 或文档类只读权限
+4. **知识库授权**：将应用添加为要同步的**知识库成员**（至少可读），否则列表/内容会为空或 131006 权限错误。  
+   路径：知识库 → 设置 → 成员与权限 → 添加成员 → 选择该应用。
+
+## 2. 后端环境变量
+
+在 **Railway** 的 Web 服务 **Variables** 中新增（或本地 `.env`）：
+
+| 变量 | 说明 |
+|------|------|
+| `FEISHU_APP_ID` | 飞书应用 App ID |
+| `FEISHU_APP_SECRET` | 飞书应用 App Secret |
+
+保存后重新部署生效。
+
+## 3. 接口说明
+
+- **GET /api/v1/integrations/feishu/spaces**  
+  列出当前应用有权限的知识空间，返回 `space_id`、`name` 等，用于确认要同步的空间。
+
+- **POST /api/v1/integrations/feishu/sync**  
+  触发一次同步。  
+  Body 示例：
+  ```json
+  { "ip_id": "test_001", "space_id": "可选，不传则用第一个空间" }
+  ```
+  响应示例：
+  ```json
+  { "synced": 10, "failed": 0, "errors": [] }
+  ```
+  会将该空间下所有 **doc / docx** 节点拉取为纯文本，写入或更新到指定 `ip_id` 的 `ip_assets`（asset_type=`data`，source=feishu_kb）。
+
+## 4. 使用流程
+
+1. 在系统中先创建 IP：`POST /api/v1/ip`（若尚未创建）。
+2. 配置并部署好 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`。
+3. 可选：调用 `GET /api/v1/integrations/feishu/spaces` 确认能看到目标知识库。
+4. 调用 `POST /api/v1/integrations/feishu/sync`，传入 `ip_id`（及可选 `space_id`）。
+5. 同步完成后，该 IP 的 Memory 检索与素材录入即可使用这些文档内容。
+
+## 5. 可选权限（若同步 doc/docx 报错）
+
+若接口返回「无权限」或 content 为空：
+
+- 在飞书开放平台为应用补充：
+  - **查看、评论和下载云空间中所有文件**（`drive:drive:readonly`，你已开通），或
+  - 文档/云文档的只读类权限（具体以开放平台文档为准）。
+- 再次确认应用已被添加为目标知识库的成员。

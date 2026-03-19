@@ -100,8 +100,9 @@ def sync_feishu_space_to_ip(
         }
         if existing:
             existing.title = title
-            existing.content = content or "(无文本)"
-            existing.asset_meta = {**existing.asset_meta or {}, **meta}
+            existing.content = content if content else "(无文本)"
+            base_meta = existing.asset_meta if existing.asset_meta else {}
+            existing.asset_meta = {**base_meta, **meta}
             db.flush()
         else:
             db.add(

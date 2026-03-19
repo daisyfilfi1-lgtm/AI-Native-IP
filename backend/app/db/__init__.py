@@ -3,6 +3,7 @@ from app.db.models import (
     Base,
     ConfigHistory,
     ContentDraft,
+    IntegrationConfig,
     IP,
     IPAsset,
     IngestTask,
@@ -22,4 +23,5 @@ __all__ = [
     "ConfigHistory",
     "IngestTask",
     "ContentDraft",
+    "IntegrationConfig",
 ]

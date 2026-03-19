@@ -15,18 +15,20 @@
 4. **知识库授权**：将应用添加为要同步的**知识库成员**（至少可读），否则列表/内容会为空或 131006 权限错误。  
    路径：知识库 → 设置 → 成员与权限 → 添加成员 → 选择该应用。
 
-## 2. 后端环境变量
+## 2. 凭证配置（二选一）
 
-在 **Railway** 的 Web 服务 **Variables** 中新增（或本地 `.env`）：
-
-| 变量 | 说明 |
-|------|------|
-| `FEISHU_APP_ID` | 飞书应用 App ID |
-| `FEISHU_APP_SECRET` | 飞书应用 App Secret |
-
-保存后重新部署生效。
+- **推荐**：在管理后台 **记忆 Agent → 飞书同步** 页签中，在「飞书应用凭证」卡片填写 **App ID**、**App Secret** 并点击「保存凭证」。凭证会保存在本系统数据库，后续列空间、同步均优先使用此处配置。
+- **可选**：在 **Railway** 的 Web 服务 **Variables** 中新增（或本地 `.env`）：
+  - `FEISHU_APP_ID`、`FEISHU_APP_SECRET`  
+  若管理后台未保存凭证，则使用环境变量。
 
 ## 3. 接口说明
+
+- **GET /api/v1/integrations/feishu/config**  
+  获取飞书配置状态（是否已配置、app_id 脱敏），供管理后台展示。
+
+- **POST /api/v1/integrations/feishu/config**  
+  保存飞书凭证（管理后台填写）。Body：`{ "app_id": "xxx", "app_secret": "xxx" }`。
 
 - **GET /api/v1/integrations/feishu/spaces**  
   列出当前应用有权限的知识空间，返回 `space_id`、`name` 等，用于确认要同步的空间。

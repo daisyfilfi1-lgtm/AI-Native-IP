@@ -1,5 +1,5 @@
 """
-飞书知识库同步：列出空间、触发同步到指定 IP 的 Memory。
+飞书知识库同步：管理后台保存凭证、列出空间、触发同步到 IP Memory。
 """
 from typing import Any
 
@@ -9,10 +9,26 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.services.feishu_client import get_tenant_access_token, list_spaces
+from app.services.feishu_config_service import (
+    get_feishu_config_display,
+    get_feishu_credentials,
+    set_feishu_config,
+)
 from app.services.feishu_sync_service import sync_feishu_space_to_ip
 from app.services.memory_config_service import get_ip
 
 router = APIRouter()
+
+
+class FeishuConfigResponse(BaseModel):
+    configured: bool
+    app_id: str
+    has_secret: bool
+
+
+class FeishuConfigSaveRequest(BaseModel):
+    app_id: str = Field(..., min_length=1)
+    app_secret: str = Field(..., min_length=1)
 
 
 class SyncFeishuRequest(BaseModel):
@@ -26,19 +42,33 @@ class SyncFeishuResponse(BaseModel):
     errors: list[str]
 
 
+@router.get("/integrations/feishu/config", response_model=FeishuConfigResponse)
+def get_feishu_config(db: Session = Depends(get_db)) -> Any:
+    """获取飞书配置状态（用于管理后台展示是否已配置、app_id 脱敏）。"""
+    d = get_feishu_config_display(db)
+    return FeishuConfigResponse(**d)
+
+
+@router.post("/integrations/feishu/config")
+def save_feishu_config(
+    payload: FeishuConfigSaveRequest,
+    db: Session = Depends(get_db),
+) -> Any:
+    """管理后台保存飞书 App ID / App Secret，后续同步与列空间将优先使用此处配置。"""
+    set_feishu_config(db, payload.app_id, payload.app_secret)
+    return {"success": True}
+
+
 @router.get("/integrations/feishu/spaces")
-def list_feishu_spaces() -> Any:
+def list_feishu_spaces(db: Session = Depends(get_db)) -> Any:
     """
-    列出当前应用有权限的飞书知识空间（用于选择要同步的 space_id）。
-    需配置 FEISHU_APP_ID、FEISHU_APP_SECRET。
+    列出当前应用有权限的飞书知识空间。凭证优先从管理后台已保存的配置读取，否则从环境变量读取。
     """
-    import os
-    app_id = os.environ.get("FEISHU_APP_ID")
-    app_secret = os.environ.get("FEISHU_APP_SECRET")
+    app_id, app_secret = get_feishu_credentials(db)
     if not app_id or not app_secret:
         raise HTTPException(
             status_code=503,
-            detail="未配置 FEISHU_APP_ID / FEISHU_APP_SECRET，请在环境变量中配置",
+            detail="请先在「飞书应用凭证」中填写 App ID 和 App Secret，或配置环境变量 FEISHU_APP_ID / FEISHU_APP_SECRET",
         )
     try:
         token = get_tenant_access_token(app_id, app_secret)
@@ -51,15 +81,22 @@ def list_feishu_spaces() -> Any:
 @router.post("/integrations/feishu/sync", response_model=SyncFeishuResponse)
 def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> Any:
     """
-    将飞书知识库同步到指定 IP 的 Memory（ip_assets）。
-    会拉取空间内所有 doc/docx 节点内容并写入或更新素材。
+    将飞书知识库同步到指定 IP 的 Memory（ip_assets）。凭证优先使用管理后台已保存的配置。
     """
     if not get_ip(db, request.ip_id):
         raise HTTPException(status_code=404, detail=f"IP 不存在: {request.ip_id}")
+    app_id, app_secret = get_feishu_credentials(db)
+    if not app_id or not app_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="请先在「飞书应用凭证」中填写 App ID 和 App Secret",
+        )
     result = sync_feishu_space_to_ip(
         db,
         ip_id=request.ip_id,
         space_id=request.space_id,
+        app_id=app_id,
+        app_secret=app_secret,
     )
     if result.get("errors") and result.get("synced") == 0 and result.get("failed") == 0:
         raise HTTPException(status_code=400, detail=result["errors"][0] if result["errors"] else "同步失败")

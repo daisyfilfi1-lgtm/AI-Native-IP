@@ -105,6 +105,14 @@ class IngestTask(Base):
     updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
 
 
+class IntegrationConfig(Base):
+    __tablename__ = "integration_config"
+
+    key = Column(String(64), primary_key=True)
+    value_json = Column(JSONB, nullable=False, default=dict)
+    updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
+
+
 class ContentDraft(Base):
     __tablename__ = "content_drafts"
 

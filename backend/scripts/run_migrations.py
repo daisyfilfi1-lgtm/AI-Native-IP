@@ -26,7 +26,7 @@ if DATABASE_URL.startswith("postgres://"):
 import psycopg2
 
 MIGRATIONS_DIR = os.path.join(backend_dir, "db", "migrations")
-ORDER = ["001_init.sql", "002_ingest_tasks.sql"]
+ORDER = ["001_init.sql", "002_ingest_tasks.sql", "003_integration_config.sql"]
 
 
 def _strip_leading_comments(stmt: str) -> str:

@@ -29,11 +29,23 @@ MIGRATIONS_DIR = os.path.join(backend_dir, "db", "migrations")
 ORDER = ["001_init.sql", "002_ingest_tasks.sql"]
 
 
+def _strip_leading_comments(stmt: str) -> str:
+    """去掉段首的注释行和空行，避免整段被误判为注释而跳过（如 -- Phase 1...\\n\\nCREATE TABLE）。"""
+    lines = stmt.split("\n")
+    start = 0
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if s and not s.startswith("--"):
+            start = i
+            break
+    return "\n".join(lines[start:]).strip()
+
+
 def _run_sql_script(cur, content: str) -> None:
-    """执行多条 SQL（按分号拆分，忽略空行与纯注释）。"""
+    """执行多条 SQL（按分号拆分，去掉段首注释后执行）。"""
     for raw in content.split(";"):
-        stmt = raw.strip()
-        if not stmt or stmt.startswith("--"):
+        stmt = _strip_leading_comments(raw)
+        if not stmt:
             continue
         cur.execute(stmt)
 

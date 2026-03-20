@@ -1,3 +1,5 @@
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -9,6 +11,13 @@ from app.services.memory_config_service import get_ip
 router = APIRouter()
 
 
+class IPResponse(BaseModel):
+    ip_id: str
+    name: str
+    owner_user_id: str
+    status: str
+
+
 class CreateIPRequest(BaseModel):
     ip_id: str = Field(..., min_length=1, max_length=64)
     name: str = Field(..., min_length=1, max_length=255)
@@ -16,11 +25,14 @@ class CreateIPRequest(BaseModel):
     status: str = Field(default="active", max_length=32)
 
 
-class IPResponse(BaseModel):
-    ip_id: str
-    name: str
-    owner_user_id: str
-    status: str
+@router.get("/ip", response_model=List[IPResponse])
+def list_ips(db: Session = Depends(get_db)):
+    """列出所有 IP（按创建时间倒序）。"""
+    rows = db.query(IP).order_by(IP.created_at.desc()).all()
+    return [
+        IPResponse(ip_id=r.ip_id, name=r.name, owner_user_id=r.owner_user_id, status=r.status)
+        for r in rows
+    ]
 
 
 @router.post("/ip", response_model=IPResponse, status_code=201)

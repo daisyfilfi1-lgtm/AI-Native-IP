@@ -1,8 +1,9 @@
 """
-飞书知识库 → Memory（ip_assets）同步：按空间拉取节点与文档内容并写入/更新 ip_assets。
+飞书知识库 → Memory（ip_assets）同步：按空间拉取节点与文档内容，做结构化分段后写入/更新。
 """
 import hashlib
 import os
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -15,6 +16,9 @@ from app.services.feishu_client import (
     list_spaces,
 )
 from app.services.vector_service import upsert_asset_vector
+
+SECTION_MAX_CHARS = 1800
+SECTION_OVERLAP = 120
 
 
 def _collect_doc_nodes(
@@ -39,6 +43,69 @@ def _collect_doc_nodes(
                 )
             )
     return result
+
+
+def _split_by_headings(content: str) -> list[tuple[str | None, str]]:
+    """
+    按 markdown 标题拆分文档，便于后续结构化检索。
+    若无标题则回退固定长度分块。
+    """
+    text = (content or "").strip()
+    if not text:
+        return [(None, "")]
+
+    heading_re = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$")
+    chunks: list[tuple[str | None, str]] = []
+    cur_title: str | None = None
+    cur_lines: list[str] = []
+
+    def flush() -> None:
+        if not cur_lines:
+            return
+        body = "\n".join(cur_lines).strip()
+        if body:
+            chunks.append((cur_title, body))
+
+    for line in text.splitlines():
+        m = heading_re.match(line)
+        if m:
+            flush()
+            cur_title = m.group(2).strip()
+            cur_lines = []
+            continue
+        cur_lines.append(line)
+    flush()
+
+    # 没有可用标题时按长度切块
+    if not chunks:
+        out: list[tuple[str | None, str]] = []
+        start = 0
+        while start < len(text):
+            end = min(start + SECTION_MAX_CHARS, len(text))
+            part = text[start:end].strip()
+            if part:
+                out.append((None, part))
+            start = end - SECTION_OVERLAP
+            if start >= len(text):
+                break
+        return out or [(None, text)]
+
+    # 二次兜底：单块过长时再切分
+    normalized: list[tuple[str | None, str]] = []
+    for title, block in chunks:
+        if len(block) <= SECTION_MAX_CHARS:
+            normalized.append((title, block))
+            continue
+        start = 0
+        while start < len(block):
+            end = min(start + SECTION_MAX_CHARS, len(block))
+            part = block[start:end].strip()
+            if part:
+                normalized.append((title, part))
+            start = end - SECTION_OVERLAP
+            if start >= len(block):
+                break
+    return normalized or [(None, text)]
 
 
 def sync_feishu_space_to_ip(
@@ -88,57 +155,70 @@ def sync_feishu_space_to_ip(
             errors.append(f"{title}({obj_token}): {e}")
             continue
 
-        # 稳定且唯一的 asset_id（≤64 字符），便于后续增量更新
-        raw = f"{space_id}_{obj_token}"
-        asset_id = "feishu_" + hashlib.sha256(raw.encode()).hexdigest()[:32]
-        existing = db.query(IPAsset).filter(IPAsset.asset_id == asset_id).first()
-        meta = {
-            "source": "feishu_kb",
-            "feishu_space_id": space_id,
-            "feishu_node_token": node_token,
-            "feishu_obj_token": obj_token,
-            "feishu_obj_type": obj_type,
-        }
-        if existing:
-            existing.title = title
-            existing.content = content if content else "(无文本)"
-            base_meta = existing.asset_meta if existing.asset_meta else {}
-            existing.asset_meta = {**base_meta, **meta}
-            db.flush()
-            try:
-                upsert_asset_vector(
-                    db,
-                    asset_id=existing.asset_id,
-                    ip_id=ip_id,
-                    content=existing.content or "",
+        sections = _split_by_headings(content or "")
+        heading_titles = [x[0] for x in sections if x[0]]
+        total_sections = max(1, len(sections))
+
+        for idx, (section_title, section_content) in enumerate(sections):
+            raw = f"{space_id}_{obj_token}_{idx}"
+            asset_id = "feishu_" + hashlib.sha256(raw.encode()).hexdigest()[:32]
+            existing = db.query(IPAsset).filter(IPAsset.asset_id == asset_id).first()
+
+            meta = {
+                "source": "feishu_kb",
+                "feishu_space_id": space_id,
+                "feishu_node_token": node_token,
+                "feishu_obj_token": obj_token,
+                "feishu_obj_type": obj_type,
+                "doc_title": title,
+                "section_title": section_title,
+                "chunk_index": idx,
+                "total_chunks": total_sections,
+                "outline": heading_titles[:30],
+            }
+            final_title = title if not section_title else f"{title} / {section_title}"
+            final_content = section_content or "(无文本)"
+
+            if existing:
+                existing.title = final_title
+                existing.content = final_content
+                base_meta = existing.asset_meta if existing.asset_meta else {}
+                existing.asset_meta = {**base_meta, **meta}
+                db.flush()
+                try:
+                    upsert_asset_vector(
+                        db,
+                        asset_id=existing.asset_id,
+                        ip_id=ip_id,
+                        content=existing.content or "",
+                    )
+                except Exception:
+                    pass
+            else:
+                db.add(
+                    IPAsset(
+                        asset_id=asset_id,
+                        ip_id=ip_id,
+                        asset_type="data",
+                        title=final_title,
+                        content=final_content,
+                        content_vector_ref=None,
+                        asset_meta=meta,
+                        relations=[],
+                        status="active",
+                    )
                 )
-            except Exception:
-                pass
-        else:
-            db.add(
-                IPAsset(
-                    asset_id=asset_id,
-                    ip_id=ip_id,
-                    asset_type="data",
-                    title=title,
-                    content=content or "(无文本)",
-                    content_vector_ref=None,
-                    asset_meta=meta,
-                    relations=[],
-                    status="active",
-                )
-            )
-            db.flush()
-            try:
-                upsert_asset_vector(
-                    db,
-                    asset_id=asset_id,
-                    ip_id=ip_id,
-                    content=content or "",
-                )
-            except Exception:
-                pass
-        synced += 1
+                db.flush()
+                try:
+                    upsert_asset_vector(
+                        db,
+                        asset_id=asset_id,
+                        ip_id=ip_id,
+                        content=final_content,
+                    )
+                except Exception:
+                    pass
+            synced += 1
 
     db.commit()
     return {"synced": synced, "failed": failed, "errors": errors[:20]}

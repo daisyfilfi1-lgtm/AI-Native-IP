@@ -134,6 +134,23 @@ class IntegrationConfig(Base):
     updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
 
 
+class IntegrationBinding(Base):
+    __tablename__ = "integration_bindings"
+
+    id = Column(String(64), primary_key=True)
+    integration = Column(String(64), nullable=False, index=True)
+    ip_id = Column(String(64), ForeignKey("ip.ip_id"), nullable=False, index=True)
+    external_id = Column(String(255), nullable=False)
+    external_name = Column(String(255), nullable=True)
+    extra = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=now_utc)
+    updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
+
+    __table_args__ = (
+        Index("uq_integration_ip", "integration", "ip_id", unique=True),
+    )
+
+
 class FileObject(Base):
     __tablename__ = "file_objects"
 

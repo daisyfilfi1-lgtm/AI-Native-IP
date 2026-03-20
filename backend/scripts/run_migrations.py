@@ -32,6 +32,7 @@ ORDER = [
     "003_integration_config.sql",
     "004_storage_and_vectors.sql",
     "005_ip_profile_fields.sql",
+    "006_integration_bindings.sql",
 ]
 
 

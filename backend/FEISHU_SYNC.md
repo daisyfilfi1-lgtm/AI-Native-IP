@@ -35,6 +35,12 @@
 - **GET /api/v1/integrations/feishu/spaces**  
   列出当前应用有权限的知识空间，返回 `space_id`、`name` 等，用于确认要同步的空间。
 
+- **GET /api/v1/integrations/feishu/binding?ip_id=...**  
+  读取某个 IP 的默认飞书空间映射（若已配置）。
+
+- **POST /api/v1/integrations/feishu/binding**  
+  保存某个 IP 的默认空间映射。Body：`{ "ip_id":"test_001", "space_id":"...", "space_name":"可选" }`。
+
 - **POST /api/v1/integrations/feishu/sync**  
   触发一次同步。  
   Body 示例：
@@ -43,9 +49,9 @@
   ```
   响应示例：
   ```json
-  { "synced": 10, "failed": 0, "errors": [] }
+  { "synced": 10, "failed": 0, "errors": [], "used_space_id": "..." }
   ```
-  会将该空间下所有 **doc / docx** 节点拉取为纯文本，写入或更新到指定 `ip_id` 的 `ip_assets`（asset_type=`data`，source=feishu_kb）。
+  会将该空间下所有 **doc / docx** 节点拉取为纯文本，按标题做结构化分段后写入/更新到指定 `ip_id` 的 `ip_assets`（asset_type=`data`，source=feishu_kb，metadata 内含 `doc_title`、`section_title`、`chunk_index`、`outline` 等）。
 
 ## 4. 使用流程
 

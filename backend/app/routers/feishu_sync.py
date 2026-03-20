@@ -15,6 +15,7 @@ from app.services.feishu_config_service import (
     set_feishu_config,
 )
 from app.services.feishu_sync_service import sync_feishu_space_to_ip
+from app.services.integration_binding_service import get_binding, upsert_binding
 from app.services.memory_config_service import get_ip
 
 router = APIRouter()
@@ -40,6 +41,19 @@ class SyncFeishuResponse(BaseModel):
     synced: int
     failed: int
     errors: list[str]
+    used_space_id: str | None = None
+
+
+class FeishuBindingSaveRequest(BaseModel):
+    ip_id: str = Field(..., description="系统内 IP ID")
+    space_id: str = Field(..., min_length=1, description="飞书知识空间 ID")
+    space_name: str | None = Field(None, description="空间名称（可选，展示用）")
+
+
+class FeishuBindingResponse(BaseModel):
+    ip_id: str
+    space_id: str
+    space_name: str | None = None
 
 
 @router.get("/integrations/feishu/config", response_model=FeishuConfigResponse)
@@ -91,13 +105,55 @@ def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> An
             status_code=503,
             detail="请先在「飞书应用凭证」中填写 App ID 和 App Secret",
         )
+    chosen_space_id = request.space_id
+    if not chosen_space_id:
+        bound = get_binding(db, "feishu", request.ip_id)
+        if bound and bound.external_id:
+            chosen_space_id = bound.external_id
+
     result = sync_feishu_space_to_ip(
         db,
         ip_id=request.ip_id,
-        space_id=request.space_id,
+        space_id=chosen_space_id,
         app_id=app_id,
         app_secret=app_secret,
     )
     if result.get("errors") and result.get("synced") == 0 and result.get("failed") == 0:
         raise HTTPException(status_code=400, detail=result["errors"][0] if result["errors"] else "同步失败")
-    return result
+    return {**result, "used_space_id": chosen_space_id}
+
+
+@router.get("/integrations/feishu/binding", response_model=FeishuBindingResponse | None)
+def get_feishu_binding(ip_id: str, db: Session = Depends(get_db)) -> Any:
+    """获取指定 IP 的飞书默认空间映射。"""
+    row = get_binding(db, "feishu", ip_id)
+    if not row:
+        return None
+    return FeishuBindingResponse(
+        ip_id=row.ip_id,
+        space_id=row.external_id,
+        space_name=row.external_name,
+    )
+
+
+@router.post("/integrations/feishu/binding", response_model=FeishuBindingResponse)
+def save_feishu_binding(
+    payload: FeishuBindingSaveRequest,
+    db: Session = Depends(get_db),
+) -> Any:
+    """保存飞书空间与 IP 的默认映射（用于后续同步自动选空间）。"""
+    if not get_ip(db, payload.ip_id):
+        raise HTTPException(status_code=404, detail=f"IP 不存在: {payload.ip_id}")
+    row = upsert_binding(
+        db,
+        integration="feishu",
+        ip_id=payload.ip_id,
+        external_id=payload.space_id,
+        external_name=payload.space_name,
+        extra={},
+    )
+    return FeishuBindingResponse(
+        ip_id=row.ip_id,
+        space_id=row.external_id,
+        space_name=row.external_name,
+    )

@@ -54,6 +54,57 @@
 | `OPENAI_*` / `OPENAI_TRANSCRIPTION_*` | AI 打标、Embedding、Whisper；详见 `docs/AI_CONFIG.md`。 |
 | `STORAGE_*` | 对象存储（S3 兼容，含阿里云 OSS）；详见 `docs/STORAGE_ALIYUN_OSS.md` 与 `backend/.env.example`。 |
 | `FEISHU_*` | 飞书同步（可选）。 |
+| `QDRANT_*` | 向量数据库（可选）；详见下方"五、部署可选服务"。 |
+| `NEO4J_*` | 知识图谱（可选）；详见下方"五、部署可选服务"。 |
+
+## 五、部署可选服务（Qdrant + Neo4j）
+
+### 方案A：使用 Railway 模板（推荐）
+
+1. **Qdrant 向量数据库**
+   - 在 Railway Dashboard 点击 **New → Marketplace**
+   - 搜索 **Qdrant** 并选择
+   - 创建后获取 `QDRANT_URL`（如 `http://qdrant:6333`）
+   - 在你的后端服务中添加变量：`QDRANT_URL=http://qdrant:6333`
+
+2. **Neo4j 知识图谱**
+   - 在 Railway Dashboard 点击 **New → Marketplace**
+   - 搜索 **Neo4j** 并选择
+   - 创建后获取连接信息
+   - 在你的后端服务中添加变量：
+     ```
+     NEO4J_URI=bolt://neo4j:7687
+     NEO4J_PASSWORD=你的密码
+     NEO4J_DATABASE=neo4j
+     ```
+
+### 方案B：使用免费云服务
+
+1. **Qdrant Cloud**（有免费额度）
+   - 注册 https://cloud.qdrant.io
+   - 创建免费 Cluster
+   - 获取 URL 和 API Key
+   - 在 Railway 环境变量中配置：
+     ```
+     QDRANT_URL=https://xxx.qdrant.cloud
+     QDRANT_API_KEY=你的APIKey
+     ```
+
+2. **Neo4j Aura**（有免费额度）
+   - 注册 https://neo4j.com/cloud/aura/
+   - 创建 Free Tier 数据库
+   - 获取连接字符串
+   - 在 Railway 环境变量中配置：
+     ```
+     NEO4J_URI=bolt://xxx.databases.neo4j.io:7687
+     NEO4J_PASSWORD=你的密码
+     ```
+
+### 服务间通信
+
+在同一 Railway 项目内，服务间通信使用内部域名：
+- `http://qdrant:6333`
+- `http://neo4j:7687`
 
 部署后首次含 `004_storage_and_vectors.sql` 的镜像会自动跑迁移；若报错，确认 `db/migrations/` 含 `004_storage_and_vectors.sql`。
 

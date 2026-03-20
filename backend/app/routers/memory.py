@@ -11,6 +11,7 @@ from app.services.ingest_service import get_ingest_task, process_ingest_task
 from app.services.memory_config_service import get_ip
 from app.services.storage_service import build_public_url, upload_bytes
 from app.services.vector_service import query_similar_assets
+from app.services.hybrid_retrieval_service import hybrid_search
 
 router = APIRouter()
 
@@ -301,6 +302,62 @@ def retrieve_memory(payload: RetrieveRequest, db: Session = Depends(get_db)) -> 
             )
         )
     return RetrieveResponse(results=results)
+
+
+class HybridRetrieveRequest(BaseModel):
+    ip_id: str
+    query: str
+    top_k: Optional[int] = 10
+    vector_weight: Optional[float] = Field(0.6, description="向量检索权重")
+    graph_weight: Optional[float] = Field(0.4, description="Graph RAG权重")
+    use_vector: Optional[bool] = True
+    use_graph: Optional[bool] = True
+
+
+class HybridRetrieveResponse(BaseModel):
+    query: str
+    ip_id: str
+    total: int
+    results: list
+    config: dict
+
+
+@router.post("/memory/retrieve/hybrid", response_model=HybridRetrieveResponse)
+def retrieve_hybrid(
+    payload: HybridRetrieveRequest,
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    混合检索 - 向量 + Graph RAG 融合检索
+    
+    结合向量语义理解和知识图谱关系推理，提供更精准的检索结果。
+    支持动态调整向量/图谱权重。
+    """
+    if not get_ip(db, payload.ip_id):
+        raise HTTPException(status_code=404, detail=f"IP 不存在: {payload.ip_id}")
+    
+    query = (payload.query or "").strip()
+    if not query:
+        return HybridRetrieveResponse(
+            query="",
+            ip_id=payload.ip_id,
+            total=0,
+            results=[],
+            config={},
+        )
+    
+    result = hybrid_search(
+        db=db,
+        ip_id=payload.ip_id,
+        query=query,
+        vector_weight=payload.vector_weight,
+        graph_weight=payload.graph_weight,
+        top_k=payload.top_k or 10,
+        use_vector=payload.use_vector,
+        use_graph=payload.use_graph,
+    )
+    
+    return HybridRetrieveResponse(**result)
 
 
 @router.get("/memory/pending-labels", response_model=PendingLabelsResponse)

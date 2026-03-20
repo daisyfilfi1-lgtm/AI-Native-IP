@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-from app.routers import baidu_pan_sync, config_memory, feishu_sync, ip, memory
+from app.routers import baidu_pan_sync, config_memory, feishu_sync, graph, ip, memory, memory_consolidation, multimodal, vector
 
 ROOT_HTML = """
 <!DOCTYPE html>
@@ -75,6 +75,10 @@ def create_app() -> FastAPI:
     app.include_router(config_memory.router, prefix="/api/v1", tags=["config"])
     app.include_router(feishu_sync.router, prefix="/api/v1", tags=["integrations"])
     app.include_router(baidu_pan_sync.router, prefix="/api/v1", tags=["integrations"])
+    app.include_router(vector.router, prefix="/api/v1", tags=["vector"])
+    app.include_router(graph.router, prefix="/api/v1", tags=["graph"])
+    app.include_router(memory_consolidation.router, prefix="/api/v1", tags=["memory"])
+    app.include_router(multimodal.router, prefix="/api/v1", tags=["multimodal"])
 
     return app
 

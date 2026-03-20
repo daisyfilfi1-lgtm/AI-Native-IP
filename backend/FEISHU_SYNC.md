@@ -2,6 +2,8 @@
 
 将飞书知识库中的文档同步到 AI-Native IP 的 Memory（ip_assets），供后续检索与生成使用。
 
+> **注意**：生产环境建议配置 Qdrant 向量库以提升检索性能。详见 `docs/QDRANT.md`
+
 > 另：**百度网盘**目录同步见项目根目录 `docs/BAIDU_PAN.md`。
 
 ## 1. 飞书开放平台配置
@@ -42,16 +44,27 @@
   保存某个 IP 的默认空间映射。Body：`{ "ip_id":"test_001", "space_id":"...", "space_name":"可选" }`。
 
 - **POST /api/v1/integrations/feishu/sync**  
-  触发一次同步。  
+  触发一次同步（支持增量模式）。  
   Body 示例：
   ```json
-  { "ip_id": "test_001", "space_id": "可选，不传则用第一个空间" }
+  { 
+    "ip_id": "test_001", 
+    "space_id": "可选，不传则用第一个空间",
+    "incremental": true  // 默认true，开启增量同步
+  }
   ```
   响应示例：
   ```json
-  { "synced": 10, "failed": 0, "errors": [], "used_space_id": "..." }
+  { 
+    "synced": 5,      // 新增/更新的片段数
+    "skipped": 3,    // 跳过的片段数（内容未变化）
+    "deleted": 1,     // 删除的片段数
+    "failed": 0, 
+    "errors": [], 
+    "used_space_id": "..." 
+  }
   ```
-  会将该空间下所有 **doc / docx** 节点拉取为纯文本，按标题做结构化分段后写入/更新到指定 `ip_id` 的 `ip_assets`（asset_type=`data`，source=feishu_kb，metadata 内含 `doc_title`、`section_title`、`chunk_index`、`outline` 等）。
+  会将该空间下所有 **doc / docx** 节点拉取为纯文本，按标题做结构化分段后写入/更新到指定 `ip_id` 的 `ip_assets`（asset_type=`data`，source=feishu_kb，metadata 内含 `doc_title`、`section_title`、`chunk_index`、`outline`、`content_hash` 等）。增量模式会通过内容hash对比，只同步变化的文档。
 
 ## 4. 使用流程
 

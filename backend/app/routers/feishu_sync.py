@@ -14,7 +14,7 @@ from app.services.feishu_config_service import (
     get_feishu_credentials,
     set_feishu_config,
 )
-from app.services.feishu_sync_service import sync_feishu_space_to_ip
+from app.services.feishu_sync_service_incremental import sync_feishu_space_to_ip_incremental
 from app.services.integration_binding_service import get_binding, upsert_binding
 from app.services.memory_config_service import get_ip
 
@@ -35,12 +35,17 @@ class FeishuConfigSaveRequest(BaseModel):
 class SyncFeishuRequest(BaseModel):
     ip_id: str = Field(..., description="同步到该 IP 的 Memory")
     space_id: str | None = Field(None, description="飞书知识空间 ID，不传则用第一个有权限的空间")
+    incremental: bool = Field(True, description="增量同步（仅同步新增/更新的文档），默认开启")
 
 
 class SyncFeishuResponse(BaseModel):
-    synced: int
-    failed: int
-    errors: list[str]
+    synced: int = Field(..., description="新增/更新的片段数")
+    skipped: int = Field(0, description="跳过的片段数（内容未变化）")
+    deleted: int = Field(0, description="删除的片段数（远程已删除）")
+    failed: int = Field(0, description="失败的片段数")
+    total_remote: int = Field(0, description="远程文档总数")
+    total_local: int = Field(0, description="本地已有文档数")
+    errors: list[str] = Field(default_factory=list)
     used_space_id: str | None = None
 
 
@@ -111,12 +116,13 @@ def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> An
         if bound and bound.external_id:
             chosen_space_id = bound.external_id
 
-    result = sync_feishu_space_to_ip(
+    result = sync_feishu_space_to_ip_incremental(
         db,
         ip_id=request.ip_id,
         space_id=chosen_space_id,
         app_id=app_id,
         app_secret=app_secret,
+        incremental=request.incremental,
     )
     if result.get("errors") and result.get("synced") == 0 and result.get("failed") == 0:
         raise HTTPException(status_code=400, detail=result["errors"][0] if result["errors"] else "同步失败")

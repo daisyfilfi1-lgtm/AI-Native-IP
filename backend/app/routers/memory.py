@@ -101,14 +101,17 @@ def ingest_memory(
 ) -> Any:
     """
     素材录入：创建任务并加入后台队列，拉取内容后分块写入 ip_assets。
-    需提供 source_url（text/document）或 local_file_id；video/audio 暂为占位。
+    source_url 与 local_file_id 至少填其一：文本/文档可走 URL 或本地上传；
+    音视频可走 URL 或本地上传（需配置 Whisper / OPENAI_TRANSCRIPTION_*）。
     """
     if not get_ip(db, payload.ip_id):
         raise HTTPException(status_code=404, detail=f"IP 不存在: {payload.ip_id}")
-    if payload.source_type in ("text", "document") and not payload.source_url:
+    has_url = bool((payload.source_url or "").strip())
+    has_file = bool((payload.local_file_id or "").strip())
+    if not has_url and not has_file:
         raise HTTPException(
             status_code=400,
-            detail="text/document 类型需提供 source_url",
+            detail="请提供 source_url，或先调用 POST /memory/upload 上传文件后传入 local_file_id",
         )
 
     task_id = f"ingest_{uuid.uuid4().hex[:16]}"

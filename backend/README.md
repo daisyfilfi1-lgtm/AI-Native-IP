@@ -91,3 +91,5 @@ backend/
 | POST | /api/v1/config/memory | 保存 Memory 配置 |
 | GET  | /api/v1/integrations/feishu/spaces | 列出飞书知识空间 |
 | POST | /api/v1/integrations/feishu/sync | 飞书知识库同步到 IP Memory |
+| GET/POST | /api/v1/integrations/baidu/config | 百度网盘 access_token 配置 |
+| POST | /api/v1/integrations/baidu/sync | 百度网盘目录同步到 IP Memory |

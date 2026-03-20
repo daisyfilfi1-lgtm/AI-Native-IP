@@ -1,16 +1,19 @@
 """
 素材录入流水线：根据任务拉取内容、分块、写入 ip_assets，并更新 ingest_tasks。
-Phase 1 支持 text/document 类型的 source_url 拉取；video/audio 占位（可后续接 Whisper）。
-已配置 OPENAI_API_KEY 时，会自动调用 LLM 打标（asset_meta.auto_labels）。
+支持：text/document 的 URL 或本地上传（UTF-8 文本）；video/audio 的 URL 或本地上传（Whisper 转写）。
+已配置 LLM 时，会自动调用打标（asset_meta.auto_labels）。
 """
+import os
+import tempfile
 import uuid
+from pathlib import Path
 from typing import List
 
 import requests
 from sqlalchemy.orm import Session
 
 from app.db.models import FileObject, IPAsset, IngestTask, TagConfig
-from app.services.ai_client import suggest_tags_for_content, transcribe_from_url
+from app.services.ai_client import suggest_tags_for_content, transcribe, transcribe_from_url
 from app.db.session import SessionLocal
 from app.services.storage_service import download_bytes
 from app.services.vector_service import upsert_asset_vector
@@ -29,6 +32,35 @@ def _fetch_text_from_url(url: str) -> str:
     resp.raise_for_status()
     resp.encoding = resp.encoding or "utf-8"
     return resp.text
+
+
+def _transcribe_from_file_object(db: Session, task: IngestTask) -> str:
+    """从对象存储已上传文件转写音视频（Whisper）。"""
+    if not task.local_file_id:
+        return ""
+    row = (
+        db.query(FileObject)
+        .filter(FileObject.file_id == task.local_file_id, FileObject.ip_id == task.ip_id)
+        .first()
+    )
+    if not row:
+        return ""
+    data = download_bytes(row.bucket, row.object_key)
+    if not data:
+        return ""
+    suffix = Path(row.file_name or row.object_key or "").suffix or ".bin"
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        return (transcribe(tmp_path) or "").strip()
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def _load_text_from_file_object(db: Session, task: IngestTask) -> str:
@@ -84,21 +116,44 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
     db.commit()
 
     try:
-        if task.source_type in ("text", "document") and task.source_url:
-            raw_text = _fetch_text_from_url(task.source_url)
-        elif task.source_type in ("video", "audio") and task.source_url:
+        st = task.source_type or "text"
+        if st in ("video", "audio") and task.local_file_id:
+            raw_text = _transcribe_from_file_object(db, task)
+            if not (raw_text or "").strip():
+                raw_text = (
+                    f"[{st} 转写失败或未配置 Whisper] {task.title or task.local_file_id}\n\n"
+                    "请检查 OPENAI_TRANSCRIPTION_API_KEY（或主 OPENAI_API_KEY）及文件格式。"
+                )
+        elif st in ("video", "audio") and task.source_url:
             raw_text = transcribe_from_url(task.source_url)
             if not (raw_text or "").strip():
-                raw_text = f"[{task.source_type} 转写失败或未配置 Whisper] {task.title or task.source_url or '未命名'}\n\n请检查 OPENAI_API_KEY 及网络。"
-        elif task.source_type in ("video", "audio"):
-            raw_text = f"[{task.source_type} 待转写] {task.title or task.source_url or '未命名'}\n\n请填写 source_url 以启用 Whisper 转写。"
-        elif task.local_file_id:
+                raw_text = f"[{st} 转写失败或未配置 Whisper] {task.title or task.source_url or '未命名'}\n\n请检查转写 API 及网络。"
+        elif st in ("text", "document") and task.local_file_id:
             raw_text = _load_text_from_file_object(db, task)
             if not raw_text.strip():
-                raw_text = f"[文件解析失败] {task.title or task.local_file_id}\n\n当前仅内置 utf-8 文本解析，复杂文档建议走文档解析服务。"
+                raw_text = (
+                    f"[文件解析失败] {task.title or task.local_file_id}\n\n"
+                    "当前仅内置 utf-8 文本解析，复杂文档建议走文档解析服务。"
+                )
+        elif st in ("text", "document") and task.source_url:
+            raw_text = _fetch_text_from_url(task.source_url)
+        elif task.local_file_id:
+            # 未明确类型时：先按文本读，再尝试转写
+            raw_text = _load_text_from_file_object(db, task)
+            if not (raw_text or "").strip():
+                raw_text = _transcribe_from_file_object(db, task)
+            if not (raw_text or "").strip():
+                raw_text = (
+                    f"[文件解析失败] {task.title or task.local_file_id}\n\n"
+                    "请确认 source_type 为 text/document（文本）或 audio/video（音视频）。"
+                )
+        elif st in ("video", "audio"):
+            raw_text = (
+                f"[{st} 待转写] {task.title or '未命名'}\n\n"
+                "请填写 source_url，或先上传文件并传入 local_file_id。"
+            )
         else:
-            # 仅 local_file_id 等暂不支持时，写入一条占位
-            raw_text = f"[待处理] {task.title or '未命名'}\n\nsource_type={task.source_type}"
+            raw_text = f"[待处理] {task.title or '未命名'}\n\nsource_type={st}"
 
         chunks = _chunk_text(raw_text)
         if not chunks:

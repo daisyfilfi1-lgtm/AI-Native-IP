@@ -30,6 +30,31 @@ class IP(Base):
     status = Column(String(32), nullable=False, default="active")
     created_at = Column(DateTime, nullable=False, default=now_utc)
     updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
+    
+    # 账号体系：超级符号识别系统（7个标准化触点）
+    avatar_url = Column(String(2048), nullable=True)  # 头像
+    nickname = Column(String(100), nullable=True)  # 昵称
+    bio = Column(String(500), nullable=True)  # 简介
+    cover_image_url = Column(String(2048), nullable=True)  # 头图
+    cover_template = Column(String(100), nullable=True)  # 封面模板
+    pinned_content = Column(String(500), nullable=True)  # 置顶视频描述
+    like_follower_ratio = Column(String(20), nullable=True)  # 赞粉比
+    
+    # 商业定位：变现前置原则
+    monetization_model = Column(String(50), nullable=True)  # 变现模式
+    target_audience = Column(String(255), nullable=True)  # 目标受众
+    content_direction = Column(String(255), nullable=True)  # 内容方向
+    unique_value_prop = Column(String(500), nullable=True)  # 独特价值主张
+    
+    # 定位交叉点：擅长 × 热爱 × 市场需求
+    expertise = Column(String(255), nullable=True)  # 擅长领域
+    passion = Column(String(255), nullable=True)  # 热爱领域
+    market_demand = Column(String(255), nullable=True)  # 市场需求
+    
+    # 变现象限：产品/服务 × 客单价 × 复购率
+    product_service = Column(String(255), nullable=True)  # 产品/服务
+    price_range = Column(String(100), nullable=True)  # 客单价区间
+    repurchase_rate = Column(String(50), nullable=True)  # 复购率
 
 
 class IPAsset(Base):

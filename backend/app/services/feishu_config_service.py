@@ -27,19 +27,19 @@ def get_feishu_credentials(db: Session) -> Tuple[str | None, str | None]:
 
 
 def get_feishu_config_display(db: Session) -> dict:
-    """供前端展示：是否已配置、app_id 脱敏，不返回 secret。"""
+    """供管理后台展示：返回完整 app_id 便于编辑；不返回 secret。"""
     row = db.query(IntegrationConfig).filter(IntegrationConfig.key == FEISHU_KEY).first()
     if row and isinstance(row.value_json, dict):
-        app_id = row.value_json.get("app_id") or ""
+        app_id = (row.value_json.get("app_id") or "").strip()
         return {
-            "configured": True,
-            "app_id": app_id[:8] + "***" if len(app_id) > 8 else "***",
+            "configured": bool(app_id and row.value_json.get("app_secret")),
+            "app_id": app_id,
             "has_secret": bool(row.value_json.get("app_secret")),
         }
-    env_id = os.environ.get("FEISHU_APP_ID")
+    env_id = (os.environ.get("FEISHU_APP_ID") or "").strip()
     return {
-        "configured": bool(env_id),
-        "app_id": (env_id[:8] + "***") if env_id and len(env_id) > 8 else "***",
+        "configured": bool(env_id and os.environ.get("FEISHU_APP_SECRET")),
+        "app_id": env_id,
         "has_secret": bool(os.environ.get("FEISHU_APP_SECRET")),
     }
 

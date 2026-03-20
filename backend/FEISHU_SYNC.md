@@ -2,6 +2,8 @@
 
 将飞书知识库中的文档同步到 AI-Native IP 的 Memory（ip_assets），供后续检索与生成使用。
 
+> 另：**百度网盘**目录同步见项目根目录 `docs/BAIDU_PAN.md`。
+
 ## 1. 飞书开放平台配置
 
 1. 登录 [飞书开放平台](https://open.feishu.cn)，创建企业自建应用。
@@ -25,7 +27,7 @@
 ## 3. 接口说明
 
 - **GET /api/v1/integrations/feishu/config**  
-  获取飞书配置状态（是否已配置、app_id 脱敏），供管理后台展示。
+  获取飞书配置状态（是否已配置、**完整 app_id** 便于再次编辑；secret 不返回），供管理后台展示。
 
 - **POST /api/v1/integrations/feishu/config**  
   保存飞书凭证（管理后台填写）。Body：`{ "app_id": "xxx", "app_secret": "xxx" }`。

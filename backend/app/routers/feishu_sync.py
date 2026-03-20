@@ -44,7 +44,7 @@ class SyncFeishuResponse(BaseModel):
 
 @router.get("/integrations/feishu/config", response_model=FeishuConfigResponse)
 def get_feishu_config(db: Session = Depends(get_db)) -> Any:
-    """获取飞书配置状态（用于管理后台展示是否已配置、app_id 脱敏）。"""
+    """获取飞书配置状态（app_id 明文便于再次编辑；secret 不落库到响应）。"""
     d = get_feishu_config_display(db)
     return FeishuConfigResponse(**d)
 

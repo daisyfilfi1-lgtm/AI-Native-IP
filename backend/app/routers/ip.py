@@ -17,14 +17,9 @@ class IPResponse(BaseModel):
     owner_user_id: str
     status: str
     
-    # 账号体系：超级符号识别系统（7个标准化触点）
-    avatar_url: Optional[str] = None
+    # 账号体系：超级符号识别系统（2个核心触点）
     nickname: Optional[str] = None
     bio: Optional[str] = None
-    cover_image_url: Optional[str] = None
-    cover_template: Optional[str] = None
-    pinned_content: Optional[str] = None
-    like_follower_ratio: Optional[str] = None
     
     # 商业定位：变现前置原则
     monetization_model: Optional[str] = None
@@ -50,13 +45,8 @@ class CreateIPRequest(BaseModel):
     status: str = Field(default="active", max_length=32)
     
     # 账号体系字段
-    avatar_url: Optional[str] = Field(default=None, max_length=2048)
     nickname: Optional[str] = Field(default=None, max_length=100)
     bio: Optional[str] = Field(default=None, max_length=500)
-    cover_image_url: Optional[str] = Field(default=None, max_length=2048)
-    cover_template: Optional[str] = Field(default=None, max_length=100)
-    pinned_content: Optional[str] = Field(default=None, max_length=500)
-    like_follower_ratio: Optional[str] = Field(default=None, max_length=20)
     
     # 商业定位字段
     monetization_model: Optional[str] = Field(default=None, max_length=50)
@@ -83,13 +73,8 @@ def ip_to_response(row: IP) -> IPResponse:
         owner_user_id=row.owner_user_id,
         status=row.status,
         # 账号体系
-        avatar_url=row.avatar_url,
         nickname=row.nickname,
         bio=row.bio,
-        cover_image_url=row.cover_image_url,
-        cover_template=row.cover_template,
-        pinned_content=row.pinned_content,
-        like_follower_ratio=row.like_follower_ratio,
         # 商业定位
         monetization_model=row.monetization_model,
         target_audience=row.target_audience,
@@ -128,13 +113,8 @@ def create_ip(payload: CreateIPRequest, db: Session = Depends(get_db)):
         owner_user_id=payload.owner_user_id,
         status=payload.status,
         # 账号体系
-        avatar_url=payload.avatar_url,
         nickname=payload.nickname,
         bio=payload.bio,
-        cover_image_url=payload.cover_image_url,
-        cover_template=payload.cover_template,
-        pinned_content=payload.pinned_content,
-        like_follower_ratio=payload.like_follower_ratio,
         # 商业定位
         monetization_model=payload.monetization_model,
         target_audience=payload.target_audience,

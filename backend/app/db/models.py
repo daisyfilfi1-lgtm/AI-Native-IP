@@ -31,14 +31,9 @@ class IP(Base):
     created_at = Column(DateTime, nullable=False, default=now_utc)
     updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
     
-    # 账号体系：超级符号识别系统（7个标准化触点）
-    avatar_url = Column(String(2048), nullable=True)  # 头像
+    # 账号体系：超级符号识别系统（2个核心触点）
     nickname = Column(String(100), nullable=True)  # 昵称
     bio = Column(String(500), nullable=True)  # 简介
-    cover_image_url = Column(String(2048), nullable=True)  # 头图
-    cover_template = Column(String(100), nullable=True)  # 封面模板
-    pinned_content = Column(String(500), nullable=True)  # 置顶视频描述
-    like_follower_ratio = Column(String(20), nullable=True)  # 赞粉比
     
     # 商业定位：变现前置原则
     monetization_model = Column(String(50), nullable=True)  # 变现模式

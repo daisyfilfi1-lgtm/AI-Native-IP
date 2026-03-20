@@ -14,6 +14,7 @@ from app.services.feishu_client import (
     list_nodes,
     list_spaces,
 )
+from app.services.vector_service import upsert_asset_vector
 
 
 def _collect_doc_nodes(
@@ -104,6 +105,15 @@ def sync_feishu_space_to_ip(
             base_meta = existing.asset_meta if existing.asset_meta else {}
             existing.asset_meta = {**base_meta, **meta}
             db.flush()
+            try:
+                upsert_asset_vector(
+                    db,
+                    asset_id=existing.asset_id,
+                    ip_id=ip_id,
+                    content=existing.content or "",
+                )
+            except Exception:
+                pass
         else:
             db.add(
                 IPAsset(
@@ -119,6 +129,15 @@ def sync_feishu_space_to_ip(
                 )
             )
             db.flush()
+            try:
+                upsert_asset_vector(
+                    db,
+                    asset_id=asset_id,
+                    ip_id=ip_id,
+                    content=content or "",
+                )
+            except Exception:
+                pass
         synced += 1
 
     db.commit()

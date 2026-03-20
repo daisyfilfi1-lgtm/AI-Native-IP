@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.db.models import ConfigHistory
 from app.services.memory_config_service import (
     append_config_history,
     get_ip,
@@ -69,6 +70,19 @@ class MemoryConfigSchema(BaseModel):
 class MemoryFullConfig(BaseModel):
     tag_config: TagConfigSchema | None = None
     memory_config: MemoryConfigSchema | None = None
+
+
+class ConfigHistoryItem(BaseModel):
+    id: str
+    agent: str
+    action: str
+    user: str
+    time: str
+    version: int
+
+
+class ConfigHistoryResponse(BaseModel):
+    items: list[ConfigHistoryItem]
 
 
 def _tag_row_to_schema(row: Any) -> TagConfigSchema:
@@ -174,3 +188,68 @@ def save_memory_config(
     )
     db.commit()
     return {"success": True, "version": version}
+
+
+@router.get("/config/history", response_model=ConfigHistoryResponse)
+def list_config_history(
+    ip_id: str,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    读取配置历史（用于配置中心 UI 展示）。
+    目前写入来源主要是 memory 配置保存；会基于 config_json 生成 action 文案。
+    """
+    if not get_ip(db, ip_id):
+        raise HTTPException(status_code=404, detail=f"IP 不存在: {ip_id}")
+
+    lim = max(1, min(limit, 50))
+    rows = (
+        db.query(ConfigHistory)
+        .filter(ConfigHistory.ip_id == ip_id)
+        .order_by(ConfigHistory.changed_at.desc())
+        .limit(lim)
+        .all()
+    )
+
+    def _agent_label(agent_type: str) -> str:
+        # 与前端展示口径对齐
+        if agent_type == "memory":
+            return "记忆Agent"
+        return agent_type
+
+    def _infer_action(agent_type: str, config_json: dict) -> str:
+        tag = config_json.get("tag_config") is not None
+        mem = config_json.get("memory_config") is not None
+        if agent_type == "memory":
+            if tag and mem:
+                return "更新标签体系与检索配置"
+            if tag:
+                return "更新标签体系"
+            if mem:
+                return "更新检索与使用限制"
+            return "更新记忆配置"
+        # 其他 agent_type 默认文案
+        if tag and mem:
+            return "更新标签与检索配置"
+        if tag:
+            return "更新标签配置"
+        if mem:
+            return "更新检索配置"
+        return f"更新 {agent_type} 配置"
+
+    items: list[ConfigHistoryItem] = []
+    for r in rows:
+        cj = r.config_json or {}
+        items.append(
+            ConfigHistoryItem(
+                id=r.id,
+                agent=_agent_label(r.agent_type),
+                action=_infer_action(r.agent_type, cj),
+                user=r.changed_by,
+                time=r.changed_at.isoformat() if r.changed_at else "",
+                version=r.version,
+            )
+        )
+
+    return ConfigHistoryResponse(items=items)

@@ -1,13 +1,13 @@
 import os
 from typing import Generator
 
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import Base
+from app.env_loader import load_backend_env
 
-load_dotenv()
+load_backend_env()
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",

@@ -1,3 +1,7 @@
+from app.env_loader import load_backend_env
+
+load_backend_env()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse

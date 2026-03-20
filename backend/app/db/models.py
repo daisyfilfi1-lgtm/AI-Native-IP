@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Column,
     DateTime,
     ForeignKey,
@@ -110,6 +111,38 @@ class IntegrationConfig(Base):
 
     key = Column(String(64), primary_key=True)
     value_json = Column(JSONB, nullable=False, default=dict)
+    updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
+
+
+class FileObject(Base):
+    __tablename__ = "file_objects"
+
+    file_id = Column(String(64), primary_key=True)
+    ip_id = Column(String(64), ForeignKey("ip.ip_id"), nullable=False, index=True)
+    provider = Column(String(32), nullable=False, default="s3")
+    bucket = Column(String(255), nullable=False)
+    object_key = Column(String(1024), nullable=False)
+    file_name = Column(String(255), nullable=True)
+    content_type = Column(String(128), nullable=True)
+    size_bytes = Column(BigInteger, nullable=False, default=0)
+    etag = Column(String(128), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=now_utc)
+    updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
+
+    __table_args__ = (
+        Index("idx_file_objects_bucket_key", "bucket", "object_key", unique=True),
+    )
+
+
+class AssetVector(Base):
+    __tablename__ = "asset_vectors"
+
+    asset_id = Column(String(64), ForeignKey("ip_assets.asset_id"), primary_key=True)
+    ip_id = Column(String(64), ForeignKey("ip.ip_id"), nullable=False, index=True)
+    embedding = Column(JSONB, nullable=False)
+    dim = Column(Integer, nullable=False)
+    model = Column(String(128), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=now_utc)
     updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
 
 

@@ -51,6 +51,11 @@
 |------|------|
 | `DATABASE_URL` | PostgreSQL 连接串，由 Railway 在添加 PostgreSQL 后自动注入；若为 `postgres://` 开头，应用内会自动转为 `postgresql://`。 |
 | `PORT` | 由 Railway 注入，无需配置。 |
+| `OPENAI_*` / `OPENAI_TRANSCRIPTION_*` | AI 打标、Embedding、Whisper；详见 `docs/AI_CONFIG.md`。 |
+| `STORAGE_*` | 对象存储（S3 兼容，含阿里云 OSS）；详见 `docs/STORAGE_ALIYUN_OSS.md` 与 `backend/.env.example`。 |
+| `FEISHU_*` | 飞书同步（可选）。 |
+
+部署后首次含 `004_storage_and_vectors.sql` 的镜像会自动跑迁移；若报错，确认 `db/migrations/` 含 `004_storage_and_vectors.sql`。
 
 ---
 
@@ -68,4 +73,4 @@
 
 - **502 / 无法访问**：确认该服务的 **Root Directory** 为 `backend`，且启动命令使用 `$PORT`（Procfile 已配置）。
 - **数据库连接失败**：确认 Web 服务环境变量中有 `DATABASE_URL`（来自 Postgres 插件或手动引用），且已执行过 `scripts/run_migrations.py`。
-- **迁移报错**：确认在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001_init.sql`、`002_ingest_tasks.sql`。
+- **迁移报错**：确认在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001`～`004` 等 SQL 文件。

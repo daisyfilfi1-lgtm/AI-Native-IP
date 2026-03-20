@@ -1,14 +1,16 @@
 import uuid
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.db.models import IngestTask, IPAsset
+from app.db.models import FileObject, IngestTask, IPAsset
 from app.services.ingest_service import get_ingest_task, process_ingest_task
 from app.services.memory_config_service import get_ip
+from app.services.storage_service import build_public_url, upload_bytes
+from app.services.vector_service import query_similar_assets
 
 router = APIRouter()
 
@@ -84,6 +86,13 @@ class UpdateLabelsRequest(BaseModel):
     confirmed_labels: dict
 
 
+class UploadResponse(BaseModel):
+    file_id: str
+    file_url: str
+    size_bytes: int
+    content_type: Optional[str] = None
+
+
 @router.post("/memory/ingest", response_model=IngestResponse)
 def ingest_memory(
     payload: IngestRequest,
@@ -119,6 +128,53 @@ def ingest_memory(
 
     background_tasks.add_task(process_ingest_task, task_id)
     return IngestResponse(ingest_task_id=task_id, status="QUEUED")
+
+
+@router.post("/memory/upload", response_model=UploadResponse)
+async def upload_memory_file(
+    ip_id: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    上传文件到对象存储，返回 local_file_id（file_id）。
+    可配合 /memory/ingest 的 local_file_id 使用。
+    """
+    if not get_ip(db, ip_id):
+        raise HTTPException(status_code=404, detail=f"IP 不存在: {ip_id}")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="上传文件为空")
+    if len(data) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="文件过大，当前上限 100MB")
+
+    result = upload_bytes(ip_id, file.filename or "upload.bin", file.content_type, data)
+    if not result:
+        raise HTTPException(
+            status_code=503,
+            detail="对象存储未配置，请设置 STORAGE_* 环境变量",
+        )
+
+    row = FileObject(
+        file_id=result["file_id"],
+        ip_id=ip_id,
+        provider="s3",
+        bucket=result["bucket"],
+        object_key=result["object_key"],
+        file_name=file.filename,
+        content_type=file.content_type,
+        size_bytes=result["size_bytes"],
+    )
+    db.add(row)
+    db.commit()
+
+    file_url = build_public_url(result["bucket"], result["object_key"])
+    return UploadResponse(
+        file_id=row.file_id,
+        file_url=file_url,
+        size_bytes=row.size_bytes,
+        content_type=row.content_type,
+    )
 
 
 @router.get("/memory/assets")
@@ -182,6 +238,30 @@ def retrieve_memory(payload: RetrieveRequest, db: Session = Depends(get_db)) -> 
     top_k = min(payload.top_k or 10, 50)
     if not query:
         return RetrieveResponse(results=[])
+
+    # 优先向量检索；不可用时回退关键词检索
+    vec_hits = query_similar_assets(db, ip_id=payload.ip_id, query=query, top_k=top_k)
+    if vec_hits:
+        hit_ids = [h["asset_id"] for h in vec_hits]
+        sim_map = {h["asset_id"]: h["similarity"] for h in vec_hits}
+        rows = db.query(IPAsset).filter(IPAsset.asset_id.in_(hit_ids)).all()
+        row_map = {r.asset_id: r for r in rows}
+        results: list[RetrieveResultItem] = []
+        for aid in hit_ids:
+            r = row_map.get(aid)
+            if not r:
+                continue
+            snippet = (r.content or "")[:220] + ("..." if len(r.content or "") > 220 else "")
+            results.append(
+                RetrieveResultItem(
+                    asset_id=r.asset_id,
+                    title=r.title,
+                    content_snippet=snippet,
+                    metadata=r.asset_meta or {},
+                    similarity=float(sim_map.get(aid, 0.0)),
+                )
+            )
+        return RetrieveResponse(results=results)
 
     esc = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{esc}%"

@@ -12,9 +12,9 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 os.chdir(backend_dir)
 
-from dotenv import load_dotenv
+from app.env_loader import load_backend_env
 
-load_dotenv()
+load_backend_env()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
@@ -26,7 +26,7 @@ if DATABASE_URL.startswith("postgres://"):
 import psycopg2
 
 MIGRATIONS_DIR = os.path.join(backend_dir, "db", "migrations")
-ORDER = ["001_init.sql", "002_ingest_tasks.sql", "003_integration_config.sql"]
+ORDER = ["001_init.sql", "002_ingest_tasks.sql", "003_integration_config.sql", "004_storage_and_vectors.sql"]
 
 
 def _strip_leading_comments(stmt: str) -> str:

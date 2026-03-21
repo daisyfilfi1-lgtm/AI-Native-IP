@@ -14,7 +14,7 @@ from app.services.feishu_config_service import (
     get_feishu_credentials,
     set_feishu_config,
 )
-from app.services.feishu_sync_simple import simple_sync as sync_feishu_space_to_ip_incremental
+from app.services.feishu_sync_by_links import sync_by_links as sync_feishu_space_to_ip_incremental
 from app.services.integration_binding_service import get_binding, upsert_binding
 from app.services.memory_config_service import get_ip
 

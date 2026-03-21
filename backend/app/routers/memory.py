@@ -133,12 +133,12 @@ def ingest_memory(
     db.add(task)
     db.commit()
 
-    # 添加日志确认后台任务被触发
-    import logging
-    logging.info(f"Adding background task for ingest: {task_id}")
+    # 使用线程后台执行，避免长时间阻塞
+    import threading
+    thread = threading.Thread(target=process_ingest_task, args=(task_id,))
+    thread.daemon = True
+    thread.start()
     
-    # 后台执行，避免长时间阻塞 HTTP 请求
-    background_tasks.add_task(process_ingest_task, task_id)
     return IngestResponse(ingest_task_id=task_id, status="QUEUED")
 
 

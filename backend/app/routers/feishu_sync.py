@@ -134,7 +134,7 @@ def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> An
 
 @router.get("/integrations/feishu/test-fetch")
 def test_fetch_docs(db: Session = Depends(get_db)) -> Any:
-    """测试：获取所有文档"""
+    """测试：获取文档中的链接"""
     app_id, app_secret = get_feishu_credentials(db)
     if not app_id or not app_secret:
         return {"error": "no credentials"}
@@ -152,41 +152,26 @@ def test_fetch_docs(db: Session = Depends(get_db)) -> Any:
         
         token = data.get("tenant_access_token")
         
-        # 直接调用API获取根节点
-        space_id = "7619512097886260165"
+        # 获取第一个文档的完整内容
+        obj_token = "FDYQd3g9AoQMGnxtRBicBxibnKe"
         
         r2 = req.get(
-            f"https://open.feishu.cn/open-apis/wiki/v2/spaces/{space_id}/nodes",
+            f"https://open.feishu.cn/open-apis/docx/v1/documents/{obj_token}/raw_content",
             headers={"Authorization": f"Bearer {token}"},
             timeout=15
         )
         
-        nodes_data = r2.json()
+        content_data = r2.json()
+        content = content_data.get("data", {}).get("content", "")
         
-        # 分析节点结构
-        items = nodes_data.get("data", {}).get("items", [])
+        # 查找飞书链接
+        import re
+        links = re.findall(r'https://[\w.-]+\.feishu\.cn/[\w/]+', content)
         
-        # 统计各类节点
-        result = {
-            "total_items": len(items),
-            "item_types": {},
-            "items": []
+        return {
+            "link_count": len(links),
+            "links": list(set(links))[:20]
         }
-        
-        for item in items:
-            obj_type = item.get("obj_type", "unknown")
-            result["item_types"][obj_type] = result["item_types"].get(obj_type, 0) + 1
-            
-            if obj_type in ("doc", "docx"):
-                result["items"].append({
-                    "title": item.get("title"),
-                    "obj_type": obj_type,
-                    "has_child": item.get("has_child"),
-                    "node_token": item.get("node_token"),
-                    "obj_token": item.get("obj_token"),
-                })
-        
-        return result
     except Exception as e:
         return {"error": str(e)}
 

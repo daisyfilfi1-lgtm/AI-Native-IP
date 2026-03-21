@@ -135,23 +135,8 @@ def ingest_memory(
     db.add(task)
     db.commit()
 
-    # 简单同步处理（不依赖后台任务）
-    try:
-        from app.services.ingest_service import _run_ingest_pipeline, get_ingest_task
-        task = get_ingest_task(db, task_id)
-        if task:
-            _run_ingest_pipeline(db, task)
-            db.refresh(task)
-            return IngestResponse(ingest_task_id=task_id, status=task.status)
-    except Exception as e:
-        task = get_ingest_task(db, task_id)
-        if task:
-            task.status = "FAILED"
-            task.error_message = str(e)
-            db.commit()
-        return IngestResponse(ingest_task_id=task_id, status="FAILED")
-    
-    return IngestResponse(ingest_task_id=task_id, status="COMPLETED")
+    background_tasks.add_task(process_ingest_task, task_id)
+    return IngestResponse(ingest_task_id=task_id, status="QUEUED")
 
 
 @router.post("/memory/upload", response_model=UploadResponse)

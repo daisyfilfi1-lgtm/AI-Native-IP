@@ -113,73 +113,15 @@ def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OV
 def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
     """执行录入：拉取内容 → 分块 → 写入 ip_assets → 更新 task。"""
     import logging
-    import uuid
-    from pathlib import Path
-    from typing import List
-    from app.db.models import IPAsset
-    from app.services.storage_service import download_bytes
-    
+
     logger = logging.getLogger(__name__)
-    logger.info(f"Starting pipeline for task: {task.task_id}")
-    
+    logger.info("Starting pipeline for task: %s", task.task_id)
+
     task.status = "PROCESSING"
     db.commit()
 
     try:
-        # 加载文件内容
-        raw_text = ""
-        if task.local_file_id:
-            from app.db.models import FileObject
-            row = db.query(FileObject).filter(
-                FileObject.file_id == task.local_file_id,
-                FileObject.ip_id == task.ip_id
-            ).first()
-            if row:
-                data = download_bytes(row.bucket, row.object_key)
-                if data:
-                    try:
-                        raw_text = data.decode("utf-8")
-                    except:
-                        raw_text = data.decode("utf-8", errors="ignore")
-        
-        if not raw_text:
-            raw_text = f"[内容为空] {task.title or task.local_file_id}"
-        
-        # 简单分块
-        chunks = [raw_text[i:i+2000] for i in range(0, len(raw_text), 2000)]
-        if not chunks:
-            chunks = [raw_text]
-        
-        created_ids = []
-        for i, content in enumerate(chunks):
-            asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
-            title = (task.title or "未命名") + (f" (片段{i+1})" if len(chunks) > 1 else "")
-            db.add(IPAsset(
-                asset_id=asset_id,
-                ip_id=task.ip_id,
-                asset_type="story",
-                title=title,
-                content=content,
-                content_vector_ref=None,
-                asset_meta={"source_task_id": task.task_id},
-                relations=[],
-                status="active",
-            ))
-            created_ids.append(asset_id)
-        
-        task.status = "COMPLETED"
-        task.created_asset_ids = created_ids
-        task.error_message = None
-        logger.info(f"Completed task: {task.task_id}, created {len(created_ids)} assets")
-        db.commit()
-    except Exception as e:
-        logger.error(f"Error in pipeline: {e}")
-        task.status = "FAILED"
-        task.error_message = str(e)
-        task.created_asset_ids = []
-        db.commit()
         st = task.source_type or "text"
-        # file 类型也按文本处理
         if st in ("video", "audio") and task.local_file_id:
             raw_text = _transcribe_from_file_object(db, task)
             if not (raw_text or "").strip():
@@ -190,7 +132,10 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
         elif st in ("video", "audio") and task.source_url:
             raw_text = transcribe_from_url(task.source_url)
             if not (raw_text or "").strip():
-                raw_text = f"[{st} 转写失败或未配置 Whisper] {task.title or task.source_url or '未命名'}\n\n请检查转写 API 及网络。"
+                raw_text = (
+                    f"[{st} 转写失败或未配置 Whisper] {task.title or task.source_url or '未命名'}\n\n"
+                    "请检查转写 API 及网络。"
+                )
         elif st in ("text", "document", "file") and task.local_file_id:
             raw_text = _load_text_from_file_object(db, task)
             if not raw_text.strip():
@@ -201,18 +146,13 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
         elif st in ("text", "document", "file") and task.source_url:
             raw_text = _fetch_text_from_url(task.source_url)
         elif task.local_file_id:
-            # 未明确类型时：先按文本读，再尝试转写
-            # file 类型也按文本处理
-            if st in ("file", "text", "document"):
-                raw_text = _load_text_from_file_object(db, task)
-            else:
-                raw_text = _load_text_from_file_object(db, task)
-                if not (raw_text or "").strip():
-                    raw_text = _transcribe_from_file_object(db, task)
+            raw_text = _load_text_from_file_object(db, task)
+            if not (raw_text or "").strip():
+                raw_text = _transcribe_from_file_object(db, task)
             if not (raw_text or "").strip():
                 raw_text = (
                     f"[文件解析失败] {task.title or task.local_file_id}\n\n"
-                    "请确认 source_type 为 text/document（文本）或 audio/video（音视频）。"
+                    "请确认 source_type 为 text/document/file（文本）或 audio/video（音视频）。"
                 )
         elif st in ("video", "audio"):
             raw_text = (
@@ -239,13 +179,12 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                 "chunk_index": i,
                 "total_chunks": len(chunks),
             }
-            # 跳过 AI 打标以加快处理速度
-            # try:
-            #     tags = suggest_tags_for_content(content, categories)
-            #     if tags:
-            #         meta["auto_labels"] = tags
-            # except Exception:
-            #     pass
+            try:
+                tags = suggest_tags_for_content(content, categories)
+                if tags:
+                    meta["auto_labels"] = tags
+            except Exception:
+                pass
             db.add(
                 IPAsset(
                     asset_id=asset_id,
@@ -259,12 +198,22 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                     status="active",
                 )
             )
+            try:
+                upsert_asset_vector(
+                    db,
+                    asset_id=asset_id,
+                    ip_id=task.ip_id,
+                    content=content,
+                )
+            except Exception:
+                pass
             created_ids.append(asset_id)
 
         task.status = "COMPLETED"
         task.created_asset_ids = created_ids
         task.error_message = None
     except Exception as e:
+        logger.exception("ingest pipeline failed: %s", task.task_id)
         task.status = "FAILED"
         task.error_message = str(e)
         task.created_asset_ids = []

@@ -97,6 +97,49 @@ def list_feishu_spaces(db: Session = Depends(get_db)) -> Any:
         raise HTTPException(status_code=502, detail=f"飞书 API 调用失败: {e}") from e
 
 
+@router.get("/integrations/feishu/debug")
+def debug_feishu(db: Session = Depends(get_db)) -> Any:
+    """调试接口：检查飞书凭证和问题"""
+    app_id, app_secret = get_feishu_credentials(db)
+    
+    result = {
+        "has_credentials": bool(app_id and app_secret),
+        "app_id": app_id,
+    }
+    
+    if not app_id or not app_secret:
+        result["error"] = "缺少凭证"
+        return result
+    
+    try:
+        import requests
+        # 获取token
+        r = requests.post(
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            json={"app_id": app_id, "app_secret": app_secret},
+            timeout=10
+        )
+        data = r.json()
+        result["token_response"] = data
+        
+        if data.get("code") == 0:
+            token = data.get("tenant_access_token")
+            # 获取空间列表
+            r2 = requests.get(
+                "https://open.feishu.cn/open-apis/wiki/v2/spaces",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=15
+            )
+            result["spaces_response"] = r2.json()
+        else:
+            result["error"] = f"Token获取失败: {data.get('msg')}"
+            
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
 @router.post("/integrations/feishu/sync", response_model=SyncFeishuResponse)
 def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> Any:
     """

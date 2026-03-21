@@ -119,8 +119,6 @@ def ingest_memory(
         )
 
     task_id = f"ingest_{uuid.uuid4().hex[:16]}"
-    
-    # 直接创建已完成的任务（简化版，跳过处理）
     task = IngestTask(
         task_id=task_id,
         ip_id=payload.ip_id,
@@ -129,14 +127,14 @@ def ingest_memory(
         local_file_id=payload.local_file_id,
         title=payload.title,
         notes=payload.notes,
-        status="COMPLETED",
+        status="QUEUED",
         created_asset_ids=[],
-        error_message=None,
     )
     db.add(task)
     db.commit()
-    
-    return IngestResponse(ingest_task_id=task_id, status="COMPLETED")
+
+    background_tasks.add_task(process_ingest_task, task_id)
+    return IngestResponse(ingest_task_id=task_id, status="QUEUED")
 
 
 @router.post("/memory/upload", response_model=UploadResponse)

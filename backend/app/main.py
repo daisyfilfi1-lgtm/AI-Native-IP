@@ -1,3 +1,5 @@
+import os
+
 from app.env_loader import load_backend_env
 
 load_backend_env()
@@ -19,6 +21,44 @@ from app.routers import (
     style,
     vector
 )
+
+def _cors_middleware_kwargs() -> dict:
+    """
+    浏览器禁止同时使用 Access-Control-Allow-Origin: * 与 Allow-Credentials: true。
+    原配置 allow_origins=['*'] + allow_credentials=True 会导致跨域（含直连 Railway）被拦截。
+    """
+    raw = os.getenv("CORS_ORIGINS", "*").strip()
+    cred = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() in ("1", "true", "yes")
+    regex = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
+    if regex:
+        return {
+            "allow_origin_regex": regex,
+            "allow_credentials": cred,
+            "allow_methods": ["*"],
+            "allow_headers": ["*"],
+        }
+    if not raw or raw == "*":
+        return {
+            "allow_origins": ["*"],
+            "allow_credentials": False,
+            "allow_methods": ["*"],
+            "allow_headers": ["*"],
+        }
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if not origins:
+        return {
+            "allow_origins": ["*"],
+            "allow_credentials": False,
+            "allow_methods": ["*"],
+            "allow_headers": ["*"],
+        }
+    return {
+        "allow_origins": origins,
+        "allow_credentials": cred,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+
 
 ROOT_HTML = """
 <!DOCTYPE html>
@@ -64,13 +104,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    app.add_middleware(CORSMiddleware, **_cors_middleware_kwargs())
 
     @app.get("/", response_class=HTMLResponse)
     def root():

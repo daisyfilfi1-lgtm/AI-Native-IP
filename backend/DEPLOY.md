@@ -56,6 +56,8 @@
 |------|------|
 | `DATABASE_URL` | PostgreSQL 连接串，由 Railway 在添加 PostgreSQL 后自动注入；若为 `postgres://` 开头，应用内会自动转为 `postgresql://`。 |
 | `PORT` | 由 Railway 注入，无需配置。 |
+| `CORS_ORIGINS` | 可选。默认 `*`（与 `CORS_ALLOW_CREDENTIALS` 未开启时配合浏览器跨域）。若前端域名固定，可改为逗号分隔的完整 origin 列表。 |
+| `CORS_ALLOW_CREDENTIALS` | 可选。默认 `false`。仅在需带 Cookie 且使用**非** `*` 的 `CORS_ORIGINS` 时设为 `true`。 |
 | `OPENAI_*` / `OPENAI_TRANSCRIPTION_*` | AI 打标、Embedding、Whisper；详见 `docs/AI_CONFIG.md`。 |
 | `STORAGE_*` | 对象存储（S3 兼容，含阿里云 OSS）；详见 `docs/STORAGE_ALIYUN_OSS.md` 与 `backend/.env.example`。 |
 | `FEISHU_*` | 飞书同步（可选）。 |
@@ -132,3 +134,4 @@
 - **方式 A 迁移未执行**：镜像启动命令已含迁移；若仍缺表，可在 **Pre-deploy Command** 增加 `python scripts/run_migrations.py`，或在本地 `railway run python scripts/run_migrations.py`。
 - **数据库连接失败**：确认 Web 服务环境变量中有 `DATABASE_URL`（来自 Postgres 插件或 `${{Postgres.DATABASE_URL}}` 引用），且迁移已成功。
 - **迁移报错**：在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001`～`004` 等 SQL 文件。
+- **浏览器报 CORS / 跨域被拦**：后端曾误配 `Allow-Origin: *` + `Allow-Credentials: true`（浏览器不允许）。当前默认已改为通配且不携带凭证；若需带 Cookie，请设置明确的 `CORS_ORIGINS` 列表并 `CORS_ALLOW_CREDENTIALS=true`。控制台若显示 **502** 而非 CORS 文案，多为网关或后端超时，见上文 502 排查。

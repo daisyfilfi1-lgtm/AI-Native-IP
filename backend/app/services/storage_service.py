@@ -2,7 +2,13 @@
 对象存储服务：上传、下载、URL 生成。
 支持 S3 兼容存储；未配置时自动使用本地文件系统（便于本地开发）。
 S3 上传失败时（凭证/网络/权限）在未设置 STORAGE_LOCAL_DISABLED 时可回退到本地磁盘。
+
+阿里云 OSS：新版 botocore 可能对 PutObject 使用 aws-chunked + 流式校验，OSS 会报错
+「aws-chunked encoding is not supported with the specified x-amz-content-sha256」。
+通过 Config（when_required + payload_signing）与单次 PUT + ContentMD5 避免分块流式上传。
 """
+import base64
+import hashlib
 import logging
 import uuid
 from pathlib import Path
@@ -19,6 +25,24 @@ LOCAL_BUCKET = "local"
 logger = logging.getLogger(__name__)
 
 
+def _content_md5_b64(data: bytes) -> str:
+    return base64.b64encode(hashlib.md5(data).digest()).decode("ascii")
+
+
+def _s3_client_config(cfg: dict[str, Any]) -> Config:
+    style = "path" if cfg.get("force_path_style") else "virtual"
+    return Config(
+        signature_version="s3v4",
+        s3={
+            "addressing_style": style,
+            # 整包 SHA256 签名，避免默认走流式 chunked（OSS 不支持 aws-chunked + 部分 x-amz-content-sha256）
+            "payload_signing_enabled": True,
+        },
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
+    )
+
+
 def _get_s3_client() -> Any | None:
     cfg = get_storage_config()
     if not cfg.get("enabled"):
@@ -31,11 +55,7 @@ def _get_s3_client() -> Any | None:
         kwargs["region_name"] = cfg["region"]
     if cfg.get("endpoint"):
         kwargs["endpoint_url"] = cfg["endpoint"]
-    # SigV4；addressing_style：OSS/AWS 需 virtual-hosted（见 storage_config._default_force_path_style）
-    kwargs["config"] = Config(
-        signature_version="s3v4",
-        s3={"addressing_style": "path" if cfg.get("force_path_style") else "virtual"},
-    )
+    kwargs["config"] = _s3_client_config(cfg)
     return boto3.client("s3", **kwargs)
 
 
@@ -88,7 +108,9 @@ def upload_bytes(ip_id: str, file_name: str, content_type: str | None, data: byt
                 ext = Path(file_name or "").suffix
                 file_id = f"file_{uuid.uuid4().hex[:20]}"
                 object_key = f"ip/{ip_id}/{file_id}{ext}"
-                extra_args: dict[str, Any] = {}
+                extra_args: dict[str, Any] = {
+                    "ContentMD5": _content_md5_b64(data),
+                }
                 if content_type:
                     extra_args["ContentType"] = content_type
                 client.put_object(Bucket=bucket, Key=object_key, Body=data, **extra_args)

@@ -21,10 +21,11 @@
 ## 常见问题
 
 1. **SecondLevelDomainForbidden / virtual hosted style**：OSS 要求 **virtual-hosted** 访问（`bucket.oss-xxx.aliyuncs.com`），不要使用 path-style。勿设置 `STORAGE_FORCE_PATH_STYLE=true`，或显式设为 `false`。
-2. **403 SignatureDoesNotMatch**：核对 Secret、Endpoint 是否含 https、REGION 是否与 Bucket 一致。
-3. **403 AccessDenied**：检查 RAM 策略是否覆盖该 Bucket。
-4. **file_url 浏览器 403**：Bucket 私有时直链不可访问属正常；可绑域名与 CDN，或后续做鉴权下载。
-5. **向量检索**：依赖 Embedding 配置；未配置时检索回退关键词。
+2. **aws-chunked encoding is not supported with the specified x-amz-content-sha256**：新版 AWS SDK（boto3/botocore）可能对 PutObject 使用 **aws-chunked** 流式体，与 OSS 不兼容。后端已对单次上传使用 **ContentMD5** + **request_checksum_calculation=when_required** 等配置避免分块流式；请更新到含该修复的镜像并重新部署。
+3. **403 SignatureDoesNotMatch**：核对 Secret、Endpoint 是否含 https、REGION 是否与 Bucket 一致。
+4. **403 AccessDenied**：检查 RAM 策略是否覆盖该 Bucket。
+5. **file_url 浏览器 403**：Bucket 私有时直链不可访问属正常；可绑域名与 CDN，或后续做鉴权下载。
+6. **向量检索**：依赖 Embedding 配置；未配置时检索回退关键词。
 
 ## 部署后自测
 

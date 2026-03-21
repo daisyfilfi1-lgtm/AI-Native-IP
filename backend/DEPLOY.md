@@ -18,17 +18,20 @@
 1. 打开 [Railway Dashboard](https://railway.app/dashboard) → **New Project**。
 2. 选择 **Deploy from GitHub repo**，授权 Railway 访问 GitHub，选中本仓库。
 3. **构建方式二选一**：  
-   - **方式 A**：在该 Web 服务的 **Settings → Root Directory** 中填写 **`backend`**，保存。构建会使用 `backend/Procfile` 和 `backend/requirements.txt`。  
-   - **方式 B**：不设置 Root Directory，使用仓库根目录的 **Dockerfile**（会从 `backend/` 拷贝并构建），平台会自动识别并完成构建。
+   - **方式 A（推荐）**：在该 Web 服务的 **Settings → Root Directory** 中填写 **`backend`**，保存。构建会使用 `backend/Procfile` 和 `backend/requirements.txt`。**重要**：在 **Settings → Deploy → Pre-deploy Command** 中填写 `python scripts/run_migrations.py`，以便每次部署前自动执行数据库迁移。  
+   - **方式 B**：不设置 Root Directory，使用仓库根目录的 **Dockerfile**（会从 `backend/` 拷贝并构建），平台会自动识别并完成构建，迁移会在容器启动时自动执行。
 4. **添加 PostgreSQL**：在同一项目里点击 **New → Database → PostgreSQL**。创建后 Railway 会生成数据库，并在项目内暴露 `DATABASE_URL`。若 Web 服务未自动获得该变量，到 Web 服务 **Variables** 中添加：`DATABASE_URL` = `${{Postgres.DATABASE_URL}}`（或按面板上该数据库的变量引用名称填写）。
 5. **部署**：Railway 会识别 `Procfile` 中的 `web: uvicorn app.main:app --host 0.0.0.0 --port $PORT` 并启动服务。首次推送或点击 **Deploy** 后等待构建完成。
 6. **生成公网域名**：在 Web 服务 **Settings → Networking → Generate Domain**，得到类似 `xxx.up.railway.app` 的 HTTPS 地址。
 
 ---
 
-## 二、数据库迁移（已自动执行）
+## 二、数据库迁移
 
-表结构在**每次容器启动时**会自动执行迁移（`Dockerfile` 中已配置：先跑 `scripts/run_migrations.py` 再启动 uvicorn）。无需在本地安装 Railway CLI 或手动执行迁移。若需在本地用 Railway 环境跑迁移，可执行：`railway login` → `railway link` → `cd backend` → `railway run python scripts/run_migrations.py`。
+- **方式 A**：通过 Pre-deploy Command（见上文）在每次部署前自动执行迁移。
+- **方式 B**：Dockerfile 在容器启动时先跑 `scripts/run_migrations.py` 再启动 uvicorn。
+
+若需在本地用 Railway 环境手动跑迁移，可执行：`railway login` → `railway link` → `cd backend` → `railway run python scripts/run_migrations.py`。
 
 ---
 
@@ -123,5 +126,6 @@
 ## 六、故障排查
 
 - **502 / 无法访问**：确认该服务的 **Root Directory** 为 `backend`，且启动命令使用 `$PORT`（Procfile 已配置）。
+- **方式 A 迁移未执行**：确认已设置 **Pre-deploy Command** 为 `python scripts/run_migrations.py`。
 - **数据库连接失败**：确认 Web 服务环境变量中有 `DATABASE_URL`（来自 Postgres 插件或手动引用），且已执行过 `scripts/run_migrations.py`。
 - **迁移报错**：确认在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001`～`004` 等 SQL 文件。

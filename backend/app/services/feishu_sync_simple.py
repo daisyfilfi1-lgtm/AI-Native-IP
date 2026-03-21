@@ -10,8 +10,8 @@ from app.db.models import IPAsset
 from app.services.feishu_client import (
     get_tenant_access_token,
     get_doc_raw_content,
-    _collect_doc_nodes,
 )
+from app.services.feishu_sync_service_incremental import _collect_doc_nodes
 
 
 def simple_sync(db: Session, ip_id: str, space_id: str, app_id: str, app_secret: str):

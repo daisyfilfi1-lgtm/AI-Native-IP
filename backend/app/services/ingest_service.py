@@ -177,12 +177,13 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                 "chunk_index": i,
                 "total_chunks": len(chunks),
             }
-            try:
-                tags = suggest_tags_for_content(content, categories)
-                if tags:
-                    meta["auto_labels"] = tags
-            except Exception:
-                pass
+            # 跳过 AI 打标以加快处理速度
+            # try:
+            #     tags = suggest_tags_for_content(content, categories)
+            #     if tags:
+            #         meta["auto_labels"] = tags
+            # except Exception:
+            #     pass
             db.add(
                 IPAsset(
                     asset_id=asset_id,
@@ -196,16 +197,6 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                     status="active",
                 )
             )
-            # 向量写入失败不阻断主流程
-            try:
-                upsert_asset_vector(
-                    db,
-                    asset_id=asset_id,
-                    ip_id=task.ip_id,
-                    content=content,
-                )
-            except Exception:
-                pass
             created_ids.append(asset_id)
 
         task.status = "COMPLETED"

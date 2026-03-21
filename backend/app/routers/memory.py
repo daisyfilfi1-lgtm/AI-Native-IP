@@ -133,8 +133,10 @@ def ingest_memory(
     db.add(task)
     db.commit()
 
-    background_tasks.add_task(process_ingest_task, task_id)
-    return IngestResponse(ingest_task_id=task_id, status="QUEUED")
+    # 同步执行（便于调试）
+    process_ingest_task(task_id)
+    task = get_ingest_task(db, task_id)
+    return IngestResponse(ingest_task_id=task_id, status=task.status if task else "FAILED")
 
 
 @router.post("/memory/upload", response_model=UploadResponse)

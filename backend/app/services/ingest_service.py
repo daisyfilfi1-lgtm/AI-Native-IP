@@ -223,15 +223,25 @@ def process_ingest_task(task_id: str) -> None:
     """
     后台执行录入任务（在独立会话中）。
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting ingest task: {task_id}")
+    
     db = SessionLocal()
     try:
         task = get_ingest_task(db, task_id)
         if not task:
+            logger.warning(f"Task {task_id} not found")
             return
         if task.status != "QUEUED":
+            logger.warning(f"Task {task_id} status is {task.status}, expected QUEUED")
             return
+            
+        logger.info(f"Running pipeline for task: {task_id}")
         _run_ingest_pipeline(db, task)
+        logger.info(f"Completed task: {task_id}")
     except Exception as e:
+        logger.error(f"Error processing task {task_id}: {e}")
         task = get_ingest_task(db, task_id)
         if task:
             task.status = "FAILED"

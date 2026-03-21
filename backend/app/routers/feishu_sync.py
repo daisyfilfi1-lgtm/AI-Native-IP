@@ -132,48 +132,16 @@ def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> An
     return {**result, "used_space_id": used_space_id}
 
 
-@router.get("/integrations/feishu/test-fetch")
-def test_fetch_docs(db: Session = Depends(get_db)) -> Any:
-    """测试：获取文档中的链接"""
+@router.get("/integrations/feishu/test-sync")
+def test_sync(db: Session = Depends(get_db)) -> Any:
+    """测试同步"""
     app_id, app_secret = get_feishu_credentials(db)
     if not app_id or not app_secret:
         return {"error": "no credentials"}
     
-    try:
-        import requests as req
-        r = req.post(
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-            json={"app_id": app_id, "app_secret": app_secret},
-            timeout=10
-        )
-        data = r.json()
-        if data.get("code") != 0:
-            return {"error": "token failed"}
-        
-        token = data.get("tenant_access_token")
-        
-        # 获取第一个文档的完整内容
-        obj_token = "FDYQd3g9AoQMGnxtRBicBxibnKe"
-        
-        r2 = req.get(
-            f"https://open.feishu.cn/open-apis/docx/v1/documents/{obj_token}/raw_content",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=15
-        )
-        
-        content_data = r2.json()
-        content = content_data.get("data", {}).get("content", "")
-        
-        # 查找飞书链接
-        import re
-        links = re.findall(r'https://[\w.-]+\.feishu\.cn/[\w/]+', content)
-        
-        return {
-            "link_count": len(links),
-            "links": list(set(links))[:20]
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    from app.services.feishu_sync_by_links import sync_by_links
+    result = sync_by_links(db, "1", app_id, app_secret)
+    return result
 
 
 @router.get("/integrations/feishu/binding", response_model=FeishuBindingResponse | None)

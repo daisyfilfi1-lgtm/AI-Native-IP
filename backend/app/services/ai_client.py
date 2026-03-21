@@ -1,6 +1,6 @@
-"""
+﻿"""
 AI 服务统一调用：Embedding、LLM Chat、Whisper 转写。
-支持 OpenAI 及兼容 API（如 Azure、国内代理），以及本地模型作为 fallback。
+支持 OpenAI 及兼容 API、Cohere Embedding、本地模型作为 fallback。
 """
 import os
 import tempfile
@@ -14,6 +14,143 @@ from openai import OpenAI
 from app.config.ai_config import get_ai_config
 
 logger = logging.getLogger(__name__)
+
+# Cohere 配置
+_COHERE_CONFIG = None
+
+def _get_cohere_config():
+    """获取Cohere配置"""
+    global _COHERE_CONFIG
+    if _COHERE_CONFIG is None:
+        api_key = os.environ.get("COHERE_API_KEY", "").strip() or None
+        _COHERE_CONFIG = {
+            "api_key": api_key,
+            "enabled": bool(api_key)
+        }
+    return _COHERE_CONFIG
+
+def _embed_cohere(texts: list[str]) -> list[list[float]] | None:
+    """Cohere Embedding - 支持多语言，免费5000次/月"""
+    import cohere
+    
+    cfg = _get_cohere_config()
+    if not cfg.get("enabled"):
+        return None
+    
+    try:
+        client = cohere.Client(cfg["api_key"])
+        response = client.embed(
+            texts=texts,
+            model='embed-multilingual-v3.0',
+            input_type='search_document'
+        )
+        # Handle both list and array formats
+        embeddings = response.embeddings
+        if hasattr(embeddings[0], 'tolist'):
+            return [emb.tolist() for emb in embeddings]
+        return embeddings
+    except Exception as e:
+        logger.warning(f"Cohere embedding failed: {e}")
+        return None
+
+# 腾讯云配置
+_TENCENT_CLOUD_CONFIG = None
+
+def _get_tencent_config():
+    """获取腾讯云配置"""
+    global _TENCENT_CLOUD_CONFIG
+    if _TENCENT_CLOUD_CONFIG is None:
+        secret_id = os.environ.get("TENCENT_CLOUD_SECRET_ID", "").strip() or None
+        secret_key = os.environ.get("TENCENT_CLOUD_SECRET_KEY", "").strip() or None
+        _TENCENT_CLOUD_CONFIG = {
+            "secret_id": secret_id,
+            "secret_key": secret_key,
+            "enabled": bool(secret_id and secret_key)
+        }
+    return _TENCENT_CLOUD_CONFIG
+
+def _tencentcloud_sign(secret_key: str, date: str, service: str, string_to_sign: str) -> str:
+    """TC3-HMAC-SHA256 签名"""
+    import hashlib
+    import hmac
+    def tc3_hash(key, msg):
+        return hmac.new(key.encode('utf-8'), msg.encode('utf-8'), hashlib.sha256).hexdigest()
+    secret_date = tc3_hash(secret_key, date)
+    secret_service = tc3_hash(secret_date, service)
+    secret_signing = tc3_hash(secret_service, 'tc3_request')
+    return hmac.new(secret_signing.encode('utf-8'), string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
+
+def _embed_tencentcloud(texts: list[str]) -> list[list[float]] | None:
+    """腾讯云混元Embedding"""
+    import hashlib
+    import time
+    from datetime import datetime
+    import requests
+    
+    cfg = _get_tencent_config()
+    if not cfg.get("enabled"):
+        return None
+    
+    secret_id = cfg["secret_id"]
+    secret_key = cfg["secret_key"]
+    
+    timestamp = int(time.time())
+    
+    # 使用文本 embedding 接口
+    payload = {
+        'TextList': texts,
+        'Model': 'embedding-equation-7b-v1'
+    }
+    
+    service = 'hunyuan'
+    action = 'GetEmbedding'
+    version = '2023-09-01'
+    region = 'ap-guangzhou'
+    
+    # 构建签名
+    http_request_method = 'POST'
+    canonical_uri = '/'
+    canonical_query_string = ''
+    payload_str = json.dumps(payload, ensure_ascii=False)
+    hashed_request_payload = hashlib.sha256(payload_str.encode('utf-8')).hexdigest()
+    canonical_headers = 'content-type:application/json;host:hunyuan.tencentcloudapi.com\n'
+    signed_headers = 'content-type;host'
+    canonical_request = f'{http_request_method}\n{canonical_uri}\n{canonical_query_string}\n{canonical_headers}\nsigned_headers:{signed_headers}\nhashed_request_payload:{hashed_request_payload}'
+    
+    algorithm = 'TC3-HMAC-SHA256'
+    date = datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d')
+    credential_scope = f'{date}/{service}/tc3_request'
+    hashed_canonical_request = hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()
+    string_to_sign = f'{algorithm}\n{timestamp}\n{credential_scope}\n{hashed_canonical_request}'
+    
+    signature = _tencentcloud_sign(secret_key, date, service, string_to_sign)
+    authorization = f'{algorithm} Credential={secret_id}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}'
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': authorization,
+        'Host': 'hunyuan.tencentcloudapi.com',
+        'X-TC-Action': action,
+        'X-TC-Version': version,
+        'X-TC-Timestamp': str(timestamp),
+        'X-TC-Region': region
+    }
+    
+    try:
+        resp = requests.post('https://hunyuan.tencentcloudapi.com', headers=headers, json=payload, timeout=60)
+        result = resp.json()
+        if 'Response' in result and 'EmbeddingList' in result.get('Response', {}):
+            embeddings = []
+            for item in result['Response']['EmbeddingList']:
+                embeddings.append(item['Embedding'])
+            logger.info(f"Tengtcent Cloud embedding success: {len(embeddings)} vectors")
+            return embeddings
+        else:
+            logger.warning(f"Tengtcent Cloud embedding failed: {result}")
+            return None
+    except Exception as e:
+        logger.error(f"Tengtcent Cloud embedding error: {e}")
+        return None
 
 # 本地embedding模型（当API不可用时的fallback）
 _LOCAL_EMBEDDING_MODEL = None
@@ -160,10 +297,23 @@ def _get_transcription_client() -> OpenAI | None:
 
 def embed(texts: list[str]) -> list[list[float]] | None:
     """
-    文本向量化。优先使用API，失败时尝试本地模型。
-    如果都失败，返回None（调用方会跳过向量存储）。
+    文本向量化。优先级：
+    1. 腾讯云混元Embedding (如果有配置)
+    2. OpenAI API (如果有有效key)
+    3. 本地模型 (可选)
+    4. 无向量 - 纯文本存储
     """
-    # 先尝试API
+    # 1. 优先尝试 Cohere
+    cohere_result = _embed_cohere(texts)
+    if cohere_result:
+        return cohere_result
+    
+    # 2. 腾讯云
+    tencent_result = _embed_tencentcloud(texts)
+    if tencent_result:
+        return tencent_result
+    
+    # 2. 尝试OpenAI API
     client = _get_text_client()
     if client:
         cfg = get_ai_config()
@@ -172,16 +322,14 @@ def embed(texts: list[str]) -> list[list[float]] | None:
             resp = client.embeddings.create(input=texts, model=model)
             return [item.embedding for item in sorted(resp.data, key=lambda x: x.index)]
         except Exception as e:
-            logger.warning(f"API embedding failed: {e}, trying local model")
+            logger.warning(f"OpenAI embedding failed: {e}")
     
-    # Fallback: 尝试本地模型
+    # 3. Fallback: 尝试本地模型
     local_model = _get_local_embedding_model()
     if local_model:
-        try:
-            embeddings = local_model.encode(texts, convert_to_numpy=True)
-            return [emb.tolist() for emb in embeddings]
-        except Exception as e:
-            logger.error(f"Local embedding also failed: {e}")
+        result = _embed_with_local_model(texts, local_model)
+        if result:
+            return result
     
     # 都失败时返回None，让调用方处理
     logger.warning("All embedding methods failed - will store text without vectors")
@@ -383,3 +531,4 @@ def suggest_tags_for_content(
         return cleaned_ref or None
     except Exception:
         return None
+

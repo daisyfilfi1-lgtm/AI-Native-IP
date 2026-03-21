@@ -117,6 +117,7 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
 
     try:
         st = task.source_type or "text"
+        # file 类型也按文本处理
         if st in ("video", "audio") and task.local_file_id:
             raw_text = _transcribe_from_file_object(db, task)
             if not (raw_text or "").strip():
@@ -128,20 +129,24 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
             raw_text = transcribe_from_url(task.source_url)
             if not (raw_text or "").strip():
                 raw_text = f"[{st} 转写失败或未配置 Whisper] {task.title or task.source_url or '未命名'}\n\n请检查转写 API 及网络。"
-        elif st in ("text", "document") and task.local_file_id:
+        elif st in ("text", "document", "file") and task.local_file_id:
             raw_text = _load_text_from_file_object(db, task)
             if not raw_text.strip():
                 raw_text = (
                     f"[文件解析失败] {task.title or task.local_file_id}\n\n"
                     "当前仅内置 utf-8 文本解析，复杂文档建议走文档解析服务。"
                 )
-        elif st in ("text", "document") and task.source_url:
+        elif st in ("text", "document", "file") and task.source_url:
             raw_text = _fetch_text_from_url(task.source_url)
         elif task.local_file_id:
             # 未明确类型时：先按文本读，再尝试转写
-            raw_text = _load_text_from_file_object(db, task)
-            if not (raw_text or "").strip():
-                raw_text = _transcribe_from_file_object(db, task)
+            # file 类型也按文本处理
+            if st in ("file", "text", "document"):
+                raw_text = _load_text_from_file_object(db, task)
+            else:
+                raw_text = _load_text_from_file_object(db, task)
+                if not (raw_text or "").strip():
+                    raw_text = _transcribe_from_file_object(db, task)
             if not (raw_text or "").strip():
                 raw_text = (
                     f"[文件解析失败] {task.title or task.local_file_id}\n\n"

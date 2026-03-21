@@ -1,0 +1,8 @@
+# 供 Railway 从仓库根目录部署（Root Directory 为空）时使用根目录 Dockerfile
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300

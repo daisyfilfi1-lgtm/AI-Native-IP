@@ -1,0 +1,9 @@
+# Railway Config as Code（服务 Root Directory 设为 backend 时生效）
+# 显式使用 Docker 构建：上下文为 backend/，使用本目录下 Dockerfile。
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300

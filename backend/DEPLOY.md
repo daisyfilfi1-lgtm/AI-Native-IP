@@ -17,9 +17,9 @@
 
 1. 打开 [Railway Dashboard](https://railway.app/dashboard) → **New Project**。
 2. 选择 **Deploy from GitHub repo**，授权 Railway 访问 GitHub，选中本仓库。
-3. **构建方式二选一**：  
-   - **方式 A（推荐）**：在该 Web 服务的 **Settings → Root Directory** 中填写 **`backend`**，保存。构建会使用 `backend/Procfile` 和 `backend/requirements.txt`。**重要**：在 **Settings → Deploy → Pre-deploy Command** 中填写 `python scripts/run_migrations.py`，以便每次部署前自动执行数据库迁移。  
-   - **方式 B**：不设置 Root Directory，使用仓库根目录的 **Dockerfile**（会从 `backend/` 拷贝并构建），平台会自动识别并完成构建，迁移会在容器启动时自动执行。
+3. **构建方式二选一**（勿混用：Root Directory 与 Dockerfile 必须匹配）：  
+   - **方式 A（推荐）**：在该 Web 服务的 **Settings → Root Directory** 中填写 **`backend`**，保存。仓库内 **`backend/railway.toml`** 会指定用 **`backend/Dockerfile`** 构建（构建上下文仅为 `backend/`，避免「根目录 Dockerfile 在上下文外」导致构建失败）。容器启动时会执行 `scripts/run_migrations.py` 再启动 uvicorn。可选：在 **Pre-deploy Command** 中再写一次 `python scripts/run_migrations.py`（与镜像内迁移重复，一般可省略）。  
+   - **方式 B**：**Root Directory 留空**，使用仓库根目录的 **Dockerfile** 与根目录 **`railway.toml`**；迁移同样在容器启动时执行。
 4. **添加 PostgreSQL**：在同一项目里点击 **New → Database → PostgreSQL**。创建后 Railway 会生成数据库，并在项目内暴露 `DATABASE_URL`。若 Web 服务未自动获得该变量，到 Web 服务 **Variables** 中添加：`DATABASE_URL` = `${{Postgres.DATABASE_URL}}`（或按面板上该数据库的变量引用名称填写）。
 5. **部署**：Railway 会识别 `Procfile` 中的 `web: uvicorn app.main:app --host 0.0.0.0 --port $PORT` 并启动服务。首次推送或点击 **Deploy** 后等待构建完成。
 6. **生成公网域名**：在 Web 服务 **Settings → Networking → Generate Domain**，得到类似 `xxx.up.railway.app` 的 HTTPS 地址。
@@ -127,7 +127,8 @@
 
 ## 六、故障排查
 
-- **502 / 无法访问**：确认该服务的 **Root Directory** 为 `backend`，且启动命令使用 `$PORT`（Procfile 已配置）。
-- **方式 A 迁移未执行**：确认已设置 **Pre-deploy Command** 为 `python scripts/run_migrations.py`。
-- **数据库连接失败**：确认 Web 服务环境变量中有 `DATABASE_URL`（来自 Postgres 插件或手动引用），且已执行过 `scripts/run_migrations.py`。
-- **迁移报错**：确认在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001`～`004` 等 SQL 文件。
+- **构建失败 / 推不上去 / 找不到 Dockerfile**：若 **Root Directory = `backend`**，构建上下文不包含仓库根目录，**不能**再指向根目录的 `Dockerfile`。应使用已提交的 **`backend/Dockerfile`** + **`backend/railway.toml`**，或将 Root Directory 清空并改用根目录 Dockerfile（二选一）。推送后需在 Railway 上 **Redeploy**。
+- **502 / 无法访问**：确认启动使用 `$PORT`（Dockerfile / `Procfile` 已配置）；健康检查路径为 **`/health`**（与 `railway.toml` 一致）。
+- **方式 A 迁移未执行**：镜像启动命令已含迁移；若仍缺表，可在 **Pre-deploy Command** 增加 `python scripts/run_migrations.py`，或在本地 `railway run python scripts/run_migrations.py`。
+- **数据库连接失败**：确认 Web 服务环境变量中有 `DATABASE_URL`（来自 Postgres 插件或 `${{Postgres.DATABASE_URL}}` 引用），且迁移已成功。
+- **迁移报错**：在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001`～`004` 等 SQL 文件。

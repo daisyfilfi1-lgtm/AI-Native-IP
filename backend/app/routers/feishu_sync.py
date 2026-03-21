@@ -133,6 +133,41 @@ def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> An
     return {**result, "used_space_id": used_space_id}
 
 
+@router.get("/integrations/feishu/test-fetch")
+def test_fetch_docs(db: Session = Depends(get_db)) -> Any:
+    """测试：只获取文档列表，不存库"""
+    app_id, app_secret = get_feishu_credentials(db)
+    if not app_id or not app_secret:
+        return {"error": "no credentials"}
+    
+    try:
+        import requests as req
+        # 获取token
+        r = req.post(
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            json={"app_id": app_id, "app_secret": app_secret},
+            timeout=10
+        )
+        data = r.json()
+        if data.get("code") != 0:
+            return {"error": "token failed", "detail": data}
+        
+        token = data.get("tenant_access_token")
+        
+        # 获取文档列表
+        from app.services.feishu_client import list_nodes
+        space_id = "7619512097886260165"
+        nodes = list(list_nodes(token, space_id))
+        
+        return {
+            "space_id": space_id,
+            "doc_count": len(nodes),
+            "docs": [{"title": n.get("title"), "obj_type": n.get("obj_type")} for n in nodes[:5]]
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.get("/integrations/feishu/binding", response_model=FeishuBindingResponse | None)
 def get_feishu_binding(ip_id: str, db: Session = Depends(get_db)) -> Any:
     """获取指定 IP 的飞书默认空间映射。"""

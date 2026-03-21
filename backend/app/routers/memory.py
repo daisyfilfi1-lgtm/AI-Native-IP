@@ -133,15 +133,9 @@ def ingest_memory(
     db.add(task)
     db.commit()
 
-    # 同步执行并返回结果（避免后台任务问题）
-    try:
-        process_ingest_task(task_id)
-    except Exception as e:
-        task.status = "FAILED"
-        task.error_message = str(e)
-        db.commit()
-    
-    return IngestResponse(ingest_task_id=task_id, status=task.status if task else "FAILED")
+    # 使用 FastAPI BackgroundTasks
+    background_tasks.add_task(process_ingest_task, task_id)
+    return IngestResponse(ingest_task_id=task_id, status="QUEUED")
 
 
 @router.post("/memory/upload", response_model=UploadResponse)

@@ -1,11 +1,13 @@
 """
 素材录入流水线：根据任务拉取内容、分块、写入 ip_assets，并更新 ingest_tasks。
-支持：text/document 的 URL 或本地上传（UTF-8 文本）；video/audio 的 URL 或本地上传（Whisper 转写）。
+支持：text/document 的 URL 或本地上传（UTF-8 的 txt/md、docx 正文、PDF 可选字层文本）；video/audio 的 URL 或本地上传（Whisper 转写）。
 已配置 LLM 时，会自动调用打标（asset_meta.auto_labels）。
 """
+import io
 import os
 import tempfile
 import uuid
+import zipfile
 from pathlib import Path
 from typing import List
 
@@ -108,6 +110,66 @@ def _transcribe_from_file_object(db: Session, task: IngestTask) -> str:
                 pass
 
 
+def _text_from_docx(data: bytes) -> str:
+    """从 .docx（OOXML）提取纯文本：段落 + 表格单元格。"""
+    try:
+        from docx import Document
+    except ImportError:
+        return ""
+    try:
+        doc = Document(io.BytesIO(data))
+        parts: List[str] = []
+        for para in doc.paragraphs:
+            t = (para.text or "").strip()
+            if t:
+                parts.append(t)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    t = (cell.text or "").strip()
+                    if t:
+                        parts.append(t)
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
+def _looks_like_pdf(data: bytes) -> bool:
+    return len(data) >= 5 and data[:5] == b"%PDF-"
+
+
+def _looks_like_docx_ooxml(data: bytes) -> bool:
+    """docx 为 ZIP，内含 word/document.xml（与 xlsx/pptx 区分）。"""
+    if len(data) < 4 or data[:2] != b"PK":
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = zf.namelist()
+            return any(n == "word/document.xml" or n.endswith("/word/document.xml") for n in names)
+    except Exception:
+        return False
+
+
+def _text_from_pdf(data: bytes) -> str:
+    """
+    从 PDF 提取可选中文字层（非扫描件）。扫描版 PDF 无文本层时结果为空，需 OCR 另处理。
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        parts: List[str] = []
+        for page in reader.pages:
+            t = (page.extract_text() or "").strip()
+            if t:
+                parts.append(t)
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
 def _load_text_from_file_object(db: Session, task: IngestTask) -> str:
     if not task.local_file_id:
         return ""
@@ -121,7 +183,30 @@ def _load_text_from_file_object(db: Session, task: IngestTask) -> str:
     data = download_bytes(row.bucket, row.object_key)
     if not data:
         return ""
-    # Phase 1: 文本类文件按 utf-8 读取；复杂格式后续接文档解析服务
+    name = (row.file_name or row.object_key or "").lower()
+    if name.endswith(".docx"):
+        text = _text_from_docx(data)
+        if text.strip():
+            return text
+        return ""
+    if name.endswith(".doc"):
+        # 旧版 Word 二进制 .doc，需 LibreOffice/专用解析；此处不冒充文本
+        return ""
+    if name.endswith(".pdf"):
+        text = _text_from_pdf(data)
+        if text.strip():
+            return text
+        return ""
+    # 扩展名缺失或误命名时，用魔数补救（如 object_key 为 upload.bin）
+    if _looks_like_pdf(data):
+        text = _text_from_pdf(data)
+        if text.strip():
+            return text
+    if _looks_like_docx_ooxml(data):
+        text = _text_from_docx(data)
+        if text.strip():
+            return text
+    # .txt / .md / .csv 等：按 UTF-8 读取
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
@@ -186,7 +271,8 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
             if not raw_text.strip():
                 raw_text = (
                     f"[文件解析失败] {task.title or task.local_file_id}\n\n"
-                    "当前仅内置 utf-8 文本解析，复杂文档建议走文档解析服务。"
+                    "已支持：UTF-8 文本（txt/md）、docx、含文字层的 PDF（扫描件无文字层则为空）。"
+                    "若仍为失败，请确认文件未加密；旧版 .doc 尚未接入。"
                 )
         elif st in ("text", "document", "file") and task.source_url:
             raw_text = _fetch_text_from_url(task.source_url)
@@ -197,7 +283,8 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
             if not (raw_text or "").strip():
                 raw_text = (
                     f"[文件解析失败] {task.title or task.local_file_id}\n\n"
-                    "请确认 source_type 为 text/document/file（文本）或 audio/video（音视频）。"
+                    "请确认 source_type 为 text/document/file（文本）或 audio/video（音视频）；"
+                    "文本类已支持 txt/md、docx、PDF（文字层）。"
                 )
         elif st in ("video", "audio"):
             raw_text = (

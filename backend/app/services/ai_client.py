@@ -20,22 +20,58 @@ _LOCAL_EMBEDDING_MODEL = None
 _LOCAL_EMBEDDING_DIM = 768  # 默认维度
 
 def _get_local_embedding_model():
-    """获取本地embedding模型（延迟加载）"""
+    """获取本地embedding模型（延迟加载）- 尝试多种方式"""
     global _LOCAL_EMBEDDING_MODEL
     if _LOCAL_EMBEDDING_MODEL is None:
+        # 方式1: sentence-transformers (需要torch)
         try:
             from sentence_transformers import SentenceTransformer
-            # 使用多语言模型支持中文
             model_name = os.environ.get("LOCAL_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
-            _LOCAL_EMBEDDING_MODEL = SentenceTransformer(model_name)
+            _LOCAL_EMBEDDING_MODEL = SentenceTransformer(model_name, device='cpu')
             logger.info(f"Loaded local embedding model: {model_name}")
-        except ImportError:
-            logger.warning("sentence-transformers not installed, local embedding unavailable")
-            _LOCAL_EMBEDDING_MODEL = False  # 标记为不可用
-        except Exception as e:
-            logger.warning(f"Failed to load local embedding model: {e}")
-            _LOCAL_EMBEDDING_MODEL = False
+            return _LOCAL_EMBEDDING_MODEL
+        except Exception as e1:
+            logger.warning(f"sentence-transformers failed: {e1}")
+        
+        # 方式2: 直接用transformers (不用torch)
+        try:
+            from transformers import AutoTokenizer, AutoModel
+            import torch
+            model_name = os.environ.get("LOCAL_EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModel.from_pretrained(model_name)
+            model.eval()
+            _LOCAL_EMBEDDING_MODEL = {"tokenizer": tokenizer, "model": model}
+            logger.info(f"Loaded embedding model via transformers: {model_name}")
+            return _LOCAL_EMBEDDING_MODEL
+        except Exception as e2:
+            logger.warning(f"transformers direct also failed: {e2}")
+        
+        _LOCAL_EMBEDDING_MODEL = False
     return _LOCAL_EMBEDDING_MODEL if _LOCAL_EMBEDDING_MODEL else None
+
+
+def _embed_with_local_model(texts: list[str], model_info) -> list[list[float]] | None:
+    """使用本地模型生成embedding"""
+    try:
+        # sentence-transformers方式
+        if hasattr(model_info, 'encode'):
+            embeddings = model_info.encode(texts, convert_to_numpy=True)
+            return [emb.tolist() for emb in embeddings]
+        # transformers直接方式
+        elif isinstance(model_info, dict):
+            tokenizer = model_info["tokenizer"]
+            model = model_info["model"]
+            import torch
+            encoded = tokenizer(texts, padding=True, truncation=True, max_length=512, return_tensors="pt")
+            with torch.no_grad():
+                outputs = model(**encoded)
+                # Mean pooling
+                embeddings = outputs.last_hidden_state.mean(dim=1).numpy()
+            return [emb.tolist() for emb in embeddings]
+    except Exception as e:
+        logger.error(f"Local embedding failed: {e}")
+    return None
 
 # 未配置 IP 术语表时使用的「内容语义」参考维与候选值（与 docs/TAG_TAXONOMY_REFERENCE.md 对齐）
 REFERENCE_SEMANTIC_TAG_WHITELIST: dict[str, frozenset[str]] = {
@@ -125,6 +161,7 @@ def _get_transcription_client() -> OpenAI | None:
 def embed(texts: list[str]) -> list[list[float]] | None:
     """
     文本向量化。优先使用API，失败时尝试本地模型。
+    如果都失败，返回None（调用方会跳过向量存储）。
     """
     # 先尝试API
     client = _get_text_client()
@@ -146,6 +183,8 @@ def embed(texts: list[str]) -> list[list[float]] | None:
         except Exception as e:
             logger.error(f"Local embedding also failed: {e}")
     
+    # 都失败时返回None，让调用方处理
+    logger.warning("All embedding methods failed - will store text without vectors")
     return None
 
 

@@ -153,17 +153,22 @@ def test_fetch_docs(db: Session = Depends(get_db)) -> Any:
         
         token = data.get("tenant_access_token")
         
-        # 递归获取所有节点
-        from app.services.feishu_sync_service_incremental import _collect_doc_nodes
-        space_id = "7619512097886260165"
+        # 获取第一个文档的完整内容
+        obj_token = "FDYQd3g9AoQMGnxtRBicBxibnKe"
         
-        # 使用递归获取
-        all_nodes = _collect_doc_nodes(token, space_id)
+        # 获取docx内容
+        r2 = req.get(
+            f"https://open.feishu.cn/open-apis/docx/v1/documents/{obj_token}/raw_content",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15
+        )
+        
+        content_data = r2.json()
         
         return {
-            "space_id": space_id,
-            "doc_count": len(all_nodes),
-            "docs": [{"title": n.get("title"), "obj_type": n.get("obj_type"), "obj_token": n.get("obj_token")} for n in all_nodes]
+            "doc_token": obj_token,
+            "content": content_data.get("data", {}).get("content", "")[:2000],
+            "has_content": bool(content_data.get("data", {}).get("content")),
         }
     except Exception as e:
         return {"error": str(e)}

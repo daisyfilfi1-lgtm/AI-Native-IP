@@ -29,3 +29,6 @@ Thumbs.db
 
 # 前端为独立 Git 仓库（推送见 frontend 目录内 origin）
 frontend/
+
+# 本地开发上传文件
+backend/data/

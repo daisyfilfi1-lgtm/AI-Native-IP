@@ -25,14 +25,14 @@ from app.services.ai_client import embed
 
 # Qdrant配置
 def get_qdrant_client() -> QdrantClient:
-    """获取Qdrant客户端，支持本地或云端"""
+    """获取Qdrant客户端，支持本地或云端。未连接时调用方会降级到 PostgreSQL。"""
     qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
-    qdrant_api_key = os.environ.get("QDRANT_API_KEY", None)
-    
+    qdrant_api_key = os.environ.get("QDRANT_API_KEY", "").strip() or None
     return QdrantClient(
         url=qdrant_url,
         api_key=qdrant_api_key,
         timeout=30,
+        check_compatibility=False,  # 避免版本检查导致的 403/连接失败
     )
 
 

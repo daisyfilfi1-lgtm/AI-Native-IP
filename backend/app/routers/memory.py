@@ -9,7 +9,7 @@ from app.db import get_db
 from app.db.models import FileObject, IngestTask, IPAsset
 from app.services.ingest_service import get_ingest_task, process_ingest_task
 from app.services.memory_config_service import get_ip
-from app.services.storage_service import build_public_url, upload_bytes
+from app.services.storage_service import LOCAL_BUCKET, build_public_url, upload_bytes
 from app.services.vector_service import query_similar_assets
 from app.services.hybrid_retrieval_service import hybrid_search
 
@@ -156,13 +156,13 @@ async def upload_memory_file(
     if not result:
         raise HTTPException(
             status_code=503,
-            detail="对象存储未配置，请设置 STORAGE_* 环境变量",
+            detail="对象存储未配置，请设置 STORAGE_* 或保持 STORAGE_LOCAL_DISABLED=false 使用本地存储",
         )
 
     row = FileObject(
         file_id=result["file_id"],
         ip_id=ip_id,
-        provider="s3",
+        provider="local" if result.get("bucket") == LOCAL_BUCKET else "s3",
         bucket=result["bucket"],
         object_key=result["object_key"],
         file_name=file.filename,

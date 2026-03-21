@@ -134,7 +134,7 @@ def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> An
 
 @router.get("/integrations/feishu/test-fetch")
 def test_fetch_docs(db: Session = Depends(get_db)) -> Any:
-    """测试：只获取文档列表，不存库"""
+    """测试：获取所有文档包括子节点"""
     app_id, app_secret = get_feishu_credentials(db)
     if not app_id or not app_secret:
         return {"error": "no credentials"}
@@ -153,15 +153,17 @@ def test_fetch_docs(db: Session = Depends(get_db)) -> Any:
         
         token = data.get("tenant_access_token")
         
-        # 获取文档列表
-        from app.services.feishu_client import list_nodes
+        # 递归获取所有节点
+        from app.services.feishu_client import list_nodes, _collect_doc_nodes
         space_id = "7619512097886260165"
-        nodes = list(list_nodes(token, space_id))
+        
+        # 使用递归获取
+        all_nodes = _collect_doc_nodes(token, space_id)
         
         return {
             "space_id": space_id,
-            "doc_count": len(nodes),
-            "docs": [{"title": n.get("title"), "obj_type": n.get("obj_type")} for n in nodes[:5]]
+            "doc_count": len(all_nodes),
+            "docs": [{"title": n.get("title"), "obj_type": n.get("obj_type"), "obj_token": n.get("obj_token")} for n in all_nodes]
         }
     except Exception as e:
         return {"error": str(e)}

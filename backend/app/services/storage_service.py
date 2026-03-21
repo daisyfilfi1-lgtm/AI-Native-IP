@@ -1,5 +1,6 @@
 """
 对象存储服务：上传、下载、URL 生成。
+支持 S3 兼容存储；未配置时自动使用本地文件系统（便于本地开发）。
 """
 import uuid
 from pathlib import Path
@@ -9,6 +10,9 @@ import boto3
 from botocore.client import Config
 
 from app.config.storage_config import get_storage_config
+
+# 本地存储的 bucket 标识
+LOCAL_BUCKET = "local"
 
 
 def _get_s3_client() -> Any | None:
@@ -31,31 +35,59 @@ def _get_s3_client() -> Any | None:
     return boto3.client("s3", **kwargs)
 
 
-def upload_bytes(ip_id: str, file_name: str, content_type: str | None, data: bytes) -> dict[str, Any] | None:
-    client = _get_s3_client()
+def _upload_bytes_local(ip_id: str, file_name: str, content_type: str | None, data: bytes) -> dict[str, Any] | None:
+    """本地文件存储上传（S3 未配置时使用）"""
     cfg = get_storage_config()
-    if not client or not cfg.get("bucket"):
+    if not cfg.get("local_enabled"):
         return None
-
+    base = Path(cfg["local_path"])
     ext = Path(file_name or "").suffix
     file_id = f"file_{uuid.uuid4().hex[:20]}"
     object_key = f"ip/{ip_id}/{file_id}{ext}"
-    extra_args: dict[str, Any] = {}
-    if content_type:
-        extra_args["ContentType"] = content_type
-
-    client.put_object(Bucket=cfg["bucket"], Key=object_key, Body=data, **extra_args)
-
+    full_path = base / object_key
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    full_path.write_bytes(data)
     return {
         "file_id": file_id,
-        "bucket": cfg["bucket"],
+        "bucket": LOCAL_BUCKET,
         "object_key": object_key,
         "size_bytes": len(data),
         "content_type": content_type,
     }
 
 
+def upload_bytes(ip_id: str, file_name: str, content_type: str | None, data: bytes) -> dict[str, Any] | None:
+    cfg = get_storage_config()
+    # 优先 S3
+    if cfg.get("s3_enabled"):
+        client = _get_s3_client()
+        bucket = cfg.get("bucket")
+        if client and bucket:
+            ext = Path(file_name or "").suffix
+            file_id = f"file_{uuid.uuid4().hex[:20]}"
+            object_key = f"ip/{ip_id}/{file_id}{ext}"
+            extra_args: dict[str, Any] = {}
+            if content_type:
+                extra_args["ContentType"] = content_type
+            client.put_object(Bucket=bucket, Key=object_key, Body=data, **extra_args)
+            return {
+                "file_id": file_id,
+                "bucket": bucket,
+                "object_key": object_key,
+                "size_bytes": len(data),
+                "content_type": content_type,
+            }
+    # S3 不可用时 fallback 本地
+    return _upload_bytes_local(ip_id, file_name, content_type, data)
+
+
 def download_bytes(bucket: str, object_key: str) -> bytes | None:
+    cfg = get_storage_config()
+    if bucket == LOCAL_BUCKET and cfg.get("local_enabled"):
+        full_path = Path(cfg["local_path"]) / object_key
+        if full_path.exists():
+            return full_path.read_bytes()
+        return None
     client = _get_s3_client()
     if not client:
         return None
@@ -68,6 +100,8 @@ def download_bytes(bucket: str, object_key: str) -> bytes | None:
 
 
 def build_public_url(bucket: str, object_key: str) -> str:
+    if bucket == LOCAL_BUCKET:
+        return f"file://{Path(get_storage_config()['local_path']) / object_key}"
     cfg = get_storage_config()
     base = cfg.get("public_base_url")
     if base:

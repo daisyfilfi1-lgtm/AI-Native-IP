@@ -219,11 +219,25 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
     db.commit()
 
 
-def process_ingest_task(task_id: str) -> None:
+def process_ingest_task(task_id: str, timeout_seconds: int = 120) -> None:
     """
     后台执行录入任务（在独立会话中）。
     由路由在 BackgroundTasks 中调用，或由 Celery 等队列调用。
+    带超时保护，避免任务卡住。
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting ingest task: {task_id}")
+    import signal
+    
+    def timeout_handler(signum, frame):
+        raise TimeoutError(f"Task {task_id} timed out after {timeout_seconds}s")
+    
+    # 仅在 Unix 系统生效
+    if hasattr(signal, 'SIGALRM'):
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(timeout_seconds)
+    
     db = SessionLocal()
     try:
         task = get_ingest_task(db, task_id)
@@ -232,5 +246,14 @@ def process_ingest_task(task_id: str) -> None:
         if task.status != "QUEUED":
             return
         _run_ingest_pipeline(db, task)
+    except TimeoutError as e:
+        task = get_ingest_task(db, task_id)
+        if task:
+            task.status = "FAILED"
+            task.error_message = str(e)
+            db.commit()
     finally:
+        if hasattr(signal, 'SIGALRM'):
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
         db.close()

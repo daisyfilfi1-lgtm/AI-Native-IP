@@ -113,6 +113,12 @@ def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OV
 def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
     """执行录入：拉取内容 → 分块 → 写入 ip_assets → 更新 task。"""
     import logging
+    import uuid
+    from pathlib import Path
+    from typing import List
+    from app.db.models import IPAsset
+    from app.services.storage_service import download_bytes
+    
     logger = logging.getLogger(__name__)
     logger.info(f"Starting pipeline for task: {task.task_id}")
     
@@ -120,13 +126,58 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
     db.commit()
 
     try:
-        # 直接返回简单的成功，测试用
+        # 加载文件内容
+        raw_text = ""
+        if task.local_file_id:
+            from app.db.models import FileObject
+            row = db.query(FileObject).filter(
+                FileObject.file_id == task.local_file_id,
+                FileObject.ip_id == task.ip_id
+            ).first()
+            if row:
+                data = download_bytes(row.bucket, row.object_key)
+                if data:
+                    try:
+                        raw_text = data.decode("utf-8")
+                    except:
+                        raw_text = data.decode("utf-8", errors="ignore")
+        
+        if not raw_text:
+            raw_text = f"[内容为空] {task.title or task.local_file_id}"
+        
+        # 简单分块
+        chunks = [raw_text[i:i+2000] for i in range(0, len(raw_text), 2000)]
+        if not chunks:
+            chunks = [raw_text]
+        
+        created_ids = []
+        for i, content in enumerate(chunks):
+            asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
+            title = (task.title or "未命名") + (f" (片段{i+1})" if len(chunks) > 1 else "")
+            db.add(IPAsset(
+                asset_id=asset_id,
+                ip_id=task.ip_id,
+                asset_type="story",
+                title=title,
+                content=content,
+                content_vector_ref=None,
+                asset_meta={"source_task_id": task.task_id},
+                relations=[],
+                status="active",
+            ))
+            created_ids.append(asset_id)
+        
         task.status = "COMPLETED"
-        task.created_asset_ids = ["test_asset"]
+        task.created_asset_ids = created_ids
         task.error_message = None
-        logger.info(f"Completed task: {task.task_id}")
+        logger.info(f"Completed task: {task.task_id}, created {len(created_ids)} assets")
         db.commit()
-        return
+    except Exception as e:
+        logger.error(f"Error in pipeline: {e}")
+        task.status = "FAILED"
+        task.error_message = str(e)
+        task.created_asset_ids = []
+        db.commit()
         st = task.source_type or "text"
         # file 类型也按文本处理
         if st in ("video", "audio") and task.local_file_id:

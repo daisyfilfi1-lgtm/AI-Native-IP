@@ -234,11 +234,18 @@ def get_ingest_status(task_id: str, db: Session = Depends(get_db)) -> Any:
     task = get_ingest_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+    raw_ids = task.created_asset_ids
+    if raw_ids is None:
+        created_assets: List[str] = []
+    elif isinstance(raw_ids, list):
+        created_assets = [str(x) for x in raw_ids]
+    else:
+        created_assets = []
     return IngestStatusResponse(
         ingest_task_id=task.task_id,
         status=task.status,
         error=task.error_message,
-        created_assets=task.created_asset_ids or [],
+        created_assets=created_assets,
     )
 
 

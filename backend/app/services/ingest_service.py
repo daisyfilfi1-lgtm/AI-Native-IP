@@ -13,7 +13,12 @@ import requests
 from sqlalchemy.orm import Session
 
 from app.db.models import FileObject, IPAsset, IngestTask, TagConfig
-from app.services.ai_client import suggest_tags_for_content, transcribe, transcribe_from_url
+from app.services.ai_client import (
+    embed_texts_batched,
+    suggest_tags_for_content,
+    transcribe,
+    transcribe_from_url,
+)
 from app.db.session import SessionLocal
 from app.services.storage_service import download_bytes
 from app.services.vector_service import upsert_asset_vector
@@ -21,6 +26,46 @@ from app.services.vector_service import upsert_asset_vector
 # 分块默认长度（字符），可按需调整
 CHUNK_SIZE = 2000
 CHUNK_OVERLAP = 100
+
+# 大素材保护：避免海量分块 ×（每块 LLM + Embedding）拖垮内存与 CPU（OOM / Killed）
+def _ingest_max_text_chars() -> int:
+    raw = os.environ.get("INGEST_MAX_TEXT_CHARS", "").strip()
+    if not raw:
+        return 500_000
+    try:
+        return max(10_000, int(raw))
+    except ValueError:
+        return 500_000
+
+
+def _ingest_max_chunks() -> int:
+    raw = os.environ.get("INGEST_MAX_CHUNKS", "").strip()
+    if not raw:
+        return 120
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 120
+
+
+def _ingest_embed_batch_size() -> int:
+    raw = os.environ.get("INGEST_EMBED_BATCH_SIZE", "").strip()
+    if not raw:
+        return 16
+    try:
+        return max(1, min(64, int(raw)))
+    except ValueError:
+        return 16
+
+
+def _ingest_commit_every() -> int:
+    raw = os.environ.get("INGEST_COMMIT_EVERY", "").strip()
+    if not raw:
+        return 25
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 25
 
 
 def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
@@ -162,29 +207,55 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
         else:
             raw_text = f"[待处理] {task.title or '未命名'}\n\nsource_type={st}"
 
-        chunks = _chunk_text(raw_text)
+        max_chars = _ingest_max_text_chars()
+        max_chunks = _ingest_max_chunks()
+        embed_bs = _ingest_embed_batch_size()
+        commit_every = _ingest_commit_every()
+
+        ingest_notes: List[str] = []
+        rt = raw_text or ""
+        if len(rt) > max_chars:
+            ingest_notes.append(f"正文已截断至前 {max_chars} 字符，避免录入任务 OOM")
+            rt = rt[:max_chars]
+
+        chunks = _chunk_text(rt)
         if not chunks:
-            chunks = [raw_text or "(无内容)"]
+            chunks = [rt or "(无内容)"]
+
+        if len(chunks) > max_chunks:
+            ingest_notes.append(f"分块仅保留前 {max_chunks} 段（共 {len(chunks)} 段），请拆分素材或调大 INGEST_MAX_CHUNKS")
+            chunks = chunks[:max_chunks]
 
         tag_cfg = db.query(TagConfig).filter(TagConfig.ip_id == task.ip_id).first()
         categories = (tag_cfg.tag_categories if tag_cfg else None) or None
 
+        # 每块各打一次 LLM 会极慢且易爆内存；整任务只打标一次（用开头片段）
+        shared_tags = None
+        try:
+            tag_snippet = (rt or "")[:4000]
+            if tag_snippet.strip():
+                shared_tags = suggest_tags_for_content(tag_snippet, categories)
+        except Exception:
+            shared_tags = None
+
+        # 批量 Embedding，减少 HTTP 次数与峰值内存
+        embeddings = embed_texts_batched(chunks, batch_size=embed_bs)
+
         created_ids: List[str] = []
+        total = len(chunks)
         for i, content in enumerate(chunks):
             asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
-            title = (task.title or "未命名") + (f" (片段{i+1})" if len(chunks) > 1 else "")
+            title = (task.title or "未命名") + (f" (片段{i+1})" if total > 1 else "")
             meta: dict = {
                 "source_task_id": task.task_id,
                 "source_type": task.source_type,
                 "chunk_index": i,
-                "total_chunks": len(chunks),
+                "total_chunks": total,
             }
-            try:
-                tags = suggest_tags_for_content(content, categories)
-                if tags:
-                    meta["auto_labels"] = tags
-            except Exception:
-                pass
+            if ingest_notes and i == 0:
+                meta["ingest_warnings"] = ingest_notes
+            if shared_tags:
+                meta["auto_labels"] = shared_tags
             db.add(
                 IPAsset(
                     asset_id=asset_id,
@@ -199,15 +270,21 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                 )
             )
             try:
+                emb = embeddings[i] if i < len(embeddings) else None
                 upsert_asset_vector(
                     db,
                     asset_id=asset_id,
                     ip_id=task.ip_id,
                     content=content,
+                    precomputed_embedding=emb,
                 )
             except Exception:
                 pass
             created_ids.append(asset_id)
+
+            if (i + 1) % commit_every == 0:
+                db.commit()
+                db.refresh(task)
 
         task.status = "COMPLETED"
         task.created_asset_ids = created_ids

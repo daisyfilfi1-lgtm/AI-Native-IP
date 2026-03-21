@@ -134,4 +134,5 @@
 - **方式 A 迁移未执行**：镜像启动命令已含迁移；若仍缺表，可在 **Pre-deploy Command** 增加 `python scripts/run_migrations.py`，或在本地 `railway run python scripts/run_migrations.py`。
 - **数据库连接失败**：确认 Web 服务环境变量中有 `DATABASE_URL`（来自 Postgres 插件或 `${{Postgres.DATABASE_URL}}` 引用），且迁移已成功。
 - **迁移报错**：在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001`～`004` 等 SQL 文件。
+- **ingest 任务一直 PROCESSING 或进程被 Killed（OOM）**：大文件会产生极多分块；旧版曾对**每一块**各调一次 LLM 打标与 Embedding，易拖垮内存与 CPU。当前实现已改为**单次打标**、**批量 Embedding**、**正文/分块上限**与**分批 `commit`**。若仍吃紧，在环境中下调 `INGEST_MAX_TEXT_CHARS`、`INGEST_MAX_CHUNKS`，必要时略减 `INGEST_EMBED_BATCH_SIZE`；并设置 `OPENAI_HTTP_TIMEOUT` 避免 API 无限挂起。
 - **浏览器报 CORS / 跨域被拦**：官方前端（Netlify）应使用 **同源** `/api/v1`，由 Next.js `rewrites` 在服务端转发到本服务，**不依赖**浏览器 CORS。若仍用 `NEXT_PUBLIC_API_URL` 直连 Railway，需正确 CORS；**502** 时网关响应无 CORS 头，会表现为 CORS+502 叠加——优先修部署稳定性或改回同源代理。后端默认对 `*.netlify.app` 等放行；直连工具可设 `CORS_ORIGINS=*`。

@@ -18,14 +18,21 @@ def upsert_asset_vector(
     asset_id: str,
     ip_id: str,
     content: str,
+    precomputed_embedding: list[float] | None = None,
 ) -> bool:
+    """
+    写入 asset_vectors。若已在外部批量算好向量，传入 precomputed_embedding 可避免重复调用 Embedding API。
+    """
     text = (content or "").strip()
-    if not text:
-        return False
-    vectors = embed([text])
-    if not vectors or not vectors[0]:
-        return False
-    vec = vectors[0]
+    if precomputed_embedding is not None:
+        vec = precomputed_embedding
+    else:
+        if not text:
+            return False
+        vectors = embed([text])
+        if not vectors or not vectors[0]:
+            return False
+        vec = vectors[0]
     cfg = get_ai_config()
     model = cfg.get("embedding_model") or "text-embedding-3-small"
     row = db.query(AssetVector).filter(AssetVector.asset_id == asset_id).first()

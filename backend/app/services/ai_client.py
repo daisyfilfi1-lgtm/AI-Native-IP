@@ -61,12 +61,24 @@ REFERENCE_SEMANTIC_TAG_WHITELIST: dict[str, frozenset[str]] = {
 }
 
 
+def _http_timeout_seconds() -> float:
+    """LLM / Embedding / 转写 HTTP 超时（秒），避免长时间挂起占满 worker。"""
+    raw = os.environ.get("OPENAI_HTTP_TIMEOUT", "120").strip()
+    try:
+        return max(10.0, float(raw))
+    except ValueError:
+        return 120.0
+
+
 def _get_text_client() -> OpenAI | None:
     """LLM / Embedding 使用的主客户端（可指向 DeepSeek 等）。"""
     cfg = get_ai_config()
     if not cfg.get("api_key"):
         return None
-    kwargs: dict[str, Any] = {"api_key": cfg["api_key"]}
+    kwargs: dict[str, Any] = {
+        "api_key": cfg["api_key"],
+        "timeout": _http_timeout_seconds(),
+    }
     if cfg.get("base_url"):
         kwargs["base_url"] = cfg["base_url"]
     return OpenAI(**kwargs)
@@ -78,7 +90,7 @@ def _get_transcription_client() -> OpenAI | None:
     key = cfg.get("transcription_api_key")
     if not key:
         return None
-    kwargs: dict[str, Any] = {"api_key": key}
+    kwargs: dict[str, Any] = {"api_key": key, "timeout": _http_timeout_seconds()}
     base = cfg.get("transcription_base_url")
     if base:
         kwargs["base_url"] = base
@@ -99,6 +111,32 @@ def embed(texts: list[str]) -> list[list[float]] | None:
         return [item.embedding for item in sorted(resp.data, key=lambda x: x.index)]
     except Exception:
         return None
+
+
+def embed_texts_batched(
+    texts: list[str],
+    *,
+    batch_size: int = 16,
+) -> list[list[float] | None]:
+    """
+    批量向量化，与输入等长；失败项为 None。单批失败时回退为逐条请求，降低大任务 OOM。
+    """
+    if not texts:
+        return []
+    out: list[list[float] | None] = [None] * len(texts)
+    bs = max(1, batch_size)
+    for i in range(0, len(texts), bs):
+        batch = texts[i : i + bs]
+        vecs = embed(batch)
+        if vecs and len(vecs) == len(batch):
+            for j, v in enumerate(vecs):
+                out[i + j] = v
+            continue
+        for j, t in enumerate(batch):
+            one = embed([t])
+            if one and one[0]:
+                out[i + j] = one[0]
+    return out
 
 
 def chat(

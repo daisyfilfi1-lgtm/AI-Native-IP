@@ -362,11 +362,17 @@ def sync_feishu_space_to_ip_incremental(
             )
             db.flush()
             
-            # 写入Qdrant向量
+            # 写入Qdrant向量（失败则跳过）
             try:
                 upsert_asset_vector(
                     db,
                     asset_id=asset_id,
+                    ip_id=ip_id,
+                    content=final_content,
+                )
+            except Exception as e:
+                # 向量存储失败不影响主流程
+                pass
                     ip_id=ip_id,
                     content=final_content,
                     metadata=meta,

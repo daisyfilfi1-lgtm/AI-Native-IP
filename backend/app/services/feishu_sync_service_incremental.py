@@ -369,12 +369,6 @@ def sync_feishu_space_to_ip_incremental(
                     asset_id=asset_id,
                     ip_id=ip_id,
                     content=final_content,
-                )
-            except Exception as e:
-                # 向量存储失败不影响主流程
-                pass
-                    ip_id=ip_id,
-                    content=final_content,
                     metadata=meta,
                 )
             except Exception:

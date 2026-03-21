@@ -42,5 +42,6 @@ def get_storage_config() -> dict[str, Any]:
         "enabled": s3_enabled or use_local,
         "s3_enabled": s3_enabled,
         "local_enabled": use_local,
+        "local_disabled": local_disabled,
         "local_path": str(local_path.resolve()),
     }

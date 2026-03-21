@@ -1,8 +1,10 @@
+import logging
 import uuid
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -14,6 +16,7 @@ from app.services.vector_service import query_similar_assets
 from app.services.hybrid_retrieval_service import hybrid_search
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class AssetItem(BaseModel):
@@ -156,7 +159,7 @@ async def upload_memory_file(
     if not result:
         raise HTTPException(
             status_code=503,
-            detail="对象存储未配置，请设置 STORAGE_* 或保持 STORAGE_LOCAL_DISABLED=false 使用本地存储",
+            detail="存储不可用：请检查 STORAGE_* 凭证与网络，或关闭 STORAGE_LOCAL_DISABLED 并确保本地目录可写；详见服务端日志。",
         )
 
     row = FileObject(
@@ -169,8 +172,16 @@ async def upload_memory_file(
         content_type=file.content_type,
         size_bytes=result["size_bytes"],
     )
-    db.add(row)
-    db.commit()
+    try:
+        db.add(row)
+        db.commit()
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.exception("memory upload: failed to persist file_objects row")
+        raise HTTPException(
+            status_code=503,
+            detail="写入数据库失败，请确认已执行迁移（含 file_objects 表）且与当前数据库一致。",
+        ) from e
 
     file_url = build_public_url(result["bucket"], result["object_key"])
     return UploadResponse(

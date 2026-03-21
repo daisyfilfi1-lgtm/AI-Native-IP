@@ -46,6 +46,8 @@
 
 迁移已在部署时自动执行；若曾部署过早于“自动迁移”的版本，可触发一次重新部署以完成建表。
 
+**素材文件上传（`/api/v1/memory/upload`）** 依赖迁移 **`004_storage_and_vectors.sql`** 中的 `file_objects` 表。若上传返回 503 且提示数据库写入失败，请在数据库中确认该表存在，或重新执行 `python scripts/run_migrations.py`。S3 上传失败时，在未设置 `STORAGE_LOCAL_DISABLED=true` 的情况下会回退写入本地目录（`data/uploads` 或 `STORAGE_LOCAL_PATH`），后续录入流水线会从本地读取同一文件。
+
 ---
 
 ## 四、环境变量

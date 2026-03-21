@@ -31,7 +31,7 @@ def _get_s3_client() -> Any | None:
         kwargs["region_name"] = cfg["region"]
     if cfg.get("endpoint"):
         kwargs["endpoint_url"] = cfg["endpoint"]
-    # 阿里云 OSS 等 S3 兼容端点通常要求 SigV4；未显式配置时与 AWS 行为一致
+    # SigV4；addressing_style：OSS/AWS 需 virtual-hosted（见 storage_config._default_force_path_style）
     kwargs["config"] = Config(
         signature_version="s3v4",
         s3={"addressing_style": "path" if cfg.get("force_path_style") else "virtual"},

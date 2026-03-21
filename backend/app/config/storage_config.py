@@ -11,6 +11,24 @@ _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_LOCAL_PATH = _BACKEND_ROOT / "data" / "uploads"
 
 
+def _default_force_path_style(endpoint: str | None) -> bool:
+    """
+    未设置 STORAGE_FORCE_PATH_STYLE 时的默认寻址方式。
+    - 阿里云 OSS：必须使用 virtual-hosted（bucket.oss-xxx.aliyuncs.com），path-style 会报
+      SecondLevelDomainForbidden / Please use virtual hosted style to access。
+    - AWS S3：标准亦为 virtual-hosted。
+    - MinIO / 自建兼容端：常用 path-style（endpoint/bucket/key）。
+    """
+    if not endpoint:
+        return True
+    e = endpoint.lower()
+    if "aliyuncs.com" in e or "aliyuncs.com.cn" in e:
+        return False
+    if "amazonaws.com" in e:
+        return False
+    return True
+
+
 def get_storage_config() -> dict[str, Any]:
     endpoint = os.environ.get("STORAGE_ENDPOINT", "").strip() or None
     access_key = os.environ.get("STORAGE_ACCESS_KEY", "").strip() or None
@@ -18,11 +36,11 @@ def get_storage_config() -> dict[str, Any]:
     bucket = os.environ.get("STORAGE_BUCKET", "").strip() or None
     region = os.environ.get("STORAGE_REGION", "").strip() or None
     public_base_url = os.environ.get("STORAGE_PUBLIC_BASE_URL", "").strip() or None
-    force_path_style = os.environ.get("STORAGE_FORCE_PATH_STYLE", "true").lower() in (
-        "true",
-        "1",
-        "yes",
-    )
+    raw_style = os.environ.get("STORAGE_FORCE_PATH_STYLE", "").strip()
+    if raw_style:
+        force_path_style = raw_style.lower() in ("true", "1", "yes")
+    else:
+        force_path_style = _default_force_path_style(endpoint)
     s3_enabled = bool(access_key and secret_key and bucket)
 
     # 本地存储：S3 未配置时默认启用，用于本地开发

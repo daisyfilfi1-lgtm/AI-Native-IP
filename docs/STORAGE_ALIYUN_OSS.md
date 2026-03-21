@@ -13,17 +13,18 @@
 | `STORAGE_SECRET_KEY` | RAM 子用户的 AccessKey Secret |
 | `STORAGE_BUCKET` | Bucket 名称（与 Endpoint 地域一致） |
 | `STORAGE_REGION` | 地域 ID。例：上海 `cn-shanghai`，杭州 `cn-hangzhou` |
-| `STORAGE_FORCE_PATH_STYLE` | 建议 **`true`** |
+| `STORAGE_FORCE_PATH_STYLE` | **留空即可**（代码对 `*.aliyuncs.com` 默认 **virtual-hosted**）。若误设为 `true` 会触发 `SecondLevelDomainForbidden` / *Please use virtual hosted style*。仅 MinIO 等自建端才需 `true`。 |
 | `STORAGE_PUBLIC_BASE_URL` | **可选**。自定义域名或 CDN 前缀，用于返回可直连的 file_url |
 
 请使用 **RAM 子用户**，权限最小化（仅目标 Bucket 读写）。
 
 ## 常见问题
 
-1. **403 SignatureDoesNotMatch**：核对 Secret、Endpoint 是否含 https、REGION 是否与 Bucket 一致。
-2. **403 AccessDenied**：检查 RAM 策略是否覆盖该 Bucket。
-3. **file_url 浏览器 403**：Bucket 私有时直链不可访问属正常；可绑域名与 CDN，或后续做鉴权下载。
-4. **向量检索**：依赖 Embedding 配置；未配置时检索回退关键词。
+1. **SecondLevelDomainForbidden / virtual hosted style**：OSS 要求 **virtual-hosted** 访问（`bucket.oss-xxx.aliyuncs.com`），不要使用 path-style。勿设置 `STORAGE_FORCE_PATH_STYLE=true`，或显式设为 `false`。
+2. **403 SignatureDoesNotMatch**：核对 Secret、Endpoint 是否含 https、REGION 是否与 Bucket 一致。
+3. **403 AccessDenied**：检查 RAM 策略是否覆盖该 Bucket。
+4. **file_url 浏览器 403**：Bucket 私有时直链不可访问属正常；可绑域名与 CDN，或后续做鉴权下载。
+5. **向量检索**：依赖 Embedding 配置；未配置时检索回退关键词。
 
 ## 部署后自测
 

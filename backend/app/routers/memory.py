@@ -133,9 +133,24 @@ def ingest_memory(
     db.add(task)
     db.commit()
 
-    # 使用 FastAPI BackgroundTasks
-    background_tasks.add_task(process_ingest_task, task_id)
-    return IngestResponse(ingest_task_id=task_id, status="QUEUED")
+    # 直接在当前线程执行（确保完成）
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(process_ingest_task, task_id)
+        try:
+            future.result(timeout=60)  # 60秒超时
+            task = get_ingest_task(db, task_id)
+            return IngestResponse(ingest_task_id=task_id, status=task.status if task else "FAILED")
+        except concurrent.futures.TimeoutError:
+            task.status = "TIMEOUT"
+            task.error_message = "处理超时"
+            db.commit()
+            return IngestResponse(ingest_task_id=task_id, status="TIMEOUT")
+        except Exception as e:
+            task.status = "FAILED"
+            task.error_message = str(e)
+            db.commit()
+            return IngestResponse(ingest_task_id=task_id, status="FAILED")
 
 
 @router.post("/memory/upload", response_model=UploadResponse)

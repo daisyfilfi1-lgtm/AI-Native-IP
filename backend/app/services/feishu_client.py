@@ -100,7 +100,8 @@ def list_nodes(
 
 def get_doc_raw_content(token: str, obj_type: str, obj_token: str) -> str:
     """
-    获取文档纯文本。支持旧版 doc；新版 docx 需文档权限，失败时返回占位。
+    获取文档纯文本。支持旧版 doc；新版 docx 需文档权限。
+    失败时抛出 RuntimeError（含 code/msg），便于调用方记录到 errors 列表。
     """
     if obj_type == "doc":
         r = requests.get(
@@ -111,7 +112,10 @@ def get_doc_raw_content(token: str, obj_type: str, obj_token: str) -> str:
         r.raise_for_status()
         data = r.json()
         if data.get("code") != 0:
-            return f"[飞书文档 {obj_token} 获取失败: code={data.get('code')} msg={data.get('msg')}]"
+            raise RuntimeError(
+                f"飞书文档 {obj_token} 获取失败: code={data.get('code')} msg={data.get('msg')} "
+                "(请确认应用已加入知识库成员，并开通云文档只读权限)"
+            )
         return (data.get("data", {}).get("content") or "").strip()
     if obj_type == "docx":
         r = requests.get(
@@ -122,6 +126,9 @@ def get_doc_raw_content(token: str, obj_type: str, obj_token: str) -> str:
         r.raise_for_status()
         data = r.json()
         if data.get("code") != 0:
-            return f"[飞书新版文档 {obj_token} 获取失败: code={data.get('code')} msg={data.get('msg')}]"
+            raise RuntimeError(
+                f"飞书新版文档 {obj_token} 获取失败: code={data.get('code')} msg={data.get('msg')} "
+                "(请确认应用已加入知识库成员，并开通「查看、评论和下载云空间中所有文件」权限)"
+            )
         return (data.get("data", {}).get("content") or "").strip()
-    return f"[暂不支持的类型: {obj_type}]"
+    raise RuntimeError(f"暂不支持的文档类型: {obj_type}")

@@ -404,9 +404,11 @@ def sync_feishu_space_to_ip_incremental(
         "synced": synced,
         "skipped": skipped,
         "deleted": deleted,
+        "failed": len(errors),
         "total_remote": len(remote_tokens),
         "total_local": len(local_doc_tokens),
-        "errors": errors[:20]
+        "errors": errors[:20],
+        "used_space_id": space_id,
     }
 
 

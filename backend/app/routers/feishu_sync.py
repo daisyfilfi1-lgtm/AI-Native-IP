@@ -124,9 +124,13 @@ def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> An
         app_secret=app_secret,
         incremental=request.incremental,
     )
-    if result.get("errors") and result.get("synced") == 0 and result.get("failed") == 0:
-        raise HTTPException(status_code=400, detail=result["errors"][0] if result["errors"] else "同步失败")
-    return {**result, "used_space_id": chosen_space_id}
+    used_space_id = result.get("used_space_id") or chosen_space_id
+    if result.get("errors") and result.get("synced", 0) == 0:
+        raise HTTPException(
+            status_code=502,
+            detail=result["errors"][0] if result["errors"] else "飞书同步失败，请检查凭证、权限及知识库成员配置",
+        )
+    return {**result, "used_space_id": used_space_id}
 
 
 @router.get("/integrations/feishu/binding", response_model=FeishuBindingResponse | None)

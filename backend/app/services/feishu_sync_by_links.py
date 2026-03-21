@@ -9,8 +9,25 @@ from sqlalchemy.orm import Session
 from app.db.models import IPAsset
 from app.services.feishu_client import (
     get_tenant_access_token,
-    get_doc_raw_content,
 )
+
+BASE = "https://open.feishu.cn/open-apis"
+
+
+def get_doc_raw_content_simple(token: str, obj_token: str) -> str:
+    """获取文档纯文本"""
+    import requests
+    r = requests.get(
+        f"{BASE}/docx/v1/documents/{obj_token}/raw_content",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if data.get("code") != 0:
+        return f"[获取失败: code={data.get('code')} msg={data.get('msg')}]"
+    return (data.get("data", {}).get("content") or "").strip()
+
 
 # 用户提供的文档链接列表
 DOC_LINKS = [
@@ -57,10 +74,15 @@ def sync_by_links(db: Session, ip_id: str, app_id: str, app_secret: str):
         seen_tokens.add(token_value)
         
         try:
-            content = get_doc_raw_content(token, "docx", token_value)
+            content = get_doc_raw_content_simple(token, token_value)
             
-            if not content or "获取失败" in content:
-                errors.append(f"{title}: 获取内容失败")
+            # 检查是否获取失败
+            if "获取失败" in content:
+                errors.append(f"{title}: {content}")
+                continue
+            
+            if not content:
+                errors.append(f"{title}: 无内容")
                 continue
             
             # 生成 asset_id
@@ -97,7 +119,7 @@ def sync_by_links(db: Session, ip_id: str, app_id: str, app_secret: str):
             db.commit()
             
         except Exception as e:
-            errors.append(f"{title}: {str(e)[:50]}")
+            errors.append(f"{title}: {str(e)[:80]}")
     
     return {
         "synced": synced,

@@ -14,7 +14,7 @@ from app.services.feishu_config_service import (
     get_feishu_credentials,
     set_feishu_config,
 )
-from app.services.feishu_sync_service_incremental import sync_feishu_space_to_ip_incremental
+from app.services.feishu_sync_simple import simple_sync as sync_feishu_space_to_ip_incremental
 from app.services.integration_binding_service import get_binding, upsert_binding
 from app.services.memory_config_service import get_ip
 
@@ -122,13 +122,12 @@ def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> An
         space_id=chosen_space_id,
         app_id=app_id,
         app_secret=app_secret,
-        incremental=False,
     )
-    used_space_id = result.get("used_space_id") or chosen_space_id
+    used_space_id = chosen_space_id
     if result.get("errors") and result.get("synced", 0) == 0:
         raise HTTPException(
             status_code=502,
-            detail=result["errors"][0] if result["errors"] else "飞书同步失败，请检查凭证、权限及知识库成员配置",
+            detail=result["errors"][0] if result["errors"] else "飞书同步失败",
         )
     return {**result, "used_space_id": used_space_id}
 

@@ -120,7 +120,7 @@ def ingest_memory(
 
     task_id = f"ingest_{uuid.uuid4().hex[:16]}"
     
-    # 直接创建已完成的任务（简化版，跳过处理）
+    # 先创建任务
     task = IngestTask(
         task_id=task_id,
         ip_id=payload.ip_id,
@@ -129,12 +129,27 @@ def ingest_memory(
         local_file_id=payload.local_file_id,
         title=payload.title,
         notes=payload.notes,
-        status="COMPLETED",
+        status="QUEUED",
         created_asset_ids=[],
-        error_message=None,
     )
     db.add(task)
     db.commit()
+
+    # 简单同步处理（不依赖后台任务）
+    try:
+        from app.services.ingest_service import _run_ingest_pipeline, get_ingest_task
+        task = get_ingest_task(db, task_id)
+        if task:
+            _run_ingest_pipeline(db, task)
+            db.refresh(task)
+            return IngestResponse(ingest_task_id=task_id, status=task.status)
+    except Exception as e:
+        task = get_ingest_task(db, task_id)
+        if task:
+            task.status = "FAILED"
+            task.error_message = str(e)
+            db.commit()
+        return IngestResponse(ingest_task_id=task_id, status="FAILED")
     
     return IngestResponse(ingest_task_id=task_id, status="COMPLETED")
 

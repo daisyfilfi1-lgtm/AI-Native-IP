@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.db.models import IPAsset
 from app.services.feishu_client import (
     get_tenant_access_token,
-    list_nodes,
     get_doc_raw_content,
+    _collect_doc_nodes,
 )
 
 
@@ -19,8 +19,8 @@ def simple_sync(db: Session, ip_id: str, space_id: str, app_id: str, app_secret:
     
     token = get_tenant_access_token(app_id, app_secret)
     
-    # 获取所有文档
-    nodes = list(list_nodes(token, space_id))
+    # 递归获取所有文档（包括子文件夹）
+    nodes = _collect_doc_nodes(token, space_id)
     
     synced = 0
     errors = []

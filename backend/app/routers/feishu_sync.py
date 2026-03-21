@@ -154,7 +154,7 @@ def test_fetch_docs(db: Session = Depends(get_db)) -> Any:
         token = data.get("tenant_access_token")
         
         # 递归获取所有节点
-        from app.services.feishu_client import list_nodes, _collect_doc_nodes
+        from app.services.feishu_client import _collect_doc_nodes
         space_id = "7619512097886260165"
         
         # 使用递归获取

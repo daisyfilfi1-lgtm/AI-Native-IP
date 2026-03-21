@@ -134,14 +134,13 @@ def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> An
 
 @router.get("/integrations/feishu/test-fetch")
 def test_fetch_docs(db: Session = Depends(get_db)) -> Any:
-    """测试：获取所有文档包括子节点"""
+    """测试：获取所有文档"""
     app_id, app_secret = get_feishu_credentials(db)
     if not app_id or not app_secret:
         return {"error": "no credentials"}
     
     try:
         import requests as req
-        # 获取token
         r = req.post(
             "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
             json={"app_id": app_id, "app_secret": app_secret},
@@ -149,26 +148,35 @@ def test_fetch_docs(db: Session = Depends(get_db)) -> Any:
         )
         data = r.json()
         if data.get("code") != 0:
-            return {"error": "token failed", "detail": data}
+            return {"error": "token failed"}
         
         token = data.get("tenant_access_token")
         
-        # 获取第一个文档的完整内容
-        obj_token = "FDYQd3g9AoQMGnxtRBicBxibnKe"
+        # 使用简单递归获取
+        def get_all_docs(space_id: str, parent_token: str = None):
+            docs = []
+            r2 = req.get(
+                f"https://open.feishu.cn/open-apis/wiki/v2/spaces/{space_id}/nodes",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"parent_node_token": parent_token} if parent_token else {},
+                timeout=15
+            )
+            items = r2.json().get("data", {}).get("items", [])
+            
+            for node in items:
+                obj_type = node.get("obj_type", "").lower()
+                if obj_type in ("doc", "docx"):
+                    docs.append({"title": node.get("title"), "obj_type": obj_type, "token": node.get("obj_token")})
+                if node.get("has_child"):
+                    docs.extend(get_all_docs(space_id, node.get("node_token")))
+            return docs
         
-        # 获取docx内容
-        r2 = req.get(
-            f"https://open.feishu.cn/open-apis/docx/v1/documents/{obj_token}/raw_content",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=15
-        )
-        
-        content_data = r2.json()
+        space_id = "7619512097886260165"
+        all_docs = get_all_docs(space_id)
         
         return {
-            "doc_token": obj_token,
-            "content": content_data.get("data", {}).get("content", "")[:2000],
-            "has_content": bool(content_data.get("data", {}).get("content")),
+            "doc_count": len(all_docs),
+            "docs": all_docs[:20]
         }
     except Exception as e:
         return {"error": str(e)}

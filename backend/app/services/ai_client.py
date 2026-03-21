@@ -1,16 +1,41 @@
 """
 AI 服务统一调用：Embedding、LLM Chat、Whisper 转写。
-支持 OpenAI 及兼容 API（如 Azure、国内代理）。
+支持 OpenAI 及兼容 API（如 Azure、国内代理），以及本地模型作为 fallback。
 """
 import os
 import tempfile
 import urllib.request
 from typing import Any
 import json
+import logging
 
 from openai import OpenAI
 
 from app.config.ai_config import get_ai_config
+
+logger = logging.getLogger(__name__)
+
+# 本地embedding模型（当API不可用时的fallback）
+_LOCAL_EMBEDDING_MODEL = None
+_LOCAL_EMBEDDING_DIM = 768  # 默认维度
+
+def _get_local_embedding_model():
+    """获取本地embedding模型（延迟加载）"""
+    global _LOCAL_EMBEDDING_MODEL
+    if _LOCAL_EMBEDDING_MODEL is None:
+        try:
+            from sentence_transformers import SentenceTransformer
+            # 使用多语言模型支持中文
+            model_name = os.environ.get("LOCAL_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
+            _LOCAL_EMBEDDING_MODEL = SentenceTransformer(model_name)
+            logger.info(f"Loaded local embedding model: {model_name}")
+        except ImportError:
+            logger.warning("sentence-transformers not installed, local embedding unavailable")
+            _LOCAL_EMBEDDING_MODEL = False  # 标记为不可用
+        except Exception as e:
+            logger.warning(f"Failed to load local embedding model: {e}")
+            _LOCAL_EMBEDDING_MODEL = False
+    return _LOCAL_EMBEDDING_MODEL if _LOCAL_EMBEDDING_MODEL else None
 
 # 未配置 IP 术语表时使用的「内容语义」参考维与候选值（与 docs/TAG_TAXONOMY_REFERENCE.md 对齐）
 REFERENCE_SEMANTIC_TAG_WHITELIST: dict[str, frozenset[str]] = {
@@ -99,18 +124,29 @@ def _get_transcription_client() -> OpenAI | None:
 
 def embed(texts: list[str]) -> list[list[float]] | None:
     """
-    文本向量化。未配置时返回 None。
+    文本向量化。优先使用API，失败时尝试本地模型。
     """
+    # 先尝试API
     client = _get_text_client()
-    if not client:
-        return None
-    cfg = get_ai_config()
-    model = cfg.get("embedding_model") or "text-embedding-3-small"
-    try:
-        resp = client.embeddings.create(input=texts, model=model)
-        return [item.embedding for item in sorted(resp.data, key=lambda x: x.index)]
-    except Exception:
-        return None
+    if client:
+        cfg = get_ai_config()
+        model = cfg.get("embedding_model") or "text-embedding-3-small"
+        try:
+            resp = client.embeddings.create(input=texts, model=model)
+            return [item.embedding for item in sorted(resp.data, key=lambda x: x.index)]
+        except Exception as e:
+            logger.warning(f"API embedding failed: {e}, trying local model")
+    
+    # Fallback: 尝试本地模型
+    local_model = _get_local_embedding_model()
+    if local_model:
+        try:
+            embeddings = local_model.encode(texts, convert_to_numpy=True)
+            return [emb.tolist() for emb in embeddings]
+        except Exception as e:
+            logger.error(f"Local embedding also failed: {e}")
+    
+    return None
 
 
 def embed_texts_batched(

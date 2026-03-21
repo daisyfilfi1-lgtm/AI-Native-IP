@@ -17,8 +17,14 @@ DATABASE_URL = os.getenv(
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# 避免云数据库网络抖动时连接阶段无限挂起，进而拖垮网关/轮询
+_connect_args = {}
+if "postgresql" in DATABASE_URL:
+    _connect_args["connect_timeout"] = 10
+
 engine = create_engine(
     DATABASE_URL,
+    connect_args=_connect_args,
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,

@@ -179,12 +179,15 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                 "chunk_index": i,
                 "total_chunks": len(chunks),
             }
-            try:
-                tags = suggest_tags_for_content(content, categories)
-                if tags:
-                    meta["auto_labels"] = tags
-            except Exception:
-                pass
+            # TODO: Re-enable with proper async handling, timeouts, and resource
+            # limits. Disabled because LLM API calls can hang indefinitely and
+            # cause the service to be OOM-killed before the task completes.
+            # try:
+            #     tags = suggest_tags_for_content(content, categories)
+            #     if tags:
+            #         meta["auto_labels"] = tags
+            # except Exception:
+            #     pass
             db.add(
                 IPAsset(
                     asset_id=asset_id,
@@ -198,15 +201,18 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                     status="active",
                 )
             )
-            try:
-                upsert_asset_vector(
-                    db,
-                    asset_id=asset_id,
-                    ip_id=task.ip_id,
-                    content=content,
-                )
-            except Exception:
-                pass
+            # TODO: Re-enable with proper async handling, timeouts, and resource
+            # limits. Disabled because vector embedding operations are slow and
+            # memory-intensive, causing OOM kills during background task execution.
+            # try:
+            #     upsert_asset_vector(
+            #         db,
+            #         asset_id=asset_id,
+            #         ip_id=task.ip_id,
+            #         content=content,
+            #     )
+            # except Exception:
+            #     pass
             created_ids.append(asset_id)
 
         task.status = "COMPLETED"

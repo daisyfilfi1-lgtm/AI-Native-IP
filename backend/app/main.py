@@ -22,14 +22,24 @@ from app.routers import (
     vector
 )
 
+# 未设置 CORS_ORIGINS 时：允许 Netlify 正式/预览域名与本地开发（比单纯 * 更明确，便于排查）
+_DEFAULT_NETLIFY_LOCAL_REGEX = (
+    r"^https://[^/]+\.netlify\.app$"  # 含 deploy-preview-xxx--repo.netlify.app
+    r"|^http://localhost(?::\d+)?$"
+)
+
+
 def _cors_middleware_kwargs() -> dict:
     """
     浏览器禁止同时使用 Access-Control-Allow-Origin: * 与 Allow-Credentials: true。
     原配置 allow_origins=['*'] + allow_credentials=True 会导致跨域（含直连 Railway）被拦截。
+
+    说明：若网关返回 502（应用未响应），响应不经过本中间件，浏览器会报「无 CORS 头」——
+    根因多为上游故障/超时，需先修部署稳定性；成功响应时本配置才会带上 CORS。
     """
-    raw = os.getenv("CORS_ORIGINS", "*").strip()
     cred = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() in ("1", "true", "yes")
     regex = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
+    raw_env = os.getenv("CORS_ORIGINS")
     if regex:
         return {
             "allow_origin_regex": regex,
@@ -37,6 +47,14 @@ def _cors_middleware_kwargs() -> dict:
             "allow_methods": ["*"],
             "allow_headers": ["*"],
         }
+    if raw_env is None:
+        return {
+            "allow_origin_regex": _DEFAULT_NETLIFY_LOCAL_REGEX,
+            "allow_credentials": False,
+            "allow_methods": ["*"],
+            "allow_headers": ["*"],
+        }
+    raw = raw_env.strip()
     if not raw or raw == "*":
         return {
             "allow_origins": ["*"],

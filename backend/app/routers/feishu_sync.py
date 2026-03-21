@@ -122,7 +122,7 @@ def sync_feishu(request: SyncFeishuRequest, db: Session = Depends(get_db)) -> An
         space_id=chosen_space_id,
         app_id=app_id,
         app_secret=app_secret,
-        incremental=request.incremental,
+        incremental=False,
     )
     used_space_id = result.get("used_space_id") or chosen_space_id
     if result.get("errors") and result.get("synced", 0) == 0:

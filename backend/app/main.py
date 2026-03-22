@@ -12,6 +12,7 @@ from app.routers import (
     baidu_pan_sync, 
     config_memory, 
     content,
+    creator,
     feishu_sync, 
     graph, 
     ip, 
@@ -145,6 +146,7 @@ def create_app() -> FastAPI:
     app.include_router(multimodal.router, prefix="/api/v1", tags=["multimodal"])
     app.include_router(content.router, prefix="/api/v1", tags=["content"])
     app.include_router(style.router, prefix="/api/v1", tags=["style"])
+    app.include_router(creator.router, prefix="/api", tags=["creator"])
 
     return app
 

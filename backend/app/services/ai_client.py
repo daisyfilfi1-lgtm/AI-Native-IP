@@ -1,4 +1,4 @@
-﻿"""
+"""
 AI 服务统一调用：Embedding、LLM Chat、Whisper 转写。
 支持 OpenAI 及兼容 API、Cohere Embedding、本地模型作为 fallback。
 """
@@ -157,8 +157,15 @@ _LOCAL_EMBEDDING_MODEL = None
 _LOCAL_EMBEDDING_DIM = 768  # 默认维度
 
 def _get_local_embedding_model():
-    """获取本地embedding模型（延迟加载）- 尝试多种方式"""
+    """获取本地embedding模型（延迟加载）- 尝试多种方式。
+
+    默认 **不** 加载：sentence-transformers + PyTorch 可达数百 MB～数 GB，Railway 等小内存实例在
+    API 临时失败时若误走本地 fallback 会整进程 OOM（日志仅显示 Killed）。
+    仅当显式设置 LOCAL_EMBEDDING_ENABLED=true 时才尝试加载。
+    """
     global _LOCAL_EMBEDDING_MODEL
+    if os.environ.get("LOCAL_EMBEDDING_ENABLED", "").lower() not in ("1", "true", "yes"):
+        return None
     if _LOCAL_EMBEDDING_MODEL is None:
         # 方式1: sentence-transformers (需要torch)
         try:
@@ -298,10 +305,11 @@ def _get_transcription_client() -> OpenAI | None:
 def embed(texts: list[str]) -> list[list[float]] | None:
     """
     文本向量化。优先级：
-    1. 腾讯云混元Embedding (如果有配置)
-    2. OpenAI API (如果有有效key)
-    3. 本地模型 (可选)
-    4. 无向量 - 纯文本存储
+    1. Cohere（若配置 COHERE_API_KEY）
+    2. 腾讯云混元（若配置 TENCENT_CLOUD_*）
+    3. OpenAI 兼容 API（OPENAI_API_KEY）
+    4. 本地模型（仅当 LOCAL_EMBEDDING_ENABLED=true，避免 Railway 误加载 PyTorch OOM）
+    5. 无向量 - 纯文本存储
     """
     # 1. 优先尝试 Cohere
     cohere_result = _embed_cohere(texts)

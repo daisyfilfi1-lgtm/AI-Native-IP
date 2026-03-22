@@ -70,15 +70,44 @@ def _ingest_commit_every() -> int:
         return 25
 
 
+def _ingest_max_url_bytes() -> int:
+    raw = os.environ.get("INGEST_MAX_URL_BYTES", "").strip()
+    if not raw:
+        return 20 * 1024 * 1024
+    try:
+        return max(64 * 1024, int(raw))
+    except ValueError:
+        return 20 * 1024 * 1024
+
+
+def _ingest_skip_embedding() -> bool:
+    """整段录入不写向量（仅文本入库），用于极低内存或排查 OOM。"""
+    return os.environ.get("INGEST_SKIP_EMBEDDING", "").lower() in ("1", "true", "yes")
+
+
 def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
     return db.query(IngestTask).filter(IngestTask.task_id == task_id).first()
 
 
 def _fetch_text_from_url(url: str) -> str:
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
-    resp.encoding = resp.encoding or "utf-8"
-    return resp.text
+    """流式拉取 URL，避免超大响应一次性占满内存。"""
+    max_bytes = _ingest_max_url_bytes()
+    resp = requests.get(url, timeout=60, stream=True)
+    try:
+        resp.raise_for_status()
+        buf = bytearray()
+        for chunk in resp.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            buf.extend(chunk)
+            if len(buf) > max_bytes:
+                raise ValueError(
+                    f"URL 正文超过 INGEST_MAX_URL_BYTES 上限（{max_bytes} bytes）"
+                )
+        enc = (resp.encoding or "utf-8").strip() or "utf-8"
+        return bytes(buf).decode(enc, errors="replace")
+    finally:
+        resp.close()
 
 
 def _transcribe_from_file_object(db: Session, task: IngestTask) -> str:
@@ -183,37 +212,40 @@ def _load_text_from_file_object(db: Session, task: IngestTask) -> str:
     data = download_bytes(row.bucket, row.object_key)
     if not data:
         return ""
-    name = (row.file_name or row.object_key or "").lower()
-    if name.endswith(".docx"):
-        text = _text_from_docx(data)
-        if text.strip():
-            return text
-        return ""
-    if name.endswith(".doc"):
-        # 旧版 Word 二进制 .doc，需 LibreOffice/专用解析；此处不冒充文本
-        return ""
-    if name.endswith(".pdf"):
-        text = _text_from_pdf(data)
-        if text.strip():
-            return text
-        return ""
-    # 扩展名缺失或误命名时，用魔数补救（如 object_key 为 upload.bin）
-    if _looks_like_pdf(data):
-        text = _text_from_pdf(data)
-        if text.strip():
-            return text
-    if _looks_like_docx_ooxml(data):
-        text = _text_from_docx(data)
-        if text.strip():
-            return text
-    # .txt / .md / .csv 等：按 UTF-8 读取
     try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError:
-        try:
-            return data.decode("utf-8", errors="ignore")
-        except Exception:
+        name = (row.file_name or row.object_key or "").lower()
+        if name.endswith(".docx"):
+            text = _text_from_docx(data)
+            if text.strip():
+                return text
             return ""
+        if name.endswith(".doc"):
+            # 旧版 Word 二进制 .doc，需 LibreOffice/专用解析；此处不冒充文本
+            return ""
+        if name.endswith(".pdf"):
+            text = _text_from_pdf(data)
+            if text.strip():
+                return text
+            return ""
+        # 扩展名缺失或误命名时，用魔数补救（如 object_key 为 upload.bin）
+        if _looks_like_pdf(data):
+            text = _text_from_pdf(data)
+            if text.strip():
+                return text
+        if _looks_like_docx_ooxml(data):
+            text = _text_from_docx(data)
+            if text.strip():
+                return text
+        # .txt / .md / .csv 等：按 UTF-8 读取
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                return data.decode("utf-8", errors="ignore")
+            except Exception:
+                return ""
+    finally:
+        del data
 
 
 def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
@@ -298,12 +330,16 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
         max_chunks = _ingest_max_chunks()
         embed_bs = _ingest_embed_batch_size()
         commit_every = _ingest_commit_every()
+        skip_emb = _ingest_skip_embedding()
 
         ingest_notes: List[str] = []
         rt = raw_text or ""
         if len(rt) > max_chars:
             ingest_notes.append(f"正文已截断至前 {max_chars} 字符，避免录入任务 OOM")
             rt = rt[:max_chars]
+
+        if skip_emb:
+            ingest_notes.append("INGEST_SKIP_EMBEDDING=1：已跳过向量写入，仅保存文本与素材记录")
 
         chunks = _chunk_text(rt)
         if not chunks:
@@ -330,10 +366,13 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
         total = len(chunks)
         for batch_start in range(0, total, embed_bs):
             batch_chunks = chunks[batch_start : batch_start + embed_bs]
-            batch_embeddings = embed_texts_batched(
-                batch_chunks,
-                batch_size=min(embed_bs, len(batch_chunks)),
-            )
+            if skip_emb:
+                batch_embeddings: List[list[float] | None] = [None] * len(batch_chunks)
+            else:
+                batch_embeddings = embed_texts_batched(
+                    batch_chunks,
+                    batch_size=min(embed_bs, len(batch_chunks)),
+                )
             for j, content in enumerate(batch_chunks):
                 i = batch_start + j
                 asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
@@ -377,6 +416,8 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                 if (i + 1) % commit_every == 0:
                     db.commit()
                     db.refresh(task)
+
+            del batch_embeddings
 
         task.status = "COMPLETED"
         task.created_asset_ids = created_ids

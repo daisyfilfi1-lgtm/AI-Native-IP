@@ -2,6 +2,7 @@
 向量存储与检索（Phase 1）。
 当前使用 PostgreSQL JSONB 存储向量，后续可平滑迁移到 pgvector 或外部向量库。
 """
+import os
 from math import sqrt
 from typing import Any
 
@@ -23,6 +24,8 @@ def upsert_asset_vector(
     """
     写入 asset_vectors。若已在外部批量算好向量，传入 precomputed_embedding 可避免重复调用 Embedding API。
     """
+    if os.environ.get("INGEST_SKIP_EMBEDDING", "").lower() in ("1", "true", "yes"):
+        return False
     text = (content or "").strip()
     if precomputed_embedding is not None:
         vec = precomputed_embedding

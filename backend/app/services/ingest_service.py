@@ -325,9 +325,6 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
         except Exception:
             shared_tags = None
 
-        # 批量 Embedding，减少 HTTP 次数与峰值内存
-        embeddings = embed_texts_batched(chunks, batch_size=embed_bs)
-
         created_ids: List[str] = []
         total = len(chunks)
         for i, content in enumerate(chunks):
@@ -356,8 +353,12 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                     status="active",
                 )
             )
+            chunk_embeddings = None
+            emb = None
             try:
-                emb = embeddings[i] if i < len(embeddings) else None
+                # 逐块生成 embedding，用后即弃，避免全量预计算导致 OOM
+                chunk_embeddings = embed_texts_batched([content], batch_size=embed_bs)
+                emb = chunk_embeddings[0] if chunk_embeddings else None
                 upsert_asset_vector(
                     db,
                     asset_id=asset_id,
@@ -367,6 +368,10 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
                 )
             except Exception:
                 pass
+            finally:
+                # 显式释放，确保 GC 及时回收
+                chunk_embeddings = None
+                emb = None
             created_ids.append(asset_id)
 
             if (i + 1) % commit_every == 0:

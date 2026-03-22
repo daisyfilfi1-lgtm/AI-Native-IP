@@ -325,53 +325,58 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
         except Exception:
             shared_tags = None
 
-        # 批量 Embedding，减少 HTTP 次数与峰值内存
-        embeddings = embed_texts_batched(chunks, batch_size=embed_bs)
-
+        # 按批向量化并落库：每批仅保留当前批的向量，避免「全部分块 embedding 列表」撑爆内存（OOM / Killed）
         created_ids: List[str] = []
         total = len(chunks)
-        for i, content in enumerate(chunks):
-            asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
-            title = (task.title or "未命名") + (f" (片段{i+1})" if total > 1 else "")
-            meta: dict = {
-                "source_task_id": task.task_id,
-                "source_type": task.source_type,
-                "chunk_index": i,
-                "total_chunks": total,
-            }
-            if ingest_notes and i == 0:
-                meta["ingest_warnings"] = ingest_notes
-            if shared_tags:
-                meta["auto_labels"] = shared_tags
-            db.add(
-                IPAsset(
-                    asset_id=asset_id,
-                    ip_id=task.ip_id,
-                    asset_type="story",
-                    title=title,
-                    content=content,
-                    content_vector_ref=None,
-                    asset_meta=meta,
-                    relations=[],
-                    status="active",
-                )
+        for batch_start in range(0, total, embed_bs):
+            batch_chunks = chunks[batch_start : batch_start + embed_bs]
+            batch_embeddings = embed_texts_batched(
+                batch_chunks,
+                batch_size=min(embed_bs, len(batch_chunks)),
             )
-            try:
-                emb = embeddings[i] if i < len(embeddings) else None
-                upsert_asset_vector(
-                    db,
-                    asset_id=asset_id,
-                    ip_id=task.ip_id,
-                    content=content,
-                    precomputed_embedding=emb,
+            for j, content in enumerate(batch_chunks):
+                i = batch_start + j
+                asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
+                title = (task.title or "未命名") + (f" (片段{i+1})" if total > 1 else "")
+                meta: dict = {
+                    "source_task_id": task.task_id,
+                    "source_type": task.source_type,
+                    "chunk_index": i,
+                    "total_chunks": total,
+                }
+                if ingest_notes and i == 0:
+                    meta["ingest_warnings"] = ingest_notes
+                if shared_tags:
+                    meta["auto_labels"] = shared_tags
+                db.add(
+                    IPAsset(
+                        asset_id=asset_id,
+                        ip_id=task.ip_id,
+                        asset_type="story",
+                        title=title,
+                        content=content,
+                        content_vector_ref=None,
+                        asset_meta=meta,
+                        relations=[],
+                        status="active",
+                    )
                 )
-            except Exception:
-                pass
-            created_ids.append(asset_id)
+                try:
+                    emb = batch_embeddings[j] if j < len(batch_embeddings) else None
+                    upsert_asset_vector(
+                        db,
+                        asset_id=asset_id,
+                        ip_id=task.ip_id,
+                        content=content,
+                        precomputed_embedding=emb,
+                    )
+                except Exception:
+                    pass
+                created_ids.append(asset_id)
 
-            if (i + 1) % commit_every == 0:
-                db.commit()
-                db.refresh(task)
+                if (i + 1) % commit_every == 0:
+                    db.commit()
+                    db.refresh(task)
 
         task.status = "COMPLETED"
         task.created_asset_ids = created_ids

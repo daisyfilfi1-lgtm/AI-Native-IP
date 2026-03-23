@@ -5,9 +5,10 @@ from app.env_loader import load_backend_env
 
 load_backend_env()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.routers import (
     baidu_pan_sync, 
@@ -28,21 +29,38 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # CORS 配置 - 允许所有来源（解决跨域问题）
-CORS_ORIGINS = [
-    "https://ai-native-ip.netlify.app",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-
-# 从环境变量读取额外的 CORS 配置
+# 从环境变量读取，如果不设置则允许所有（开发环境方便调试）
 cors_env = os.getenv("CORS_ORIGINS", "")
 if cors_env:
-    for origin in cors_env.split(","):
-        origin = origin.strip()
-        if origin and origin not in CORS_ORIGINS:
-            CORS_ORIGINS.append(origin)
+    CORS_ORIGINS = [o.strip() for o in cors_env.split(",") if o.strip()]
+else:
+    # 默认允许的来源
+    CORS_ORIGINS = [
+        "https://ai-native-ip.netlify.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
-logger.info(f"CORS allowed origins: {CORS_ORIGINS}")
+# 如果设置 CORS_ALLOW_ALL=true，则允许所有来源（仅用于紧急调试）
+if os.getenv("CORS_ALLOW_ALL", "").lower() in ("1", "true", "yes"):
+    CORS_ORIGINS = ["*"]
+    logger.info("CORS: 允许所有来源 (CORS_ALLOW_ALL=true)")
+else:
+    logger.info(f"CORS allowed origins: {CORS_ORIGINS}")
+
+
+# 请求日志中间件
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        logger.info(f"[Request] {request.method} {request.url.path} from {request.headers.get('origin', 'unknown')}")
+        try:
+            response = await call_next(request)
+            logger.info(f"[Response] {request.method} {request.url.path} - {response.status_code}")
+            return response
+        except Exception as e:
+            logger.exception(f"[Error] {request.method} {request.url.path} - {e}")
+            raise
+
 
 ROOT_HTML = """
 <!DOCTYPE html>
@@ -88,7 +106,10 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
-    # CORS 中间件 - 放在最前面
+    # 请求日志中间件（最先添加，记录所有请求）
+    app.add_middleware(RequestLoggingMiddleware)
+
+    # CORS 中间件
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,

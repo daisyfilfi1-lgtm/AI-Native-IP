@@ -9,6 +9,7 @@
 - 更频繁的数据库提交
 """
 import gc
+import concurrent.futures
 import io
 import logging
 import os
@@ -125,6 +126,27 @@ class TimeLimitChecker:
     def remaining(self) -> float:
         """返回剩余时间"""
         return max(0, self.seconds - (time.time() - self.start_time))
+
+
+def _call_with_timeout(
+    fn,
+    *args,
+    timeout_seconds: float,
+    **kwargs,
+):
+    """
+    在独立线程执行潜在阻塞调用（LLM/Embedding），避免长时间卡死任务状态。
+    """
+    if timeout_seconds <= 0:
+        raise TimeoutException("Task exceeded timeout while waiting external service")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(fn, *args, **kwargs)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except concurrent.futures.TimeoutError as e:
+            raise TimeoutException(
+                f"External service call timed out after {timeout_seconds:.1f}s"
+            ) from e
 
 
 def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
@@ -453,7 +475,15 @@ def _run_ingest_pipeline(
         try:
             tag_snippet = (rt or "")[:4000]
             if tag_snippet.strip():
-                shared_tags = suggest_tags_for_content(tag_snippet, categories)
+                tag_timeout = min(15.0, checker.remaining()) if checker else 15.0
+                shared_tags = _call_with_timeout(
+                    suggest_tags_for_content,
+                    tag_snippet,
+                    categories,
+                    timeout_seconds=tag_timeout,
+                )
+        except TimeoutException:
+            raise
         except Exception:
             shared_tags = None
 
@@ -467,9 +497,12 @@ def _run_ingest_pipeline(
             if skip_emb:
                 batch_embeddings: List[list[float] | None] = [None] * len(batch_chunks)
             else:
-                batch_embeddings = embed_texts_batched(
+                embed_timeout = min(20.0, checker.remaining()) if checker else 20.0
+                batch_embeddings = _call_with_timeout(
+                    embed_texts_batched,
                     batch_chunks,
                     batch_size=min(embed_bs, len(batch_chunks)),
+                    timeout_seconds=embed_timeout,
                 )
             for j, content in enumerate(batch_chunks):
                 i = batch_start + j

@@ -4,7 +4,7 @@
 已配置 LLM 时，会自动调用打标（asset_meta.auto_labels）。
 
 防OOM优化：
-- 任务超时控制（防止Railway Kill进程）
+- 任务超时控制（软超时，定期检查）
 - 内存使用限制
 - 更频繁的数据库提交
 """
@@ -12,13 +12,10 @@ import gc
 import io
 import logging
 import os
-import signal
 import tempfile
-import threading
 import time
 import uuid
 import zipfile
-from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional
 
@@ -112,38 +109,22 @@ class TimeoutException(Exception):
     pass
 
 
-@contextmanager
-def time_limit(seconds: int):
-    """
-    限制执行时间的上下文管理器
-    兼容 Windows 和 Linux 环境
-    """
-    def signal_handler(signum, frame):
-        raise TimeoutException(f"Task exceeded {seconds} seconds")
+class TimeLimitChecker:
+    """软超时检查器（线程安全，适用于 Railway 后台任务）"""
+    def __init__(self, seconds: int):
+        self.seconds = seconds
+        self.start_time = time.time()
+        self.timed_out = False
     
-    # Linux/Mac 使用 signal
-    if hasattr(signal, 'SIGALRM'):
-        signal.signal(signal.SIGALRM, signal_handler)
-        signal.alarm(seconds)
-        try:
-            yield
-        finally:
-            signal.alarm(0)
-    else:
-        # Windows 环境：使用 threading 超时
-        timeout_occurred = threading.Event()
-        
-        def timeout_handler():
-            timeout_occurred.set()
-        
-        timer = threading.Timer(seconds, timeout_handler)
-        timer.start()
-        try:
-            yield
-            if timeout_occurred.is_set():
-                raise TimeoutException(f"Task exceeded {seconds} seconds")
-        finally:
-            timer.cancel()
+    def check(self):
+        """检查是否已超时，如果超时则抛出异常"""
+        if time.time() - self.start_time > self.seconds:
+            self.timed_out = True
+            raise TimeoutException(f"Task exceeded {self.seconds} seconds")
+    
+    def remaining(self) -> float:
+        """返回剩余时间"""
+        return max(0, self.seconds - (time.time() - self.start_time))
 
 
 def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
@@ -492,10 +473,121 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
     db.commit()
 
 
+def _run_ingest_pipeline_with_timeout(db: Session, task: IngestTask, timeout_seconds: int) -> None:
+    """执行录入流水线，带软超时检查"""
+    checker = TimeLimitChecker(timeout_seconds)
+    
+    logger = logging.getLogger(__name__)
+    logger.info("Starting pipeline with timeout %ss for task: %s", timeout_seconds, task.task_id)
+    
+    task.status = "PROCESSING"
+    db.commit()
+    
+    try:
+        # 检查超时
+        checker.check()
+        
+        # 1. 提取文本
+        st = task.source_type or "text"
+        if st in ("video", "audio") and task.local_file_id:
+            raw_text = _transcribe_from_file_object(db, task)
+        elif st in ("text", "document", "file") and task.local_file_id:
+            raw_text = _load_text_from_file_object(db, task)
+        else:
+            raw_text = ""
+        
+        # 检查超时
+        checker.check()
+        
+        # 2. 处理参数
+        max_chars = _ingest_max_text_chars()
+        max_chunks = _ingest_max_chunks()
+        embed_bs = _ingest_embed_batch_size()
+        commit_every = _ingest_commit_every()
+        skip_emb = _ingest_skip_embedding()
+        
+        rt = raw_text or ""
+        if len(rt) > max_chars:
+            rt = rt[:max_chars]
+        
+        chunks = _chunk_text(rt)
+        if not chunks:
+            chunks = [rt or "(无内容)"]
+        
+        if len(chunks) > max_chunks:
+            chunks = chunks[:max_chunks]
+        
+        # 检查超时
+        checker.check()
+        
+        # 3. 批量写入（带超时检查）
+        created_ids: List[str] = []
+        total = len(chunks)
+        
+        for batch_start in range(0, total, embed_bs):
+            # 每批检查超时
+            checker.check()
+            
+            batch_chunks = chunks[batch_start : batch_start + embed_bs]
+            if skip_emb:
+                batch_embeddings: List[list[float] | None] = [None] * len(batch_chunks)
+            else:
+                batch_embeddings = embed_texts_batched(
+                    batch_chunks,
+                    batch_size=min(embed_bs, len(batch_chunks)),
+                )
+            
+            for j, content in enumerate(batch_chunks):
+                i = batch_start + j
+                asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
+                title = (task.title or "未命名") + (f" (片段{i+1})" if total > 1 else "")
+                
+                db.add(
+                    IPAsset(
+                        asset_id=asset_id,
+                        ip_id=task.ip_id,
+                        asset_type="story",
+                        title=title,
+                        content=content,
+                        content_vector_ref=None,
+                        asset_meta={"source_task_id": task.task_id, "chunk_index": i},
+                        relations=[],
+                        status="active",
+                    )
+                )
+                
+                try:
+                    emb = batch_embeddings[j] if j < len(batch_embeddings) else None
+                    upsert_asset_vector(db, asset_id, task.ip_id, content, emb)
+                except Exception:
+                    pass
+                
+                created_ids.append(asset_id)
+                
+                if (i + 1) % commit_every == 0:
+                    db.commit()
+            
+            del batch_embeddings
+        
+        task.status = "COMPLETED"
+        task.created_asset_ids = created_ids
+        task.error_message = None
+        
+    except TimeoutException:
+        raise  # 重新抛出超时异常
+    except Exception as e:
+        logger.exception("ingest pipeline failed: %s", task.task_id)
+        task.status = "FAILED"
+        task.error_message = str(e)
+        task.created_asset_ids = []
+    
+    db.commit()
+
+
 def process_ingest_task(task_id: str) -> None:
     """
     后台执行录入任务（在独立会话中）。
-    添加超时保护和内存优化，防止 Railway OOM Kill。
+    使用软超时机制（定期检查），适用于 Railway 后台任务线程。
     """
     logger = logging.getLogger(__name__)
     start_time = time.time()
@@ -517,10 +609,9 @@ def process_ingest_task(task_id: str) -> None:
         task.status = "PROCESSING"
         db.commit()
         
-        # 使用超时保护执行流水线
+        # 执行流水线（使用软超时检查）
         try:
-            with time_limit(timeout_seconds):
-                _run_ingest_pipeline(db, task)
+            _run_ingest_pipeline_with_timeout(db, task, timeout_seconds)
             
             duration = time.time() - start_time
             logger.info(f"[Ingest] Completed task {task_id} in {duration:.1f}s")
@@ -529,7 +620,6 @@ def process_ingest_task(task_id: str) -> None:
             duration = time.time() - start_time
             logger.error(f"[Ingest] Task {task_id} TIMEOUT after {duration:.1f}s")
             
-            # 刷新task对象（可能被之前的会话修改）
             db.refresh(task)
             task.status = "FAILED"
             task.error_message = (
@@ -545,12 +635,11 @@ def process_ingest_task(task_id: str) -> None:
         try:
             db.refresh(task)
             task.status = "FAILED"
-            task.error_message = str(e)[:500]  # 截断错误信息
+            task.error_message = str(e)[:500]
             db.commit()
         except Exception as inner_e:
             logger.error(f"[Ingest] Failed to update error status: {inner_e}")
     finally:
         db.close()
-        # 强制垃圾回收，释放内存
         gc.collect()
         logger.info(f"[Ingest] Task {task_id} cleanup complete")

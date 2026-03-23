@@ -6,19 +6,19 @@ import os
 from pathlib import Path
 from typing import Any
 
-# 本地存储默认目录（backend/data/uploads）
+# 本地存储默认目录
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_LOCAL_PATH = _BACKEND_ROOT / "data" / "uploads"
 
+# Railway 环境使用 /tmp（可写）
+def _get_default_local_path() -> Path:
+    if os.getenv("RAILWAY_ENVIRONMENT"):
+        # Railway 使用 /tmp，因为其他目录可能只读
+        return Path("/tmp/ip_uploads")
+    return _DEFAULT_LOCAL_PATH
+
 
 def _default_force_path_style(endpoint: str | None) -> bool:
-    """
-    未设置 STORAGE_FORCE_PATH_STYLE 时的默认寻址方式。
-    - 阿里云 OSS：必须使用 virtual-hosted（bucket.oss-xxx.aliyuncs.com），path-style 会报
-      SecondLevelDomainForbidden / Please use virtual hosted style to access。
-    - AWS S3：标准亦为 virtual-hosted。
-    - MinIO / 自建兼容端：常用 path-style（endpoint/bucket/key）。
-    """
     if not endpoint:
         return True
     e = endpoint.lower()
@@ -36,16 +36,22 @@ def get_storage_config() -> dict[str, Any]:
     bucket = os.environ.get("STORAGE_BUCKET", "").strip() or None
     region = os.environ.get("STORAGE_REGION", "").strip() or None
     public_base_url = os.environ.get("STORAGE_PUBLIC_BASE_URL", "").strip() or None
+    
     raw_style = os.environ.get("STORAGE_FORCE_PATH_STYLE", "").strip()
     if raw_style:
         force_path_style = raw_style.lower() in ("true", "1", "yes")
     else:
         force_path_style = _default_force_path_style(endpoint)
+    
     s3_enabled = bool(access_key and secret_key and bucket)
-
-    # 本地存储：S3 未配置时默认启用，用于本地开发
+    
+    # 本地存储路径
     local_path_env = os.environ.get("STORAGE_LOCAL_PATH", "").strip()
-    local_path = Path(local_path_env) if local_path_env else _DEFAULT_LOCAL_PATH
+    if local_path_env:
+        local_path = Path(local_path_env)
+    else:
+        local_path = _get_default_local_path()
+    
     local_disabled = os.environ.get("STORAGE_LOCAL_DISABLED", "").lower() in ("true", "1", "yes")
     use_local = not s3_enabled and not local_disabled
 
@@ -61,5 +67,5 @@ def get_storage_config() -> dict[str, Any]:
         "s3_enabled": s3_enabled,
         "local_enabled": use_local,
         "local_disabled": local_disabled,
-        "local_path": str(local_path.resolve()),
+        "local_path": str(local_path),
     }

@@ -10,6 +10,8 @@ S3 上传失败时（凭证/网络/权限）在未设置 STORAGE_LOCAL_DISABLED 
 import base64
 import hashlib
 import logging
+import os
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,16 @@ logger = logging.getLogger(__name__)
 
 def _content_md5_b64(data: bytes) -> str:
     return base64.b64encode(hashlib.md5(data).digest()).decode("ascii")
+
+
+def _is_safe_path(base: Path, target: Path) -> bool:
+    """防止路径遍历攻击：确保 target 在 base 目录下"""
+    try:
+        # 使用 relative_to 检查是否在 base 下
+        target.resolve().relative_to(base.resolve())
+        return True
+    except (ValueError, OSError, RuntimeError):
+        return False
 
 
 def _s3_client_config(cfg: dict[str, Any]) -> Config:
@@ -77,30 +89,38 @@ def _upload_bytes_local(
         return None
     if not force and not cfg.get("local_enabled"):
         return None
-    base = Path(cfg["local_path"])
-    ext = Path(file_name or "").suffix
-    file_id = f"file_{uuid.uuid4().hex[:20]}"
-    object_key = f"ip/{ip_id}/{file_id}{ext}"
-    full_path = base / object_key
+    
     try:
+        base = Path(cfg["local_path"])
+        ext = Path(file_name or "").suffix
+        file_id = f"file_{uuid.uuid4().hex[:20]}"
+        object_key = f"ip/{ip_id}/{file_id}{ext}"
+        full_path = base / object_key
+        
+        # 安全检查
+        if not _is_safe_path(base, full_path):
+            logger.warning("Path traversal blocked: %s", object_key)
+            return None
+        
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(data)
+        
+        return {
+            "file_id": file_id,
+            "bucket": LOCAL_BUCKET,
+            "object_key": object_key,
+            "size_bytes": len(data),
+            "content_type": content_type,
+        }
     except OSError as e:
-        logger.warning("Local disk upload failed: %s", e)
+        logger.error("Local upload failed: %s", e)
         return None
-    return {
-        "file_id": file_id,
-        "bucket": LOCAL_BUCKET,
-        "object_key": object_key,
-        "size_bytes": len(data),
-        "content_type": content_type,
-    }
 
 
 def upload_bytes(ip_id: str, file_name: str, content_type: str | None, data: bytes) -> dict[str, Any] | None:
     """上传 bytes 数据（向后兼容）"""
     cfg = get_storage_config()
-    # 优先 S3（含客户端创建、put_object 任一步失败则回退本地，避免未捕获异常导致 500）
+    
     if cfg.get("s3_enabled"):
         try:
             client = _get_s3_client()
@@ -122,14 +142,14 @@ def upload_bytes(ip_id: str, file_name: str, content_type: str | None, data: byt
                     "size_bytes": len(data),
                     "content_type": content_type,
                 }
-            logger.warning("S3 已配置但 client 或 bucket 不可用，尝试本地回退")
         except Exception as e:
-            logger.warning("S3 上传失败，尝试本地回退: %s", e)
+            logger.warning("S3 upload failed, fallback to local: %s", e)
+        
         fallback = _upload_bytes_local(ip_id, file_name, content_type, data, force=True)
         if fallback:
             return fallback
         return None
-    # 未配置 S3：仅本地主路径
+    
     return _upload_bytes_local(ip_id, file_name, content_type, data, force=False)
 
 
@@ -141,33 +161,34 @@ def upload_stream(
     size_bytes: int
 ) -> dict[str, Any] | None:
     """
-    流式上传文件（真正的低内存上传）
-    从文件路径读取并上传，避免加载整个文件到内存
+    流式上传文件（低内存上传）
     """
     cfg = get_storage_config()
     ext = Path(file_name or "").suffix
     file_id = f"file_{uuid.uuid4().hex[:20]}"
     object_key = f"ip/{ip_id}/{file_id}{ext}"
     
-    # 计算文件 MD5
-    md5_hash = hashlib.md5()
-    with open(file_path, 'rb') as f:
-        for chunk in iter(lambda: f.read(64 * 1024), b''):
-            md5_hash.update(chunk)
-    content_md5 = base64.b64encode(md5_hash.digest()).decode('ascii')
+    # 计算 MD5
+    try:
+        md5_hash = hashlib.md5()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(64 * 1024), b''):
+                md5_hash.update(chunk)
+        content_md5 = base64.b64encode(md5_hash.digest()).decode('ascii')
+    except Exception as e:
+        logger.error("MD5 calculation failed: %s", e)
+        return None
     
+    # 优先 S3
     if cfg.get("s3_enabled"):
         try:
             client = _get_s3_client()
             bucket = cfg.get("bucket")
             if client and bucket:
-                extra_args: dict[str, Any] = {
-                    "ContentMD5": content_md5,
-                }
+                extra_args: dict[str, Any] = {"ContentMD5": content_md5}
                 if content_type:
                     extra_args["ContentType"] = content_type
                 
-                # 使用 UploadFileObj 流式上传
                 with open(file_path, 'rb') as f:
                     client.put_object(Bucket=bucket, Key=object_key, Body=f, **extra_args)
                 
@@ -179,9 +200,9 @@ def upload_stream(
                     "content_type": content_type,
                 }
         except Exception as e:
-            logger.warning("S3 流式上传失败，尝试本地回退: %s", e)
+            logger.warning("S3 stream upload failed: %s", e)
     
-    # 本地存储（流式复制）
+    # 本地存储回退
     return _upload_file_local(ip_id, file_name, content_type, file_path, size_bytes, object_key, file_id)
 
 
@@ -197,20 +218,22 @@ def _upload_file_local(
     """本地文件流式复制"""
     cfg = get_storage_config()
     if cfg.get("local_disabled"):
-        return None
-    
-    base = Path(cfg["local_path"])
-    full_path = base / object_key
-    
-    # 安全检查：防止路径遍历
-    if not _is_safe_path(base, full_path):
-        logger.warning("Path traversal attempt blocked: %s", object_key)
+        logger.warning("Local storage disabled")
         return None
     
     try:
+        base = Path(cfg["local_path"])
+        full_path = base / object_key
+        
+        # 安全检查
+        if not _is_safe_path(base, full_path):
+            logger.warning("Path traversal blocked: %s", object_key)
+            return None
+        
+        # 创建目录（使用 exist_ok 避免竞争条件）
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        # 流式复制文件
-        import shutil
+        
+        # 复制文件
         shutil.copy2(source_path, full_path)
         
         return {
@@ -221,35 +244,30 @@ def _upload_file_local(
             "content_type": content_type,
         }
     except OSError as e:
-        logger.warning("Local file upload failed: %s", e)
+        logger.error("Local file upload failed: %s", e)
         return None
-
-
-def _is_safe_path(base: Path, target: Path) -> bool:
-    """防止路径遍历攻击：确保 target 在 base 目录下"""
-    try:
-        return target.resolve().is_relative_to(base.resolve())
-    except (ValueError, OSError):
-        return False
 
 
 def download_bytes(bucket: str, object_key: str) -> bytes | None:
     cfg = get_storage_config()
-    # 本地盘上的对象（含「配置了 S3 但回退写入」的情况，此时 local_enabled 可能为 False）
+    
     if bucket == LOCAL_BUCKET:
         if cfg.get("local_disabled"):
             return None
-        base = Path(cfg["local_path"])
-        full_path = base / object_key
-        
-        # 安全检查：防止路径遍历攻击
-        if not _is_safe_path(base, full_path):
-            logger.warning("Path traversal attempt blocked: %s", object_key)
-            return None
-        
-        if full_path.exists() and full_path.is_file():
-            return full_path.read_bytes()
+        try:
+            base = Path(cfg["local_path"])
+            full_path = base / object_key
+            
+            if not _is_safe_path(base, full_path):
+                logger.warning("Path traversal blocked in download: %s", object_key)
+                return None
+            
+            if full_path.exists() and full_path.is_file():
+                return full_path.read_bytes()
+        except OSError as e:
+            logger.error("Download failed: %s", e)
         return None
+    
     client = _get_s3_client()
     if not client:
         return None
@@ -257,7 +275,8 @@ def download_bytes(bucket: str, object_key: str) -> bytes | None:
         resp = client.get_object(Bucket=bucket, Key=object_key)
         body = resp.get("Body")
         return body.read() if body else None
-    except Exception:
+    except Exception as e:
+        logger.error("S3 download failed: %s", e)
         return None
 
 

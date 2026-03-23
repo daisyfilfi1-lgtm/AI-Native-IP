@@ -1,12 +1,14 @@
 import os
+import logging
 
 from app.env_loader import load_backend_env
 
 load_backend_env()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.routers import (
     baidu_pan_sync, 
@@ -23,11 +25,60 @@ from app.routers import (
     vector
 )
 
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # 未设置 CORS_ORIGINS 时：允许 Netlify 正式/预览域名与本地开发（比单纯 * 更明确，便于排查）
 _DEFAULT_NETLIFY_LOCAL_REGEX = (
     r"^https://[^/]+\.netlify\.app$"  # 含 deploy-preview-xxx--repo.netlify.app
     r"|^http://localhost(?::\d+)?$"
 )
+
+
+# 内存监控中间件
+class MemoryMonitorMiddleware(BaseHTTPMiddleware):
+    """监控请求处理过程中的内存使用情况"""
+    
+    async def dispatch(self, request: Request, call_next):
+        import psutil
+        import os
+        
+        process = psutil.Process(os.getpid())
+        mem_before = process.memory_info().rss / 1024 / 1024  # MB
+        
+        # 检查是否是文件上传请求
+        is_upload = '/upload' in request.url.path and request.method == 'POST'
+        content_length = request.headers.get('content-length')
+        
+        if is_upload:
+            logger.info(f"[MemoryMonitor] 上传请求开始: {request.url.path}, "
+                       f"content-length={content_length}, memory={mem_before:.1f}MB")
+        
+        try:
+            response = await call_next(request)
+            
+            if is_upload:
+                mem_after = process.memory_info().rss / 1024 / 1024
+                delta = mem_after - mem_before
+                logger.info(f"[MemoryMonitor] 上传请求完成: {request.url.path}, "
+                           f"memory={mem_after:.1f}MB, delta={delta:+.1f}MB")
+                
+                # 如果内存增长超过 100MB，发出警告
+                if delta > 100:
+                    logger.warning(f"[MemoryMonitor] ⚠️ 内存增长异常: {delta:.1f}MB")
+            
+            return response
+            
+        except Exception as e:
+            if is_upload:
+                mem_after = process.memory_info().rss / 1024 / 1024
+                logger.error(f"[MemoryMonitor] 上传请求异常: {request.url.path}, "
+                            f"error={e}, memory={mem_after:.1f}MB")
+            raise
 
 
 def _cors_middleware_kwargs() -> dict:
@@ -118,10 +169,14 @@ ROOT_HTML = """
 
 
 def create_app() -> FastAPI:
+    # 全局请求体大小限制：10MB（Railway 免费版内存通常较小）
     app = FastAPI(
         title="AI-Native IP Factory - Phase 1",
         version="0.1.0",
     )
+    
+    # 添加内存监控中间件（必须在 CORS 之前）
+    app.add_middleware(MemoryMonitorMiddleware)
 
     app.add_middleware(CORSMiddleware, **_cors_middleware_kwargs())
 

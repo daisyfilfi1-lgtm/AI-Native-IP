@@ -2,7 +2,7 @@ import logging
 import uuid
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -17,6 +17,10 @@ from app.services.hybrid_retrieval_service import hybrid_search
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# 文件上传配置
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_MEMORY_SIZE = 16 * 1024 * 1024  # 16MB
 
 
 class AssetItem(BaseModel):
@@ -141,6 +145,7 @@ def ingest_memory(
 
 @router.post("/memory/upload", response_model=UploadResponse)
 async def upload_memory_file(
+    request: Request,
     ip_id: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -148,16 +153,79 @@ async def upload_memory_file(
     """
     上传文件到对象存储，返回 local_file_id（file_id）。
     可配合 /memory/ingest 的 local_file_id 使用。
+    
+    ⚠️ 内存优化：限制单文件 10MB，使用流式读取。
     """
+    import psutil
+    import os
+    
+    # 获取上传前的内存状态
+    process = psutil.Process(os.getpid())
+    mem_before = process.memory_info().rss / 1024 / 1024  # MB
+    
+    logger.info(f"[upload_memory_file] 开始上传: ip_id={ip_id}, filename={file.filename}, content_type={file.content_type}, memory_before={mem_before:.1f}MB")
+    
     if not get_ip(db, ip_id):
+        logger.warning(f"[upload_memory_file] IP不存在: {ip_id}")
         raise HTTPException(status_code=404, detail=f"IP 不存在: {ip_id}")
-    data = await file.read()
+    
+    # 检查请求体大小（通过 header）
+    content_length = request.headers.get('content-length')
+    if content_length:
+        try:
+            size = int(content_length)
+            if size > MAX_UPLOAD_SIZE:
+                logger.warning(f"[upload_memory_file] 请求体过大: {size / 1024 / 1024:.1f}MB > {MAX_UPLOAD_SIZE / 1024 / 1024}MB")
+                raise HTTPException(status_code=413, detail=f"请求体过大，最大支持 {MAX_UPLOAD_SIZE / 1024 / 1024}MB")
+        except ValueError:
+            pass
+    
+    # 流式读取文件内容，避免一次性加载大文件
+    chunks = []
+    total_size = 0
+    chunk_size = 64 * 1024  # 64KB chunks
+    
+    try:
+        while True:
+            chunk = await file.read(chunk_size)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            if total_size > MAX_UPLOAD_SIZE:
+                logger.warning(f"[upload_memory_file] 文件超过大小限制: {total_size / 1024 / 1024:.1f}MB")
+                raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE / 1024 / 1024}MB")
+            chunks.append(chunk)
+            
+            # 监控内存增长
+            if len(chunks) % 10 == 0:  # 每 640KB 检查一次
+                current_mem = process.memory_info().rss / 1024 / 1024
+                if current_mem - mem_before > 100:  # 内存增长超过 100MB
+                    logger.warning(f"[upload_memory_file] 内存增长异常: +{current_mem - mem_before:.1f}MB")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"[upload_memory_file] 读取文件时出错: {e}")
+        raise HTTPException(status_code=500, detail="读取文件失败")
+    
+    # 合并 chunks
+    data = b''.join(chunks)
+    
     if not data:
+        logger.warning(f"[upload_memory_file] 上传文件为空")
         raise HTTPException(status_code=400, detail="上传文件为空")
-    if len(data) > 100 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="文件过大，当前上限 100MB")
+    
+    logger.info(f"[upload_memory_file] 文件读取完成: size={len(data)} bytes, chunks={len(chunks)}")
 
     result = upload_bytes(ip_id, file.filename or "upload.bin", file.content_type, data)
+    
+    # 立即释放内存
+    del data
+    del chunks
+    
+    mem_after_upload = process.memory_info().rss / 1024 / 1024
+    logger.info(f"[upload_memory_file] 上传完成: file_id={result.get('file_id') if result else 'None'}, memory_after={mem_after_upload:.1f}MB, delta={mem_after_upload - mem_before:+.1f}MB")
+    
     if not result:
         raise HTTPException(
             status_code=503,
@@ -177,6 +245,7 @@ async def upload_memory_file(
     try:
         db.add(row)
         db.commit()
+        logger.info(f"[upload_memory_file] 数据库写入成功: file_id={row.file_id}")
     except SQLAlchemyError as e:
         db.rollback()
         logger.exception("memory upload: failed to persist file_objects row")
@@ -186,6 +255,10 @@ async def upload_memory_file(
         ) from e
 
     file_url = build_public_url(result["bucket"], result["object_key"])
+    
+    mem_final = process.memory_info().rss / 1024 / 1024
+    logger.info(f"[upload_memory_file] 请求完成: total_memory_delta={mem_final - mem_before:+.1f}MB")
+    
     return UploadResponse(
         file_id=row.file_id,
         file_url=file_url,

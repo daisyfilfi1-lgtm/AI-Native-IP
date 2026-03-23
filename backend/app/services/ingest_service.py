@@ -150,17 +150,21 @@ def _call_with_timeout(
 ):
     """
     在独立线程执行潜在阻塞调用（LLM/Embedding），避免长时间卡死任务状态。
+    超时后必须 shutdown(wait=False)，否则 ThreadPoolExecutor 退出时会无限等子线程。
     """
     if timeout_seconds <= 0:
         raise TimeoutException("Task exceeded timeout while waiting external service")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(fn, *args, **kwargs)
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = pool.submit(fn, *args, **kwargs)
         try:
             return future.result(timeout=timeout_seconds)
         except concurrent.futures.TimeoutError as e:
             raise TimeoutException(
                 f"External service call timed out after {timeout_seconds:.1f}s"
             ) from e
+    finally:
+        pool.shutdown(wait=False)
 
 
 def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
@@ -682,7 +686,10 @@ def process_ingest_task(task_id: str) -> None:
             db.close()
             gc.collect()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+    # 注意：不能用「with ThreadPoolExecutor」默认退出逻辑——shutdown(wait=True) 会在子线程
+    # 仍阻塞（如 S3 读挂起）时无限等待，拖死 Starlette 后台线程池。
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
         fut = pool.submit(runner)
         try:
             fut.result(timeout=hard_cap)
@@ -694,5 +701,7 @@ def process_ingest_task(task_id: str) -> None:
                 task_id,
                 f"处理超时（硬超时 {int(hard_cap)}s）。请稍后重试或联系管理员检查对象存储与 AI 服务。",
             )
+    finally:
+        pool.shutdown(wait=False)
 
     logger.info("[Ingest] Task %s cleanup complete", task_id)

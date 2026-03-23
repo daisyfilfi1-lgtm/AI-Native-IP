@@ -260,11 +260,7 @@ async def upload_memory_file(
 
     file_url = build_public_url(result["bucket"], result["object_key"])
     
-    if has_psutil:
-        mem_final = process.memory_info().rss / 1024 / 1024
-        logger.info(f"[upload_memory_file] 请求完成: total_memory_delta={mem_final - mem_before:+.1f}MB")
-    else:
-        logger.info(f"[upload_memory_file] 请求完成")
+    logger.info(f"[upload_memory_file] 请求完成: file_id={row.file_id}")
     
     return UploadResponse(
         file_id=row.file_id,

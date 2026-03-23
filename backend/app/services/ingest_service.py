@@ -600,6 +600,7 @@ def _run_ingest_pipeline(
                 "ingest task %s no longer PROCESSING before COMPLETED (skip overwrite)",
                 task.task_id,
             )
+            db.rollback()
             return
         task.status = "COMPLETED"
         task.created_asset_ids = created_ids

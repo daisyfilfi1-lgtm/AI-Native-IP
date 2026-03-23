@@ -43,7 +43,18 @@ def main() -> int:
     print("task_id", task_id)
 
     for i in range(120):
-        d = requests.get(f"{API}/memory/ingest/{task_id}", timeout=25).json()
+        for attempt in range(3):
+            try:
+                r = requests.get(f"{API}/memory/ingest/{task_id}", timeout=60)
+                r.raise_for_status()
+                d = r.json()
+                break
+            except (requests.exceptions.RequestException, ValueError) as ex:
+                print(f"{i:3d} poll retry {attempt} {ex!r}")
+                time.sleep(3)
+        else:
+            print("poll failed after retries")
+            return 3
         st = d.get("status")
         err = (d.get("error") or "")[:120]
         n = len(d.get("created_assets") or [])

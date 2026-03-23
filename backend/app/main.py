@@ -5,10 +5,9 @@ from app.env_loader import load_backend_env
 
 load_backend_env()
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.routers import (
     baidu_pan_sync, 
@@ -25,139 +24,25 @@ from app.routers import (
     vector
 )
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 未设置 CORS_ORIGINS 时：允许 Netlify 正式/预览域名与本地开发（比单纯 * 更明确，便于排查）
-# 支持所有 netlify.app 子域名，包括 deploy-preview 预览链接
-_DEFAULT_NETLIFY_LOCAL_REGEX = (
-    r"^https://.*\.netlify\.app$"  # 匹配所有 netlify.app 子域名
-    r"|^http://localhost(?::\d+)?$"  # 本地开发
-)
-
-# 默认允许的来源列表（备选方案，如果正则不起作用）
-_DEFAULT_CORS_ORIGINS = [
+# CORS 配置 - 允许所有来源（解决跨域问题）
+CORS_ORIGINS = [
     "https://ai-native-ip.netlify.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
 
+# 从环境变量读取额外的 CORS 配置
+cors_env = os.getenv("CORS_ORIGINS", "")
+if cors_env:
+    for origin in cors_env.split(","):
+        origin = origin.strip()
+        if origin and origin not in CORS_ORIGINS:
+            CORS_ORIGINS.append(origin)
 
-# 内存监控中间件
-class MemoryMonitorMiddleware(BaseHTTPMiddleware):
-    """监控请求处理过程中的内存使用情况（psutil 可选）"""
-    
-    async def dispatch(self, request: Request, call_next):
-        import os
-        
-        # 尝试导入 psutil，如果不存在则跳过内存监控
-        try:
-            import psutil
-            process = psutil.Process(os.getpid())
-            mem_before = process.memory_info().rss / 1024 / 1024  # MB
-            has_psutil = True
-        except ImportError:
-            has_psutil = False
-            mem_before = 0
-        
-        # 检查是否是文件上传请求
-        is_upload = '/upload' in request.url.path and request.method == 'POST'
-        content_length = request.headers.get('content-length')
-        
-        if is_upload:
-            if has_psutil:
-                logger.info(f"[MemoryMonitor] 上传请求开始: {request.url.path}, "
-                           f"content-length={content_length}, memory={mem_before:.1f}MB")
-            else:
-                logger.info(f"[MemoryMonitor] 上传请求开始: {request.url.path}, "
-                           f"content-length={content_length} (psutil 未安装，无法监控内存)")
-        
-        try:
-            response = await call_next(request)
-            
-            if is_upload and has_psutil:
-                mem_after = process.memory_info().rss / 1024 / 1024
-                delta = mem_after - mem_before
-                logger.info(f"[MemoryMonitor] 上传请求完成: {request.url.path}, "
-                           f"memory={mem_after:.1f}MB, delta={delta:+.1f}MB")
-                
-                # 如果内存增长超过 100MB，发出警告
-                if delta > 100:
-                    logger.warning(f"[MemoryMonitor] ⚠️ 内存增长异常: {delta:.1f}MB")
-            
-            return response
-            
-        except Exception as e:
-            if is_upload and has_psutil:
-                mem_after = process.memory_info().rss / 1024 / 1024
-                logger.error(f"[MemoryMonitor] 上传请求异常: {request.url.path}, "
-                            f"error={e}, memory={mem_after:.1f}MB")
-            raise
-
-
-def _cors_middleware_kwargs() -> dict:
-    """
-    浏览器禁止同时使用 Access-Control-Allow-Origin: * 与 Allow-Credentials: true。
-    原配置 allow_origins=['*'] + allow_credentials=True 会导致跨域（含直连 Railway）被拦截。
-
-    说明：若网关返回 502（应用未响应），响应不经过本中间件，浏览器会报「无 CORS 头」——
-    根因多为上游故障/超时，需先修部署稳定性；成功响应时本配置才会带上 CORS。
-    """
-    cred = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() in ("1", "true", "yes")
-    regex = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
-    raw_env = os.getenv("CORS_ORIGINS")
-    
-    if regex:
-        logger.info(f"[CORS] 使用环境变量正则: {regex}")
-        return {
-            "allow_origin_regex": regex,
-            "allow_credentials": cred,
-            "allow_methods": ["*"],
-            "allow_headers": ["*"],
-        }
-    
-    if raw_env is None:
-        # 使用明确的 origins 列表而不是正则，更可靠
-        logger.info(f"[CORS] 使用默认 origins: {_DEFAULT_CORS_ORIGINS}")
-        return {
-            "allow_origins": _DEFAULT_CORS_ORIGINS,
-            "allow_credentials": False,
-            "allow_methods": ["*"],
-            "allow_headers": ["*"],
-        }
-    
-    raw = raw_env.strip()
-    if not raw or raw == "*":
-        logger.info("[CORS] 允许所有来源 (allow_origins=['*'])")
-        return {
-            "allow_origins": ["*"],
-            "allow_credentials": False,
-            "allow_methods": ["*"],
-            "allow_headers": ["*"],
-        }
-    
-    origins = [o.strip() for o in raw.split(",") if o.strip()]
-    if not origins:
-        logger.info("[CORS] 使用默认 origins（CORS_ORIGINS 为空）")
-        return {
-            "allow_origins": _DEFAULT_CORS_ORIGINS,
-            "allow_credentials": False,
-            "allow_methods": ["*"],
-            "allow_headers": ["*"],
-        }
-    
-    logger.info(f"[CORS] 使用配置的 origins: {origins}")
-    return {
-        "allow_origins": origins,
-        "allow_credentials": cred,
-        "allow_methods": ["*"],
-        "allow_headers": ["*"],
-    }
-
+logger.info(f"CORS allowed origins: {CORS_ORIGINS}")
 
 ROOT_HTML = """
 <!DOCTYPE html>
@@ -198,20 +83,22 @@ ROOT_HTML = """
 
 
 def create_app() -> FastAPI:
-    # 全局请求体大小限制：10MB（Railway 免费版内存通常较小）
     app = FastAPI(
         title="AI-Native IP Factory - Phase 1",
         version="0.1.0",
     )
-    
-    # 添加内存监控中间件（必须在 CORS 之前）
-    app.add_middleware(MemoryMonitorMiddleware)
 
-    app.add_middleware(CORSMiddleware, **_cors_middleware_kwargs())
+    # CORS 中间件 - 放在最前面
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ORIGINS,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/", response_class=HTMLResponse)
     def root():
-        """产品欢迎页：说明当前为后端服务，并引导到 API 文档。"""
         return ROOT_HTML
 
     @app.get("/health")
@@ -236,4 +123,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

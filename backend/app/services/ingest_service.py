@@ -2,14 +2,25 @@
 素材录入流水线：根据任务拉取内容、分块、写入 ip_assets，并更新 ingest_tasks。
 支持：text/document 的 URL 或本地上传（UTF-8 的 txt/md、docx 正文、PDF 可选字层文本）；video/audio 的 URL 或本地上传（Whisper 转写）。
 已配置 LLM 时，会自动调用打标（asset_meta.auto_labels）。
+
+防OOM优化：
+- 任务超时控制（防止Railway Kill进程）
+- 内存使用限制
+- 更频繁的数据库提交
 """
+import gc
 import io
+import logging
 import os
+import signal
 import tempfile
+import threading
+import time
 import uuid
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import requests
 from sqlalchemy.orm import Session
@@ -83,6 +94,56 @@ def _ingest_max_url_bytes() -> int:
 def _ingest_skip_embedding() -> bool:
     """整段录入不写向量（仅文本入库），用于极低内存或排查 OOM。"""
     return os.environ.get("INGEST_SKIP_EMBEDDING", "").lower() in ("1", "true", "yes")
+
+
+def _ingest_task_timeout() -> int:
+    """任务执行超时时间（秒），防止Railway Kill进程。"""
+    raw = os.environ.get("INGEST_TASK_TIMEOUT", "").strip()
+    if not raw:
+        return 25  # 默认25秒安全值
+    try:
+        return max(10, min(60, int(raw)))  # 限制10-60秒
+    except ValueError:
+        return 25
+
+
+class TimeoutException(Exception):
+    """任务超时异常"""
+    pass
+
+
+@contextmanager
+def time_limit(seconds: int):
+    """
+    限制执行时间的上下文管理器
+    兼容 Windows 和 Linux 环境
+    """
+    def signal_handler(signum, frame):
+        raise TimeoutException(f"Task exceeded {seconds} seconds")
+    
+    # Linux/Mac 使用 signal
+    if hasattr(signal, 'SIGALRM'):
+        signal.signal(signal.SIGALRM, signal_handler)
+        signal.alarm(seconds)
+        try:
+            yield
+        finally:
+            signal.alarm(0)
+    else:
+        # Windows 环境：使用 threading 超时
+        timeout_occurred = threading.Event()
+        
+        def timeout_handler():
+            timeout_occurred.set()
+        
+        timer = threading.Timer(seconds, timeout_handler)
+        timer.start()
+        try:
+            yield
+            if timeout_occurred.is_set():
+                raise TimeoutException(f"Task exceeded {seconds} seconds")
+        finally:
+            timer.cancel()
 
 
 def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
@@ -434,30 +495,62 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
 def process_ingest_task(task_id: str) -> None:
     """
     后台执行录入任务（在独立会话中）。
+    添加超时保护和内存优化，防止 Railway OOM Kill。
     """
-    import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"Starting ingest task: {task_id}")
+    start_time = time.time()
+    timeout_seconds = _ingest_task_timeout()
+    
+    logger.info(f"[Ingest] Starting task {task_id}, timeout={timeout_seconds}s")
     
     db = SessionLocal()
     try:
         task = get_ingest_task(db, task_id)
         if not task:
-            logger.warning(f"Task {task_id} not found")
+            logger.warning(f"[Ingest] Task {task_id} not found")
             return
         if task.status != "QUEUED":
-            logger.warning(f"Task {task_id} status is {task.status}, expected QUEUED")
+            logger.warning(f"[Ingest] Task {task_id} already processed: {task.status}")
             return
+        
+        # 更新状态为处理中
+        task.status = "PROCESSING"
+        db.commit()
+        
+        # 使用超时保护执行流水线
+        try:
+            with time_limit(timeout_seconds):
+                _run_ingest_pipeline(db, task)
             
-        logger.info(f"Running pipeline for task: {task_id}")
-        _run_ingest_pipeline(db, task)
-        logger.info(f"Completed task: {task_id}")
-    except Exception as e:
-        logger.error(f"Error processing task {task_id}: {e}")
-        task = get_ingest_task(db, task_id)
-        if task:
+            duration = time.time() - start_time
+            logger.info(f"[Ingest] Completed task {task_id} in {duration:.1f}s")
+            
+        except TimeoutException:
+            duration = time.time() - start_time
+            logger.error(f"[Ingest] Task {task_id} TIMEOUT after {duration:.1f}s")
+            
+            # 刷新task对象（可能被之前的会话修改）
+            db.refresh(task)
             task.status = "FAILED"
-            task.error_message = str(e)
+            task.error_message = (
+                f"处理超时({timeout_seconds}秒)。"
+                f"建议：1) 压缩文件 2) 拆分成小文件(<5MB) 3) 稍后重试"
+            )
             db.commit()
+            
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.exception(f"[Ingest] Task {task_id} FAILED after {duration:.1f}s: {e}")
+        
+        try:
+            db.refresh(task)
+            task.status = "FAILED"
+            task.error_message = str(e)[:500]  # 截断错误信息
+            db.commit()
+        except Exception as inner_e:
+            logger.error(f"[Ingest] Failed to update error status: {inner_e}")
     finally:
         db.close()
+        # 强制垃圾回收，释放内存
+        gc.collect()
+        logger.info(f"[Ingest] Task {task_id} cleanup complete")

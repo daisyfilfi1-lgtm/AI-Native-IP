@@ -131,10 +131,34 @@ def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
     return db.query(IngestTask).filter(IngestTask.task_id == task_id).first()
 
 
+def _normalize_http_url(url: str | None) -> str:
+    """
+    补全 http(s) 协议，避免 requests / urllib 抛出 MissingSchema。
+    用户常漏写协议（如只填域名或误填「ddd」）。
+    """
+    u = (url or "").strip()
+    if not u:
+        return ""
+    if u.startswith("//"):
+        return "https:" + u
+    low = u.lower()
+    if low.startswith("http://") or low.startswith("https://"):
+        return u
+    return "https://" + u
+
+
 def _fetch_text_from_url(url: str) -> str:
     """流式拉取 URL，避免超大响应一次性占满内存。"""
+    resolved = _normalize_http_url(url)
+    if not resolved:
+        raise ValueError("source_url 为空或仅空白，请填写以 http:// 或 https:// 开头的完整链接。")
     max_bytes = _ingest_max_url_bytes()
-    resp = requests.get(url, timeout=60, stream=True)
+    try:
+        resp = requests.get(resolved, timeout=60, stream=True)
+    except requests.RequestException as e:
+        raise ValueError(
+            f"无法拉取 URL（{resolved}）：{e}"
+        ) from e
     try:
         resp.raise_for_status()
         buf = bytearray()
@@ -348,7 +372,14 @@ def _run_ingest_pipeline(
                     "请检查 OPENAI_TRANSCRIPTION_API_KEY（或主 OPENAI_API_KEY）及文件格式。"
                 )
         elif st in ("video", "audio") and task.source_url:
-            raw_text = transcribe_from_url(task.source_url)
+            src = _normalize_http_url(task.source_url)
+            if not src:
+                raw_text = (
+                    f"[{st} 转写失败] source_url 无效或为空。\n\n"
+                    "请填写以 http:// 或 https:// 开头的完整音视频链接。"
+                )
+            else:
+                raw_text = transcribe_from_url(src)
             if not (raw_text or "").strip():
                 raw_text = (
                     f"[{st} 转写失败或未配置 Whisper] {task.title or task.source_url or '未命名'}\n\n"

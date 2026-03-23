@@ -154,62 +154,61 @@ async def upload_memory_file(
     上传文件到对象存储，返回 local_file_id（file_id）。
     可配合 /memory/ingest 的 local_file_id 使用。
     
-    ⚠️ 内存优化：使用 SpooledTemporaryFile，内存中只保留 1MB，超出部分写入磁盘
+    ⚠️ 内存优化：使用临时文件，避免内存溢出
     """
     import os
     import tempfile
     
+    logger.info(f"[upload] 开始处理上传请求: ip_id={ip_id}, filename={file.filename}")
+    
     # 检查 IP 存在
     if not get_ip(db, ip_id):
-        logger.warning(f"[upload_memory_file] IP不存在: {ip_id}")
+        logger.warning(f"[upload] IP不存在: {ip_id}")
         raise HTTPException(status_code=404, detail=f"IP 不存在: {ip_id}")
     
-    # 检查请求体大小（通过 header）
+    # 检查请求体大小
     content_length = request.headers.get('content-length')
     if content_length:
         try:
             size = int(content_length)
             if size > MAX_UPLOAD_SIZE:
-                logger.warning(f"[upload_memory_file] 请求体过大: {size / 1024 / 1024:.1f}MB")
+                logger.warning(f"[upload] 请求体过大: {size / 1024 / 1024:.1f}MB")
                 raise HTTPException(status_code=413, detail=f"请求体过大，最大支持 {MAX_UPLOAD_SIZE / 1024 / 1024}MB")
         except ValueError:
             pass
     
-    # 使用 SpooledTemporaryFile：内存中最多保留 1MB，超出部分自动写入磁盘
-    # 这是真正的低内存方案
-    temp_file = None
     temp_path = None
     total_size = 0
     
     try:
-        # 创建临时文件，内存阈值 1MB
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.upload')
-        temp_path = temp_file.name
+        # 使用系统临时目录（Railway上通常是 /tmp）
+        temp_dir = tempfile.gettempdir()
+        logger.info(f"[upload] 使用临时目录: {temp_dir}")
         
-        # 流式读取并写入临时文件
-        chunk_size = 64 * 1024  # 64KB
-        while True:
-            chunk = await file.read(chunk_size)
-            if not chunk:
-                break
-            total_size += len(chunk)
-            if total_size > MAX_UPLOAD_SIZE:
-                temp_file.close()
-                os.unlink(temp_path)
-                logger.warning(f"[upload_memory_file] 文件超过大小限制: {total_size / 1024 / 1024:.1f}MB")
-                raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE / 1024 / 1024}MB")
-            temp_file.write(chunk)
-        
-        temp_file.close()
+        # 创建临时文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.upload', dir=temp_dir) as temp_file:
+            temp_path = temp_file.name
+            logger.info(f"[upload] 创建临时文件: {temp_path}")
+            
+            # 流式读取并写入
+            chunk_size = 64 * 1024
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > MAX_UPLOAD_SIZE:
+                    logger.warning(f"[upload] 文件超过限制: {total_size / 1024 / 1024:.1f}MB")
+                    raise HTTPException(status_code=413, detail=f"文件过大")
+                temp_file.write(chunk)
         
         if total_size == 0:
-            os.unlink(temp_path)
-            logger.warning(f"[upload_memory_file] 上传文件为空")
+            logger.warning(f"[upload] 文件为空")
             raise HTTPException(status_code=400, detail="上传文件为空")
         
-        logger.info(f"[upload_memory_file] 文件接收完成: size={total_size} bytes, temp_path={temp_path}")
+        logger.info(f"[upload] 文件写入完成: {total_size} bytes")
         
-        # 使用流式上传（从磁盘文件读取，不加载到内存）
+        # 调用存储服务
         from app.services.storage_service import upload_stream
         result = upload_stream(
             ip_id=ip_id,
@@ -219,27 +218,23 @@ async def upload_memory_file(
             size_bytes=total_size
         )
         
-        logger.info(f"[upload_memory_file] 上传完成: file_id={result.get('file_id') if result else 'None'}")
-        
+        if result:
+            logger.info(f"[upload] 成功: file_id={result.get('file_id')}")
+        else:
+            logger.error(f"[upload] 存储服务返回 None")
+            raise HTTPException(status_code=503, detail="存储服务不可用")
+            
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"[upload_memory_file] 上传失败: {e}")
-        raise HTTPException(status_code=500, detail="上传失败")
+        logger.exception(f"[upload] 异常: {e}")
+        raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
     finally:
-        # 清理临时文件
         if temp_path and os.path.exists(temp_path):
             try:
                 os.unlink(temp_path)
-                logger.debug(f"[upload_memory_file] 临时文件已清理: {temp_path}")
-            except OSError:
-                pass
-    
-    if not result:
-        raise HTTPException(
-            status_code=503,
-            detail="存储不可用：请检查 STORAGE_* 凭证与网络，或关闭 STORAGE_LOCAL_DISABLED 并确保本地目录可写；详见服务端日志。",
-        )
+            except OSError as e:
+                logger.warning(f"[upload] 清理临时文件失败: {e}")
 
     row = FileObject(
         file_id=result["file_id"],

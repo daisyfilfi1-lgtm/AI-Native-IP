@@ -8,7 +8,7 @@ import logging
 from app.env_loader import load_backend_env
 load_backend_env()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
@@ -26,6 +26,7 @@ from app.routers import (
     style,
     vector
 )
+from app.middleware.auth import verify_api_key
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -112,19 +113,22 @@ def create_app() -> FastAPI:
     def health():
         return {"status": "ok"}
 
-    # API routes
-    app.include_router(ip.router, prefix="/api/v1", tags=["ip"])
-    app.include_router(memory.router, prefix="/api/v1", tags=["memory"])
-    app.include_router(config_memory.router, prefix="/api/v1", tags=["config"])
-    app.include_router(feishu_sync.router, prefix="/api/v1", tags=["integrations"])
-    app.include_router(baidu_pan_sync.router, prefix="/api/v1", tags=["integrations"])
-    app.include_router(vector.router, prefix="/api/v1", tags=["vector"])
-    app.include_router(graph.router, prefix="/api/v1", tags=["graph"])
-    app.include_router(memory_consolidation.router, prefix="/api/v1", tags=["memory"])
-    app.include_router(multimodal.router, prefix="/api/v1", tags=["multimodal"])
-    app.include_router(content.router, prefix="/api/v1", tags=["content"])
-    app.include_router(style.router, prefix="/api/v1", tags=["style"])
-    app.include_router(creator.router, prefix="/api", tags=["creator"])
+    # API 密钥依赖（公开端点除外）
+    api_key_dep = [Depends(verify_api_key)]
+
+    # API routes - 需要认证
+    app.include_router(ip.router, prefix="/api/v1", tags=["ip"], dependencies=api_key_dep)
+    app.include_router(memory.router, prefix="/api/v1", tags=["memory"], dependencies=api_key_dep)
+    app.include_router(config_memory.router, prefix="/api/v1", tags=["config"], dependencies=api_key_dep)
+    app.include_router(feishu_sync.router, prefix="/api/v1", tags=["integrations"], dependencies=api_key_dep)
+    app.include_router(baidu_pan_sync.router, prefix="/api/v1", tags=["integrations"], dependencies=api_key_dep)
+    app.include_router(vector.router, prefix="/api/v1", tags=["vector"], dependencies=api_key_dep)
+    app.include_router(graph.router, prefix="/api/v1", tags=["graph"], dependencies=api_key_dep)
+    app.include_router(memory_consolidation.router, prefix="/api/v1", tags=["memory"], dependencies=api_key_dep)
+    app.include_router(multimodal.router, prefix="/api/v1", tags=["multimodal"], dependencies=api_key_dep)
+    app.include_router(content.router, prefix="/api/v1", tags=["content"], dependencies=api_key_dep)
+    app.include_router(style.router, prefix="/api/v1", tags=["style"], dependencies=api_key_dep)
+    app.include_router(creator.router, prefix="/api", tags=["creator"], dependencies=api_key_dep)
 
     return app
 

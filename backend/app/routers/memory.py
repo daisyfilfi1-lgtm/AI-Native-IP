@@ -156,14 +156,19 @@ async def upload_memory_file(
     
     ⚠️ 内存优化：限制单文件 10MB，使用流式读取。
     """
-    import psutil
     import os
     
-    # 获取上传前的内存状态
-    process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / 1024 / 1024  # MB
-    
-    logger.info(f"[upload_memory_file] 开始上传: ip_id={ip_id}, filename={file.filename}, content_type={file.content_type}, memory_before={mem_before:.1f}MB")
+    # 尝试导入 psutil 进行内存监控（可选）
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        mem_before = process.memory_info().rss / 1024 / 1024  # MB
+        has_psutil = True
+        logger.info(f"[upload_memory_file] 开始上传: ip_id={ip_id}, filename={file.filename}, content_type={file.content_type}, memory_before={mem_before:.1f}MB")
+    except ImportError:
+        has_psutil = False
+        mem_before = 0
+        logger.info(f"[upload_memory_file] 开始上传: ip_id={ip_id}, filename={file.filename}, content_type={file.content_type} (psutil 未安装)")
     
     if not get_ip(db, ip_id):
         logger.warning(f"[upload_memory_file] IP不存在: {ip_id}")
@@ -196,8 +201,8 @@ async def upload_memory_file(
                 raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE / 1024 / 1024}MB")
             chunks.append(chunk)
             
-            # 监控内存增长
-            if len(chunks) % 10 == 0:  # 每 640KB 检查一次
+            # 监控内存增长（如果 psutil 可用）
+            if has_psutil and len(chunks) % 10 == 0:  # 每 640KB 检查一次
                 current_mem = process.memory_info().rss / 1024 / 1024
                 if current_mem - mem_before > 100:  # 内存增长超过 100MB
                     logger.warning(f"[upload_memory_file] 内存增长异常: +{current_mem - mem_before:.1f}MB")
@@ -223,8 +228,11 @@ async def upload_memory_file(
     del data
     del chunks
     
-    mem_after_upload = process.memory_info().rss / 1024 / 1024
-    logger.info(f"[upload_memory_file] 上传完成: file_id={result.get('file_id') if result else 'None'}, memory_after={mem_after_upload:.1f}MB, delta={mem_after_upload - mem_before:+.1f}MB")
+    if has_psutil:
+        mem_after_upload = process.memory_info().rss / 1024 / 1024
+        logger.info(f"[upload_memory_file] 上传完成: file_id={result.get('file_id') if result else 'None'}, memory_after={mem_after_upload:.1f}MB, delta={mem_after_upload - mem_before:+.1f}MB")
+    else:
+        logger.info(f"[upload_memory_file] 上传完成: file_id={result.get('file_id') if result else 'None'}")
     
     if not result:
         raise HTTPException(
@@ -256,8 +264,11 @@ async def upload_memory_file(
 
     file_url = build_public_url(result["bucket"], result["object_key"])
     
-    mem_final = process.memory_info().rss / 1024 / 1024
-    logger.info(f"[upload_memory_file] 请求完成: total_memory_delta={mem_final - mem_before:+.1f}MB")
+    if has_psutil:
+        mem_final = process.memory_info().rss / 1024 / 1024
+        logger.info(f"[upload_memory_file] 请求完成: total_memory_delta={mem_final - mem_before:+.1f}MB")
+    else:
+        logger.info(f"[upload_memory_file] 请求完成")
     
     return UploadResponse(
         file_id=row.file_id,

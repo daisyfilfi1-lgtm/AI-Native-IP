@@ -49,27 +49,37 @@ _DEFAULT_CORS_ORIGINS = [
 
 # 内存监控中间件
 class MemoryMonitorMiddleware(BaseHTTPMiddleware):
-    """监控请求处理过程中的内存使用情况"""
+    """监控请求处理过程中的内存使用情况（psutil 可选）"""
     
     async def dispatch(self, request: Request, call_next):
-        import psutil
         import os
         
-        process = psutil.Process(os.getpid())
-        mem_before = process.memory_info().rss / 1024 / 1024  # MB
+        # 尝试导入 psutil，如果不存在则跳过内存监控
+        try:
+            import psutil
+            process = psutil.Process(os.getpid())
+            mem_before = process.memory_info().rss / 1024 / 1024  # MB
+            has_psutil = True
+        except ImportError:
+            has_psutil = False
+            mem_before = 0
         
         # 检查是否是文件上传请求
         is_upload = '/upload' in request.url.path and request.method == 'POST'
         content_length = request.headers.get('content-length')
         
         if is_upload:
-            logger.info(f"[MemoryMonitor] 上传请求开始: {request.url.path}, "
-                       f"content-length={content_length}, memory={mem_before:.1f}MB")
+            if has_psutil:
+                logger.info(f"[MemoryMonitor] 上传请求开始: {request.url.path}, "
+                           f"content-length={content_length}, memory={mem_before:.1f}MB")
+            else:
+                logger.info(f"[MemoryMonitor] 上传请求开始: {request.url.path}, "
+                           f"content-length={content_length} (psutil 未安装，无法监控内存)")
         
         try:
             response = await call_next(request)
             
-            if is_upload:
+            if is_upload and has_psutil:
                 mem_after = process.memory_info().rss / 1024 / 1024
                 delta = mem_after - mem_before
                 logger.info(f"[MemoryMonitor] 上传请求完成: {request.url.path}, "
@@ -82,7 +92,7 @@ class MemoryMonitorMiddleware(BaseHTTPMiddleware):
             return response
             
         except Exception as e:
-            if is_upload:
+            if is_upload and has_psutil:
                 mem_after = process.memory_info().rss / 1024 / 1024
                 logger.error(f"[MemoryMonitor] 上传请求异常: {request.url.path}, "
                             f"error={e}, memory={mem_after:.1f}MB")

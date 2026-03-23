@@ -314,17 +314,31 @@ def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OV
     return [c for c in chunks if c]
 
 
-def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
-    """执行录入：拉取内容 → 分块 → 写入 ip_assets → 更新 task。"""
+def _run_ingest_pipeline(
+    db: Session,
+    task: IngestTask,
+    *,
+    checker: Optional[TimeLimitChecker] = None,
+) -> None:
+    """执行录入：拉取内容 → 分块 → 写入 ip_assets → 更新 task。可选 checker 用于后台线程中的软超时（不可用 signal）。"""
     import logging
 
     logger = logging.getLogger(__name__)
-    logger.info("Starting pipeline for task: %s", task.task_id)
+    if checker:
+        logger.info(
+            "Starting pipeline for task: %s (soft timeout %ss)",
+            task.task_id,
+            checker.seconds,
+        )
+    else:
+        logger.info("Starting pipeline for task: %s", task.task_id)
 
     task.status = "PROCESSING"
     db.commit()
 
     try:
+        if checker:
+            checker.check()
         st = task.source_type or "text"
         if st in ("video", "audio") and task.local_file_id:
             raw_text = _transcribe_from_file_object(db, task)
@@ -368,6 +382,9 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
         else:
             raw_text = f"[待处理] {task.title or '未命名'}\n\nsource_type={st}"
 
+        if checker:
+            checker.check()
+
         max_chars = _ingest_max_text_chars()
         max_chunks = _ingest_max_chunks()
         embed_bs = _ingest_embed_batch_size()
@@ -391,8 +408,14 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
             ingest_notes.append(f"分块仅保留前 {max_chunks} 段（共 {len(chunks)} 段），请拆分素材或调大 INGEST_MAX_CHUNKS")
             chunks = chunks[:max_chunks]
 
+        if checker:
+            checker.check()
+
         tag_cfg = db.query(TagConfig).filter(TagConfig.ip_id == task.ip_id).first()
         categories = (tag_cfg.tag_categories if tag_cfg else None) or None
+
+        if checker:
+            checker.check()
 
         # 每块各打一次 LLM 会极慢且易爆内存；整任务只打标一次（用开头片段）
         shared_tags = None
@@ -407,6 +430,8 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
         created_ids: List[str] = []
         total = len(chunks)
         for batch_start in range(0, total, embed_bs):
+            if checker:
+                checker.check()
             batch_chunks = chunks[batch_start : batch_start + embed_bs]
             if skip_emb:
                 batch_embeddings: List[list[float] | None] = [None] * len(batch_chunks)
@@ -464,123 +489,14 @@ def _run_ingest_pipeline(db: Session, task: IngestTask) -> None:
         task.status = "COMPLETED"
         task.created_asset_ids = created_ids
         task.error_message = None
-    except Exception as e:
-        logger.exception("ingest pipeline failed: %s", task.task_id)
-        task.status = "FAILED"
-        task.error_message = str(e)
-        task.created_asset_ids = []
-
-    db.commit()
-
-
-def _run_ingest_pipeline_with_timeout(db: Session, task: IngestTask, timeout_seconds: int) -> None:
-    """执行录入流水线，带软超时检查"""
-    checker = TimeLimitChecker(timeout_seconds)
-    
-    logger = logging.getLogger(__name__)
-    logger.info("Starting pipeline with timeout %ss for task: %s", timeout_seconds, task.task_id)
-    
-    task.status = "PROCESSING"
-    db.commit()
-    
-    try:
-        # 检查超时
-        checker.check()
-        
-        # 1. 提取文本
-        st = task.source_type or "text"
-        if st in ("video", "audio") and task.local_file_id:
-            raw_text = _transcribe_from_file_object(db, task)
-        elif st in ("text", "document", "file") and task.local_file_id:
-            raw_text = _load_text_from_file_object(db, task)
-        else:
-            raw_text = ""
-        
-        # 检查超时
-        checker.check()
-        
-        # 2. 处理参数
-        max_chars = _ingest_max_text_chars()
-        max_chunks = _ingest_max_chunks()
-        embed_bs = _ingest_embed_batch_size()
-        commit_every = _ingest_commit_every()
-        skip_emb = _ingest_skip_embedding()
-        
-        rt = raw_text or ""
-        if len(rt) > max_chars:
-            rt = rt[:max_chars]
-        
-        chunks = _chunk_text(rt)
-        if not chunks:
-            chunks = [rt or "(无内容)"]
-        
-        if len(chunks) > max_chunks:
-            chunks = chunks[:max_chunks]
-        
-        # 检查超时
-        checker.check()
-        
-        # 3. 批量写入（带超时检查）
-        created_ids: List[str] = []
-        total = len(chunks)
-        
-        for batch_start in range(0, total, embed_bs):
-            # 每批检查超时
-            checker.check()
-            
-            batch_chunks = chunks[batch_start : batch_start + embed_bs]
-            if skip_emb:
-                batch_embeddings: List[list[float] | None] = [None] * len(batch_chunks)
-            else:
-                batch_embeddings = embed_texts_batched(
-                    batch_chunks,
-                    batch_size=min(embed_bs, len(batch_chunks)),
-                )
-            
-            for j, content in enumerate(batch_chunks):
-                i = batch_start + j
-                asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
-                title = (task.title or "未命名") + (f" (片段{i+1})" if total > 1 else "")
-                
-                db.add(
-                    IPAsset(
-                        asset_id=asset_id,
-                        ip_id=task.ip_id,
-                        asset_type="story",
-                        title=title,
-                        content=content,
-                        content_vector_ref=None,
-                        asset_meta={"source_task_id": task.task_id, "chunk_index": i},
-                        relations=[],
-                        status="active",
-                    )
-                )
-                
-                try:
-                    emb = batch_embeddings[j] if j < len(batch_embeddings) else None
-                    upsert_asset_vector(db, asset_id, task.ip_id, content, emb)
-                except Exception:
-                    pass
-                
-                created_ids.append(asset_id)
-                
-                if (i + 1) % commit_every == 0:
-                    db.commit()
-            
-            del batch_embeddings
-        
-        task.status = "COMPLETED"
-        task.created_asset_ids = created_ids
-        task.error_message = None
-        
     except TimeoutException:
-        raise  # 重新抛出超时异常
+        raise
     except Exception as e:
         logger.exception("ingest pipeline failed: %s", task.task_id)
         task.status = "FAILED"
         task.error_message = str(e)
         task.created_asset_ids = []
-    
+
     db.commit()
 
 
@@ -604,14 +520,14 @@ def process_ingest_task(task_id: str) -> None:
         if task.status != "QUEUED":
             logger.warning(f"[Ingest] Task {task_id} already processed: {task.status}")
             return
-        
-        # 更新状态为处理中
-        task.status = "PROCESSING"
-        db.commit()
-        
-        # 执行流水线（使用软超时检查）
+
+        # 执行流水线（软超时，适用于后台线程，禁止使用 signal.SIGALRM）
         try:
-            _run_ingest_pipeline_with_timeout(db, task, timeout_seconds)
+            _run_ingest_pipeline(
+                db,
+                task,
+                checker=TimeLimitChecker(timeout_seconds),
+            )
             
             duration = time.time() - start_time
             logger.info(f"[Ingest] Completed task {task_id} in {duration:.1f}s")

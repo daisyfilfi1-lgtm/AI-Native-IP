@@ -33,10 +33,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 未设置 CORS_ORIGINS 时：允许 Netlify 正式/预览域名与本地开发（比单纯 * 更明确，便于排查）
+# 支持所有 netlify.app 子域名，包括 deploy-preview 预览链接
 _DEFAULT_NETLIFY_LOCAL_REGEX = (
-    r"^https://[^/]+\.netlify\.app$"  # 含 deploy-preview-xxx--repo.netlify.app
-    r"|^http://localhost(?::\d+)?$"
+    r"^https://.*\.netlify\.app$"  # 匹配所有 netlify.app 子域名
+    r"|^http://localhost(?::\d+)?$"  # 本地开发
 )
+
+# 默认允许的来源列表（备选方案，如果正则不起作用）
+_DEFAULT_CORS_ORIGINS = [
+    "https://ai-native-ip.netlify.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 
 
 # 内存监控中间件
@@ -92,36 +100,47 @@ def _cors_middleware_kwargs() -> dict:
     cred = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() in ("1", "true", "yes")
     regex = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
     raw_env = os.getenv("CORS_ORIGINS")
+    
     if regex:
+        logger.info(f"[CORS] 使用环境变量正则: {regex}")
         return {
             "allow_origin_regex": regex,
             "allow_credentials": cred,
             "allow_methods": ["*"],
             "allow_headers": ["*"],
         }
+    
     if raw_env is None:
+        # 使用明确的 origins 列表而不是正则，更可靠
+        logger.info(f"[CORS] 使用默认 origins: {_DEFAULT_CORS_ORIGINS}")
         return {
-            "allow_origin_regex": _DEFAULT_NETLIFY_LOCAL_REGEX,
+            "allow_origins": _DEFAULT_CORS_ORIGINS,
             "allow_credentials": False,
             "allow_methods": ["*"],
             "allow_headers": ["*"],
         }
+    
     raw = raw_env.strip()
     if not raw or raw == "*":
+        logger.info("[CORS] 允许所有来源 (allow_origins=['*'])")
         return {
             "allow_origins": ["*"],
             "allow_credentials": False,
             "allow_methods": ["*"],
             "allow_headers": ["*"],
         }
+    
     origins = [o.strip() for o in raw.split(",") if o.strip()]
     if not origins:
+        logger.info("[CORS] 使用默认 origins（CORS_ORIGINS 为空）")
         return {
-            "allow_origins": ["*"],
+            "allow_origins": _DEFAULT_CORS_ORIGINS,
             "allow_credentials": False,
             "allow_methods": ["*"],
             "allow_headers": ["*"],
         }
+    
+    logger.info(f"[CORS] 使用配置的 origins: {origins}")
     return {
         "allow_origins": origins,
         "allow_credentials": cred,

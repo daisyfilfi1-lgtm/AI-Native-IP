@@ -31,14 +31,23 @@ from app.routers import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# CORS - Allow Netlify frontend
-CORS_ORIGINS = [
-    "https://ai-native-ip.netlify.app",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+# CORS - 根据环境动态配置
+is_production = os.getenv("RAILWAY_ENVIRONMENT_NAME") == "production"
 
-# Override from environment if set
+if is_production:
+    # 生产环境：只允许 Netlify 域名
+    CORS_ORIGINS = [
+        "https://ai-native-ip.netlify.app",
+    ]
+else:
+    # 开发环境：允许本地
+    CORS_ORIGINS = [
+        "https://ai-native-ip.netlify.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+# 环境变量可以覆盖
 cors_env = os.getenv("CORS_ORIGINS", "")
 if cors_env:
     CORS_ORIGINS = [o.strip() for o in cors_env.split(",") if o.strip()]

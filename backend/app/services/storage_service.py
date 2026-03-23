@@ -132,14 +132,29 @@ def upload_bytes(ip_id: str, file_name: str, content_type: str | None, data: byt
     return _upload_bytes_local(ip_id, file_name, content_type, data, force=False)
 
 
+def _is_safe_path(base: Path, target: Path) -> bool:
+    """防止路径遍历攻击：确保 target 在 base 目录下"""
+    try:
+        return target.resolve().is_relative_to(base.resolve())
+    except (ValueError, OSError):
+        return False
+
+
 def download_bytes(bucket: str, object_key: str) -> bytes | None:
     cfg = get_storage_config()
     # 本地盘上的对象（含「配置了 S3 但回退写入」的情况，此时 local_enabled 可能为 False）
     if bucket == LOCAL_BUCKET:
         if cfg.get("local_disabled"):
             return None
-        full_path = Path(cfg["local_path"]) / object_key
-        if full_path.exists():
+        base = Path(cfg["local_path"])
+        full_path = base / object_key
+        
+        # 安全检查：防止路径遍历攻击
+        if not _is_safe_path(base, full_path):
+            logger.warning("Path traversal attempt blocked: %s", object_key)
+            return None
+        
+        if full_path.exists() and full_path.is_file():
             return full_path.read_bytes()
         return None
     client = _get_s3_client()

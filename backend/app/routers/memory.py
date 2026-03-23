@@ -154,22 +154,12 @@ async def upload_memory_file(
     上传文件到对象存储，返回 local_file_id（file_id）。
     可配合 /memory/ingest 的 local_file_id 使用。
     
-    ⚠️ 内存优化：限制单文件 10MB，使用流式读取。
+    ⚠️ 内存优化：使用 SpooledTemporaryFile，内存中只保留 1MB，超出部分写入磁盘
     """
     import os
+    import tempfile
     
-    # 尝试导入 psutil 进行内存监控（可选）
-    try:
-        import psutil
-        process = psutil.Process(os.getpid())
-        mem_before = process.memory_info().rss / 1024 / 1024  # MB
-        has_psutil = True
-        logger.info(f"[upload_memory_file] 开始上传: ip_id={ip_id}, filename={file.filename}, content_type={file.content_type}, memory_before={mem_before:.1f}MB")
-    except ImportError:
-        has_psutil = False
-        mem_before = 0
-        logger.info(f"[upload_memory_file] 开始上传: ip_id={ip_id}, filename={file.filename}, content_type={file.content_type} (psutil 未安装)")
-    
+    # 检查 IP 存在
     if not get_ip(db, ip_id):
         logger.warning(f"[upload_memory_file] IP不存在: {ip_id}")
         raise HTTPException(status_code=404, detail=f"IP 不存在: {ip_id}")
@@ -180,59 +170,70 @@ async def upload_memory_file(
         try:
             size = int(content_length)
             if size > MAX_UPLOAD_SIZE:
-                logger.warning(f"[upload_memory_file] 请求体过大: {size / 1024 / 1024:.1f}MB > {MAX_UPLOAD_SIZE / 1024 / 1024}MB")
+                logger.warning(f"[upload_memory_file] 请求体过大: {size / 1024 / 1024:.1f}MB")
                 raise HTTPException(status_code=413, detail=f"请求体过大，最大支持 {MAX_UPLOAD_SIZE / 1024 / 1024}MB")
         except ValueError:
             pass
     
-    # 流式读取文件内容，避免一次性加载大文件
-    chunks = []
+    # 使用 SpooledTemporaryFile：内存中最多保留 1MB，超出部分自动写入磁盘
+    # 这是真正的低内存方案
+    temp_file = None
+    temp_path = None
     total_size = 0
-    chunk_size = 64 * 1024  # 64KB chunks
     
     try:
+        # 创建临时文件，内存阈值 1MB
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.upload')
+        temp_path = temp_file.name
+        
+        # 流式读取并写入临时文件
+        chunk_size = 64 * 1024  # 64KB
         while True:
             chunk = await file.read(chunk_size)
             if not chunk:
                 break
             total_size += len(chunk)
             if total_size > MAX_UPLOAD_SIZE:
+                temp_file.close()
+                os.unlink(temp_path)
                 logger.warning(f"[upload_memory_file] 文件超过大小限制: {total_size / 1024 / 1024:.1f}MB")
                 raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE / 1024 / 1024}MB")
-            chunks.append(chunk)
-            
-            # 监控内存增长（如果 psutil 可用）
-            if has_psutil and len(chunks) % 10 == 0:  # 每 640KB 检查一次
-                current_mem = process.memory_info().rss / 1024 / 1024
-                if current_mem - mem_before > 100:  # 内存增长超过 100MB
-                    logger.warning(f"[upload_memory_file] 内存增长异常: +{current_mem - mem_before:.1f}MB")
-    
+            temp_file.write(chunk)
+        
+        temp_file.close()
+        
+        if total_size == 0:
+            os.unlink(temp_path)
+            logger.warning(f"[upload_memory_file] 上传文件为空")
+            raise HTTPException(status_code=400, detail="上传文件为空")
+        
+        logger.info(f"[upload_memory_file] 文件接收完成: size={total_size} bytes, temp_path={temp_path}")
+        
+        # 使用流式上传（从磁盘文件读取，不加载到内存）
+        from app.services.storage_service import upload_stream
+        result = upload_stream(
+            ip_id=ip_id,
+            file_name=file.filename or "upload.bin",
+            content_type=file.content_type,
+            file_path=temp_path,
+            size_bytes=total_size
+        )
+        
+        logger.info(f"[upload_memory_file] 上传完成: file_id={result.get('file_id') if result else 'None'}")
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"[upload_memory_file] 读取文件时出错: {e}")
-        raise HTTPException(status_code=500, detail="读取文件失败")
-    
-    # 合并 chunks
-    data = b''.join(chunks)
-    
-    if not data:
-        logger.warning(f"[upload_memory_file] 上传文件为空")
-        raise HTTPException(status_code=400, detail="上传文件为空")
-    
-    logger.info(f"[upload_memory_file] 文件读取完成: size={len(data)} bytes, chunks={len(chunks)}")
-
-    result = upload_bytes(ip_id, file.filename or "upload.bin", file.content_type, data)
-    
-    # 立即释放内存
-    del data
-    del chunks
-    
-    if has_psutil:
-        mem_after_upload = process.memory_info().rss / 1024 / 1024
-        logger.info(f"[upload_memory_file] 上传完成: file_id={result.get('file_id') if result else 'None'}, memory_after={mem_after_upload:.1f}MB, delta={mem_after_upload - mem_before:+.1f}MB")
-    else:
-        logger.info(f"[upload_memory_file] 上传完成: file_id={result.get('file_id') if result else 'None'}")
+        logger.exception(f"[upload_memory_file] 上传失败: {e}")
+        raise HTTPException(status_code=500, detail="上传失败")
+    finally:
+        # 清理临时文件
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+                logger.debug(f"[upload_memory_file] 临时文件已清理: {temp_path}")
+            except OSError:
+                pass
     
     if not result:
         raise HTTPException(

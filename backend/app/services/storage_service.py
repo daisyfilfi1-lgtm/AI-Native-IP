@@ -98,6 +98,7 @@ def _upload_bytes_local(
 
 
 def upload_bytes(ip_id: str, file_name: str, content_type: str | None, data: bytes) -> dict[str, Any] | None:
+    """上传 bytes 数据（向后兼容）"""
     cfg = get_storage_config()
     # 优先 S3（含客户端创建、put_object 任一步失败则回退本地，避免未捕获异常导致 500）
     if cfg.get("s3_enabled"):
@@ -130,6 +131,98 @@ def upload_bytes(ip_id: str, file_name: str, content_type: str | None, data: byt
         return None
     # 未配置 S3：仅本地主路径
     return _upload_bytes_local(ip_id, file_name, content_type, data, force=False)
+
+
+def upload_stream(
+    ip_id: str, 
+    file_name: str, 
+    content_type: str | None, 
+    file_path: str,
+    size_bytes: int
+) -> dict[str, Any] | None:
+    """
+    流式上传文件（真正的低内存上传）
+    从文件路径读取并上传，避免加载整个文件到内存
+    """
+    cfg = get_storage_config()
+    ext = Path(file_name or "").suffix
+    file_id = f"file_{uuid.uuid4().hex[:20]}"
+    object_key = f"ip/{ip_id}/{file_id}{ext}"
+    
+    # 计算文件 MD5
+    md5_hash = hashlib.md5()
+    with open(file_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(64 * 1024), b''):
+            md5_hash.update(chunk)
+    content_md5 = base64.b64encode(md5_hash.digest()).decode('ascii')
+    
+    if cfg.get("s3_enabled"):
+        try:
+            client = _get_s3_client()
+            bucket = cfg.get("bucket")
+            if client and bucket:
+                extra_args: dict[str, Any] = {
+                    "ContentMD5": content_md5,
+                }
+                if content_type:
+                    extra_args["ContentType"] = content_type
+                
+                # 使用 UploadFileObj 流式上传
+                with open(file_path, 'rb') as f:
+                    client.put_object(Bucket=bucket, Key=object_key, Body=f, **extra_args)
+                
+                return {
+                    "file_id": file_id,
+                    "bucket": bucket,
+                    "object_key": object_key,
+                    "size_bytes": size_bytes,
+                    "content_type": content_type,
+                }
+        except Exception as e:
+            logger.warning("S3 流式上传失败，尝试本地回退: %s", e)
+    
+    # 本地存储（流式复制）
+    return _upload_file_local(ip_id, file_name, content_type, file_path, size_bytes, object_key, file_id)
+
+
+def _upload_file_local(
+    ip_id: str,
+    file_name: str,
+    content_type: str | None,
+    source_path: str,
+    size_bytes: int,
+    object_key: str,
+    file_id: str,
+) -> dict[str, Any] | None:
+    """本地文件流式复制"""
+    cfg = get_storage_config()
+    if cfg.get("local_disabled"):
+        return None
+    
+    base = Path(cfg["local_path"])
+    full_path = base / object_key
+    
+    # 安全检查：防止路径遍历
+    if not _is_safe_path(base, full_path):
+        logger.warning("Path traversal attempt blocked: %s", object_key)
+        return None
+    
+    try:
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        # 流式复制文件
+        import shutil
+        shutil.copy2(source_path, full_path)
+        
+        return {
+            "file_id": file_id,
+            "bucket": LOCAL_BUCKET,
+            "object_key": object_key,
+            "size_bytes": size_bytes,
+            "content_type": content_type,
+        }
+    except OSError as e:
+        logger.warning("Local file upload failed: %s", e)
+        return None
 
 
 def _is_safe_path(base: Path, target: Path) -> bool:

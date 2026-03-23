@@ -95,14 +95,28 @@ def _ingest_skip_embedding() -> bool:
 
 
 def _ingest_task_timeout() -> int:
-    """任务执行超时时间（秒），防止Railway Kill进程。"""
+    """任务执行软超时时间（秒），用于 TimeLimitChecker 定期检查。"""
     raw = os.environ.get("INGEST_TASK_TIMEOUT", "").strip()
     if not raw:
-        return 25  # 默认25秒安全值
+        return 60
     try:
-        return max(10, min(60, int(raw)))  # 限制10-60秒
+        return max(15, min(120, int(raw)))
     except ValueError:
-        return 25
+        return 60
+
+
+def _ingest_hard_timeout_seconds(soft: int) -> float:
+    """
+    整段录入硬超时（秒）：超过则主线程放弃等待，并把仍处 PROCESSING 的任务标为 FAILED。
+    解决 S3/网络等阻塞导致任务永久卡在 PROCESSING 的问题。
+    """
+    raw = os.environ.get("INGEST_HARD_TIMEOUT_SECONDS", "").strip()
+    if raw:
+        try:
+            return max(60.0, min(900.0, float(raw)))
+        except ValueError:
+            pass
+    return float(max(soft, 60) + 120)
 
 
 class TimeoutException(Exception):
@@ -151,6 +165,28 @@ def _call_with_timeout(
 
 def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
     return db.query(IngestTask).filter(IngestTask.task_id == task_id).first()
+
+
+def _mark_failed_if_processing(task_id: str, message: str) -> None:
+    """硬超时后：仅当仍为 PROCESSING 时写入失败，避免覆盖已成功 COMPLETED 的任务。"""
+    log = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        n = (
+            db.query(IngestTask)
+            .filter(IngestTask.task_id == task_id, IngestTask.status == "PROCESSING")
+            .update(
+                {"status": "FAILED", "error_message": message[:500]},
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        if n:
+            log.warning("[Ingest] HARD timeout: marked %s as FAILED", task_id)
+    except Exception as e:
+        log.error("[Ingest] HARD timeout: failed to mark %s: %s", task_id, e)
+    finally:
+        db.close()
 
 
 def _normalize_http_url(url: str | None) -> str:
@@ -475,7 +511,9 @@ def _run_ingest_pipeline(
         try:
             tag_snippet = (rt or "")[:4000]
             if tag_snippet.strip():
-                tag_timeout = min(15.0, checker.remaining()) if checker else 15.0
+                tag_timeout = (
+                    max(5.0, min(15.0, checker.remaining())) if checker else 15.0
+                )
                 shared_tags = _call_with_timeout(
                     suggest_tags_for_content,
                     tag_snippet,
@@ -497,7 +535,9 @@ def _run_ingest_pipeline(
             if skip_emb:
                 batch_embeddings: List[list[float] | None] = [None] * len(batch_chunks)
             else:
-                embed_timeout = min(20.0, checker.remaining()) if checker else 20.0
+                embed_timeout = (
+                    max(8.0, min(45.0, checker.remaining())) if checker else 45.0
+                )
                 batch_embeddings = _call_with_timeout(
                     embed_texts_batched,
                     batch_chunks,
@@ -550,6 +590,13 @@ def _run_ingest_pipeline(
 
             del batch_embeddings
 
+        db.refresh(task)
+        if task.status != "PROCESSING":
+            logger.warning(
+                "ingest task %s no longer PROCESSING before COMPLETED (skip overwrite)",
+                task.task_id,
+            )
+            return
         task.status = "COMPLETED"
         task.created_asset_ids = created_ids
         task.error_message = None
@@ -566,60 +613,86 @@ def _run_ingest_pipeline(
 
 def process_ingest_task(task_id: str) -> None:
     """
-    后台执行录入任务（在独立会话中）。
-    使用软超时机制（定期检查），适用于 Railway 后台任务线程。
+    后台执行录入任务。
+    - 软超时：TimeLimitChecker + 外部调用线程级超时
+    - 硬超时：整段任务在独立线程中执行，主等待侧超时后把仍处 PROCESSING 的任务标为 FAILED
     """
     logger = logging.getLogger(__name__)
-    start_time = time.time()
     timeout_seconds = _ingest_task_timeout()
-    
-    logger.info(f"[Ingest] Starting task {task_id}, timeout={timeout_seconds}s")
-    
-    db = SessionLocal()
-    try:
-        task = get_ingest_task(db, task_id)
-        if not task:
-            logger.warning(f"[Ingest] Task {task_id} not found")
-            return
-        if task.status != "QUEUED":
-            logger.warning(f"[Ingest] Task {task_id} already processed: {task.status}")
-            return
+    hard_cap = _ingest_hard_timeout_seconds(timeout_seconds)
 
-        # 执行流水线（软超时，适用于后台线程，禁止使用 signal.SIGALRM）
+    logger.info(
+        "[Ingest] Starting task %s soft_timeout=%ss hard_timeout=%ss",
+        task_id,
+        timeout_seconds,
+        hard_cap,
+    )
+
+    def runner() -> None:
+        db = SessionLocal()
+        task: IngestTask | None = None
+        start_time = time.time()
         try:
-            _run_ingest_pipeline(
-                db,
-                task,
-                checker=TimeLimitChecker(timeout_seconds),
-            )
-            
+            task = get_ingest_task(db, task_id)
+            if not task:
+                logger.warning("[Ingest] Task %s not found", task_id)
+                return
+            if task.status != "QUEUED":
+                logger.warning(
+                    "[Ingest] Task %s already processed: %s", task_id, task.status
+                )
+                return
+            try:
+                _run_ingest_pipeline(
+                    db,
+                    task,
+                    checker=TimeLimitChecker(timeout_seconds),
+                )
+                logger.info(
+                    "[Ingest] Finished pipeline for %s in %.1fs",
+                    task_id,
+                    time.time() - start_time,
+                )
+            except TimeoutException:
+                duration = time.time() - start_time
+                logger.error(
+                    "[Ingest] Task %s TIMEOUT after %.1fs", task_id, duration
+                )
+                db.refresh(task)
+                task.status = "FAILED"
+                task.error_message = (
+                    f"处理超时({timeout_seconds}秒)。"
+                    f"建议：1) 压缩文件 2) 拆分成小文件(<5MB) 3) 稍后重试"
+                )
+                db.commit()
+        except Exception as e:
             duration = time.time() - start_time
-            logger.info(f"[Ingest] Completed task {task_id} in {duration:.1f}s")
-            
-        except TimeoutException:
-            duration = time.time() - start_time
-            logger.error(f"[Ingest] Task {task_id} TIMEOUT after {duration:.1f}s")
-            
-            db.refresh(task)
-            task.status = "FAILED"
-            task.error_message = (
-                f"处理超时({timeout_seconds}秒)。"
-                f"建议：1) 压缩文件 2) 拆分成小文件(<5MB) 3) 稍后重试"
+            logger.exception(
+                "[Ingest] Task %s FAILED after %.1fs: %s", task_id, duration, e
             )
-            db.commit()
-            
-    except Exception as e:
-        duration = time.time() - start_time
-        logger.exception(f"[Ingest] Task {task_id} FAILED after {duration:.1f}s: {e}")
-        
+            try:
+                if task is not None:
+                    db.refresh(task)
+                    task.status = "FAILED"
+                    task.error_message = str(e)[:500]
+                    db.commit()
+            except Exception as inner_e:
+                logger.error("[Ingest] Failed to update error status: %s", inner_e)
+        finally:
+            db.close()
+            gc.collect()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        fut = pool.submit(runner)
         try:
-            db.refresh(task)
-            task.status = "FAILED"
-            task.error_message = str(e)[:500]
-            db.commit()
-        except Exception as inner_e:
-            logger.error(f"[Ingest] Failed to update error status: {inner_e}")
-    finally:
-        db.close()
-        gc.collect()
-        logger.info(f"[Ingest] Task {task_id} cleanup complete")
+            fut.result(timeout=hard_cap)
+        except concurrent.futures.TimeoutError:
+            logger.error(
+                "[Ingest] HARD timeout waiting for %s after %.1fs", task_id, hard_cap
+            )
+            _mark_failed_if_processing(
+                task_id,
+                f"处理超时（硬超时 {int(hard_cap)}s）。请稍后重试或联系管理员检查对象存储与 AI 服务。",
+            )
+
+    logger.info("[Ingest] Task %s cleanup complete", task_id)

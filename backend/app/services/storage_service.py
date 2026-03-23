@@ -41,10 +41,30 @@ def _is_safe_path(base: Path, target: Path) -> bool:
         return False
 
 
+def _s3_connect_timeout_seconds() -> float:
+    raw = os.environ.get("S3_CONNECT_TIMEOUT_SECONDS", "10").strip()
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return 10.0
+
+
+def _s3_read_timeout_seconds() -> float:
+    """get_object / Body.read() 等读超时，避免 OSS 网络挂起导致录入永久 PROCESSING。"""
+    raw = os.environ.get("S3_READ_TIMEOUT_SECONDS", "120").strip()
+    try:
+        return max(5.0, float(raw))
+    except ValueError:
+        return 120.0
+
+
 def _s3_client_config(cfg: dict[str, Any]) -> Config:
     style = "path" if cfg.get("force_path_style") else "virtual"
     return Config(
         signature_version="s3v4",
+        connect_timeout=_s3_connect_timeout_seconds(),
+        read_timeout=_s3_read_timeout_seconds(),
+        retries={"max_attempts": 3, "mode": "standard"},
         s3={
             "addressing_style": style,
             # 整包 SHA256 签名，避免默认走流式 chunked（OSS 不支持 aws-chunked + 部分 x-amz-content-sha256）

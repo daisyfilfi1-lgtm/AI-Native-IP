@@ -9,7 +9,6 @@
 - 更频繁的数据库提交
 """
 import gc
-import concurrent.futures
 import io
 import logging
 import os
@@ -91,7 +90,13 @@ def _ingest_max_url_bytes() -> int:
 
 def _ingest_skip_embedding() -> bool:
     """整段录入不写向量（仅文本入库），用于极低内存或排查 OOM。"""
-    return os.environ.get("INGEST_SKIP_EMBEDDING", "").lower() in ("1", "true", "yes")
+    raw = os.environ.get("INGEST_SKIP_EMBEDDING", "").strip().lower()
+    if raw in ("1", "true", "yes"):
+        return True
+    if raw in ("0", "false", "no"):
+        return False
+    # 生产默认跳过 embedding，优先保证录入链路稳定；需要时可显式设置为 false 开启。
+    return os.environ.get("RAILWAY_ENVIRONMENT_NAME") == "production"
 
 
 def _ingest_task_timeout() -> int:
@@ -103,20 +108,6 @@ def _ingest_task_timeout() -> int:
         return max(15, min(120, int(raw)))
     except ValueError:
         return 60
-
-
-def _ingest_hard_timeout_seconds(soft: int) -> float:
-    """
-    整段录入硬超时（秒）：超过则主线程放弃等待，并把仍处 PROCESSING 的任务标为 FAILED。
-    解决 S3/网络等阻塞导致任务永久卡在 PROCESSING 的问题。
-    """
-    raw = os.environ.get("INGEST_HARD_TIMEOUT_SECONDS", "").strip()
-    if raw:
-        try:
-            return max(60.0, min(900.0, float(raw)))
-        except ValueError:
-            pass
-    return float(max(soft, 60) + 120)
 
 
 class TimeoutException(Exception):
@@ -142,55 +133,8 @@ class TimeLimitChecker:
         return max(0, self.seconds - (time.time() - self.start_time))
 
 
-def _call_with_timeout(
-    fn,
-    *args,
-    timeout_seconds: float,
-    **kwargs,
-):
-    """
-    在独立线程执行潜在阻塞调用（LLM/Embedding），避免长时间卡死任务状态。
-    超时后必须 shutdown(wait=False)，否则 ThreadPoolExecutor 退出时会无限等子线程。
-    """
-    if timeout_seconds <= 0:
-        raise TimeoutException("Task exceeded timeout while waiting external service")
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    try:
-        future = pool.submit(fn, *args, **kwargs)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except concurrent.futures.TimeoutError as e:
-            raise TimeoutException(
-                f"External service call timed out after {timeout_seconds:.1f}s"
-            ) from e
-    finally:
-        pool.shutdown(wait=False)
-
-
 def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
     return db.query(IngestTask).filter(IngestTask.task_id == task_id).first()
-
-
-def _mark_failed_if_processing(task_id: str, message: str) -> None:
-    """硬超时后：仅当仍为 PROCESSING 时写入失败，避免覆盖已成功 COMPLETED 的任务。"""
-    log = logging.getLogger(__name__)
-    db = SessionLocal()
-    try:
-        n = (
-            db.query(IngestTask)
-            .filter(IngestTask.task_id == task_id, IngestTask.status == "PROCESSING")
-            .update(
-                {"status": "FAILED", "error_message": message[:500]},
-                synchronize_session=False,
-            )
-        )
-        db.commit()
-        if n:
-            log.warning("[Ingest] HARD timeout: marked %s as FAILED", task_id)
-    except Exception as e:
-        log.error("[Ingest] HARD timeout: failed to mark %s: %s", task_id, e)
-    finally:
-        db.close()
 
 
 def _normalize_http_url(url: str | None) -> str:
@@ -515,17 +459,7 @@ def _run_ingest_pipeline(
         try:
             tag_snippet = (rt or "")[:4000]
             if tag_snippet.strip():
-                tag_timeout = (
-                    max(5.0, min(15.0, checker.remaining())) if checker else 15.0
-                )
-                shared_tags = _call_with_timeout(
-                    suggest_tags_for_content,
-                    tag_snippet,
-                    categories,
-                    timeout_seconds=tag_timeout,
-                )
-        except TimeoutException:
-            raise
+                shared_tags = suggest_tags_for_content(tag_snippet, categories)
         except Exception:
             shared_tags = None
 
@@ -539,14 +473,9 @@ def _run_ingest_pipeline(
             if skip_emb:
                 batch_embeddings: List[list[float] | None] = [None] * len(batch_chunks)
             else:
-                embed_timeout = (
-                    max(8.0, min(45.0, checker.remaining())) if checker else 45.0
-                )
-                batch_embeddings = _call_with_timeout(
-                    embed_texts_batched,
+                batch_embeddings = embed_texts_batched(
                     batch_chunks,
                     batch_size=min(embed_bs, len(batch_chunks)),
-                    timeout_seconds=embed_timeout,
                 )
             for j, content in enumerate(batch_chunks):
                 i = batch_start + j
@@ -618,91 +547,59 @@ def _run_ingest_pipeline(
 
 def process_ingest_task(task_id: str) -> None:
     """
-    后台执行录入任务。
-    - 软超时：TimeLimitChecker + 外部调用线程级超时
-    - 硬超时：整段任务在独立线程中执行，主等待侧超时后把仍处 PROCESSING 的任务标为 FAILED
+    后台执行录入任务（在独立会话中）。
+    使用软超时机制（定期检查），适用于 Railway 后台任务线程。
     """
     logger = logging.getLogger(__name__)
+    start_time = time.time()
     timeout_seconds = _ingest_task_timeout()
-    hard_cap = _ingest_hard_timeout_seconds(timeout_seconds)
+    logger.info(f"[Ingest] Starting task {task_id}, timeout={timeout_seconds}s")
 
-    logger.info(
-        "[Ingest] Starting task %s soft_timeout=%ss hard_timeout=%ss",
-        task_id,
-        timeout_seconds,
-        hard_cap,
-    )
-
-    def runner() -> None:
-        db = SessionLocal()
-        task: IngestTask | None = None
-        start_time = time.time()
-        try:
-            task = get_ingest_task(db, task_id)
-            if not task:
-                logger.warning("[Ingest] Task %s not found", task_id)
-                return
-            if task.status != "QUEUED":
-                logger.warning(
-                    "[Ingest] Task %s already processed: %s", task_id, task.status
-                )
-                return
-            try:
-                _run_ingest_pipeline(
-                    db,
-                    task,
-                    checker=TimeLimitChecker(timeout_seconds),
-                )
-                logger.info(
-                    "[Ingest] Finished pipeline for %s in %.1fs",
-                    task_id,
-                    time.time() - start_time,
-                )
-            except TimeoutException:
-                duration = time.time() - start_time
-                logger.error(
-                    "[Ingest] Task %s TIMEOUT after %.1fs", task_id, duration
-                )
-                db.refresh(task)
-                task.status = "FAILED"
-                task.error_message = (
-                    f"处理超时({timeout_seconds}秒)。"
-                    f"建议：1) 压缩文件 2) 拆分成小文件(<5MB) 3) 稍后重试"
-                )
-                db.commit()
-        except Exception as e:
-            duration = time.time() - start_time
-            logger.exception(
-                "[Ingest] Task %s FAILED after %.1fs: %s", task_id, duration, e
-            )
-            try:
-                if task is not None:
-                    db.refresh(task)
-                    task.status = "FAILED"
-                    task.error_message = str(e)[:500]
-                    db.commit()
-            except Exception as inner_e:
-                logger.error("[Ingest] Failed to update error status: %s", inner_e)
-        finally:
-            db.close()
-            gc.collect()
-
-    # 注意：不能用「with ThreadPoolExecutor」默认退出逻辑——shutdown(wait=True) 会在子线程
-    # 仍阻塞（如 S3 读挂起）时无限等待，拖死 Starlette 后台线程池。
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    db = SessionLocal()
     try:
-        fut = pool.submit(runner)
-        try:
-            fut.result(timeout=hard_cap)
-        except concurrent.futures.TimeoutError:
-            logger.error(
-                "[Ingest] HARD timeout waiting for %s after %.1fs", task_id, hard_cap
-            )
-            _mark_failed_if_processing(
-                task_id,
-                f"处理超时（硬超时 {int(hard_cap)}s）。请稍后重试或联系管理员检查对象存储与 AI 服务。",
-            )
-    finally:
-        pool.shutdown(wait=False)
+        task = get_ingest_task(db, task_id)
+        if not task:
+            logger.warning(f"[Ingest] Task {task_id} not found")
+            return
+        if task.status != "QUEUED":
+            logger.warning(f"[Ingest] Task {task_id} already processed: {task.status}")
+            return
 
-    logger.info("[Ingest] Task %s cleanup complete", task_id)
+        # 执行流水线（软超时，适用于后台线程，禁止使用 signal.SIGALRM）
+        try:
+            _run_ingest_pipeline(
+                db,
+                task,
+                checker=TimeLimitChecker(timeout_seconds),
+            )
+            
+            duration = time.time() - start_time
+            logger.info(f"[Ingest] Completed task {task_id} in {duration:.1f}s")
+            
+        except TimeoutException:
+            duration = time.time() - start_time
+            logger.error(f"[Ingest] Task {task_id} TIMEOUT after {duration:.1f}s")
+            
+            db.refresh(task)
+            task.status = "FAILED"
+            task.error_message = (
+                f"处理超时({timeout_seconds}秒)。"
+                f"建议：1) 压缩文件 2) 拆分成小文件(<5MB) 3) 稍后重试"
+            )
+            db.commit()
+            
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.exception(f"[Ingest] Task {task_id} FAILED after {duration:.1f}s: {e}")
+        
+        try:
+            db.refresh(task)
+            task.status = "FAILED"
+            task.error_message = str(e)[:500]
+            db.commit()
+        except Exception as inner_e:
+            logger.error(f"[Ingest] Failed to update error status: {inner_e}")
+    finally:
+        db.close()
+        gc.collect()
+        logger.info(f"[Ingest] Task {task_id} cleanup complete")

@@ -19,11 +19,12 @@ def upsert_asset_vector(
     ip_id: str,
     content: str,
     precomputed_embedding: list[float] | None = None,
+    force: bool = False,
 ) -> bool:
     """
     写入 asset_vectors。若已在外部批量算好向量，传入 precomputed_embedding 可避免重复调用 Embedding API。
     """
-    if os.environ.get("INGEST_SKIP_EMBEDDING", "").lower() in ("1", "true", "yes"):
+    if (not force) and os.environ.get("INGEST_SKIP_EMBEDDING", "").lower() in ("1", "true", "yes"):
         return False
     text = (content or "").strip()
     if precomputed_embedding is not None:

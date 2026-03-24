@@ -28,7 +28,7 @@ from typing import List, Optional, Dict, Any
 import requests
 from sqlalchemy.orm import Session
 
-from app.db.models import FileObject, IPAsset, IngestTask, TagConfig
+from app.db.models import FileObject, IPAsset, IngestTask, TagConfig, AssetVector
 from app.db.models import now_utc
 from app.services.ai_client import (
     embed_texts_batched,
@@ -474,6 +474,26 @@ def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OV
     return [c for c in chunks if c]
 
 
+def _build_asset_title(task_title: Optional[str], chunk_index: int, total_chunks: int) -> str:
+    """
+    Build a stable ASCII suffix to avoid mojibake in some terminals/UIs.
+    """
+    base = (task_title or "").strip() or "Untitled"
+    base = " ".join(base.split())
+    if total_chunks > 1:
+        return f"{base} (chunk-{chunk_index + 1})"
+    return base
+
+
+def _enable_async_vector_backfill() -> bool:
+    raw = os.environ.get("INGEST_ASYNC_VECTOR_BACKFILL", "").strip().lower()
+    if raw in ("1", "true", "yes"):
+        return True
+    if raw in ("0", "false", "no"):
+        return False
+    return True
+
+
 def _run_ingest_pipeline(
     db: Session,
     task: IngestTask,
@@ -646,7 +666,7 @@ def _run_ingest_pipeline(
             for j, content in enumerate(batch_chunks):
                 i = batch_start + j
                 asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
-                title = (task.title or "未命名") + (f" (片段{i+1})" if total > 1 else "")
+                title = _build_asset_title(task.title, i, total)
                 # ===== P3/P4: 合并元数据 =====
                 meta: dict = {
                     "source_task_id": task.task_id,
@@ -719,6 +739,18 @@ def _run_ingest_pipeline(
         task.created_asset_ids = []
 
     db.commit()
+
+    # 文本先入库、向量事后补齐：避免 ingest 主链路被 embedding 慢请求阻塞/放大内存。
+    if skip_emb and created_ids and _enable_async_vector_backfill():
+        try:
+            from app.queue import enqueue_vector_backfill
+            enqueued = enqueue_vector_backfill(task.task_id)
+            if enqueued:
+                logger.info("[Ingest] queued vector backfill for task %s", task.task_id)
+            else:
+                logger.warning("[Ingest] vector backfill queue unavailable for task %s", task.task_id)
+        except Exception:
+            logger.exception("[Ingest] failed to enqueue vector backfill for task %s", task.task_id)
 
 
 def process_ingest_task(task_id: str) -> None:
@@ -822,3 +854,89 @@ def process_ingest_task(task_id: str) -> None:
         db.close()
         gc.collect()
         logger.info(f"[Ingest] Task {task_id} cleanup complete")
+
+
+def backfill_vectors_for_task(task_id: str) -> None:
+    """
+    事后异步补齐向量：
+    - 仅处理 ingest 已创建的素材
+    - 跳过已存在向量的素材
+    - 无视 INGEST_SKIP_EMBEDDING（force=True）写入向量
+    """
+    logger = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        task = get_ingest_task(db, task_id)
+        if not task:
+            logger.warning("[VectorBackfill] task not found: %s", task_id)
+            return
+
+        raw_ids = task.created_asset_ids or []
+        asset_ids = [str(x) for x in raw_ids if str(x).strip()]
+        if not asset_ids:
+            logger.info("[VectorBackfill] no assets to backfill for task: %s", task_id)
+            return
+
+        existing_ids = set(
+            x[0]
+            for x in (
+                db.query(AssetVector.asset_id)
+                .filter(AssetVector.asset_id.in_(asset_ids))
+                .all()
+            )
+        )
+        pending_ids = [aid for aid in asset_ids if aid not in existing_ids]
+        if not pending_ids:
+            logger.info("[VectorBackfill] all vectors already exist for task: %s", task_id)
+            return
+
+        rows = (
+            db.query(IPAsset)
+            .filter(IPAsset.asset_id.in_(pending_ids), IPAsset.status == "active")
+            .all()
+        )
+        row_map = {r.asset_id: r for r in rows}
+        ordered_rows = [row_map[aid] for aid in pending_ids if aid in row_map]
+        if not ordered_rows:
+            logger.info("[VectorBackfill] no active assets found for task: %s", task_id)
+            return
+
+        batch_size = _ingest_embed_batch_size()
+        success = 0
+        for start in range(0, len(ordered_rows), batch_size):
+            batch_rows = ordered_rows[start : start + batch_size]
+            texts = [(r.content or "").strip() for r in batch_rows]
+            embeddings = embed_texts_batched(texts, batch_size=min(batch_size, len(texts)))
+            for i, row in enumerate(batch_rows):
+                emb = embeddings[i] if i < len(embeddings) else None
+                if not emb:
+                    continue
+                try:
+                    ok = upsert_asset_vector(
+                        db,
+                        asset_id=row.asset_id,
+                        ip_id=row.ip_id,
+                        content=row.content or "",
+                        precomputed_embedding=emb,
+                        force=True,
+                    )
+                    if ok:
+                        success += 1
+                except Exception:
+                    logger.exception("[VectorBackfill] upsert failed for asset %s", row.asset_id)
+            db.commit()
+
+        logger.info(
+            "[VectorBackfill] task=%s done, success=%s, total=%s",
+            task_id,
+            success,
+            len(ordered_rows),
+        )
+    except Exception:
+        logger.exception("[VectorBackfill] failed for task=%s", task_id)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()

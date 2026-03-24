@@ -1,0 +1,10 @@
+{
+  "services": {
+    "api": {
+      "startCommand": "sh -c \"cd /app && python scripts/run_migrations.py && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}\""
+    },
+    "worker": {
+      "startCommand": "./worker_entrypoint.sh"
+    }
+  }
+}

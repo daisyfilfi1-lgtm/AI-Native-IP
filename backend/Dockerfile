@@ -8,8 +8,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN chmod +x worker_entrypoint.sh
+RUN chmod +x worker_entrypoint.sh entrypoint.sh
 
 ENV PORT=8000
 EXPOSE $PORT
-CMD sh -c "python scripts/run_migrations.py && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+CMD ["sh", "-c", "chmod +x /app/entrypoint.sh && exec /app/entrypoint.sh"]

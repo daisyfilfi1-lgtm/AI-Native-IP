@@ -3,6 +3,12 @@
 支持：text/document 的 URL 或本地上传（UTF-8 的 txt/md、docx 正文、PDF 可选字层文本）；video/audio 的 URL 或本地上传（Whisper 转写）。
 已配置 LLM 时，会自动调用打标（asset_meta.auto_labels）。
 
+优化版本 - 包含：
+- P1: 递归分块（智能语义分块）
+- P2: 智能重试（指数退避）
+- P3: 父子文档索引
+- P4: 元数据强化
+
 防OOM优化：
 - 任务超时控制（软超时，定期检查）
 - 内存使用限制
@@ -17,7 +23,7 @@ import time
 import uuid
 import zipfile
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 import requests
 from sqlalchemy.orm import Session
@@ -34,9 +40,101 @@ from app.db.session import SessionLocal
 from app.services.storage_service import download_bytes
 from app.services.vector_service import upsert_asset_vector
 
+# 尝试导入新的分块服务
+try:
+    from app.services.chunking_service import recursive_chunk, hybrid_chunk, Chunk
+    CHUNKING_AVAILABLE = True
+except ImportError:
+    CHUNKING_AVAILABLE = False
+
 # 分块默认长度（字符），可按需调整
 CHUNK_SIZE = 2000
 CHUNK_OVERLAP = 100
+
+# ===== P2: 智能重试配置 =====
+def _get_max_retries() -> int:
+    """获取最大重试次数"""
+    raw = os.environ.get("INGEST_MAX_RETRIES", "").strip()
+    if raw:
+        try:
+            return max(0, min(5, int(raw)))
+        except ValueError:
+            pass
+    return 3  # 默认3次
+
+
+def _get_retry_delay() -> float:
+    """获取基础重试延迟（秒）"""
+    raw = os.environ.get("INGEST_RETRY_DELAY", "").strip()
+    if raw:
+        try:
+            return max(1, float(raw))
+        except ValueError:
+            pass
+    return 2.0  # 默认2秒
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    """
+    判断错误是否可重试
+    
+    可重试：
+    - 网络超时/连接错误
+    - 临时服务不可用（503等）
+    - 配额限制（429）
+    
+    不可重试：
+    - 配置错误（缺环境变量）
+    - 格式错误（文件损坏）
+    - 认证错误
+    """
+    error_str = str(error).lower()
+    
+    # 不可重试的错误模式
+    non_retryable = [
+        "not set",           # 配置缺失
+        "not found",         # 资源不存在
+        "unauthorized",      # 认证失败
+        "forbidden",         # 权限不足
+        "invalid",           # 格式错误
+        "parse error",       # 解析失败
+        "not supported",     # 不支持
+        "missing",           # 缺少必要字段
+    ]
+    
+    for pattern in non_retryable:
+        if pattern in error_str:
+            return False
+    
+    # 可重试的错误模式
+    retryable = [
+        "timeout",           # 超时
+        "connection",        # 连接错误
+        "temporary",         # 临时错误
+        "429",               # 速率限制
+        "503",               # 服务不可用
+        "502",               # 网关错误
+        "504",               # 网关超时
+        "rate limit",        # 速率限制
+        "too many requests", # 请求过多
+    ]
+    
+    for pattern in retryable:
+        if pattern in error_str:
+            return True
+    
+    # 默认不重试（保守策略）
+    return False
+
+
+def _exponential_backoff(attempt: int, base_delay: float = 2.0) -> float:
+    """计算指数退避延迟"""
+    # 2^attempt * base_delay，最大60秒
+    delay = min(60, (2 ** attempt) * base_delay)
+    # 添加随机抖动（±25%）
+    import random
+    jitter = delay * 0.25 * (2 * random.random() - 1)
+    return delay + jitter
 
 # 大素材保护：避免海量分块 ×（每块 LLM + Embedding）拖垮内存与 CPU（OOM / Killed）
 def _ingest_max_text_chars() -> int:
@@ -471,13 +569,45 @@ def _run_ingest_pipeline(
         if skip_emb:
             ingest_notes.append("INGEST_SKIP_EMBEDDING=1：已跳过向量写入，仅保存文本与素材记录")
 
-        chunks = _chunk_text(rt)
+        # ===== P1: 智能分块 =====
+        if CHUNKING_AVAILABLE:
+            # 使用新的递归分块策略
+            chunk_objs = hybrid_chunk(rt, max_chunks=max_chunks)
+            chunks = [c.content for c in chunk_objs]
+            chunk_metadata = {i: c.metadata for i, c in enumerate(chunk_objs)}
+            # 记录使用的分块策略
+            if chunk_objs:
+                strategy = chunk_objs[0].metadata.get("strategy", "unknown") if chunk_objs[0].metadata else "recursive"
+                ingest_notes.append(f"使用智能分块策略: {strategy}")
+        else:
+            # 降级到旧的分块方式
+            chunks = _chunk_text(rt)
+            chunk_metadata = {}
+
         if not chunks:
             chunks = [rt or "(无内容)"]
 
         if len(chunks) > max_chunks:
             ingest_notes.append(f"分块仅保留前 {max_chunks} 段（共 {len(chunks)} 段），请拆分素材或调大 INGEST_MAX_CHUNKS")
             chunks = chunks[:max_chunks]
+
+        # ===== P4: 元数据强化 =====
+        enhanced_metadata: Dict[str, Any] = {}
+        
+        # 提取文档标题（从task title或首行）
+        if task.title:
+            enhanced_metadata["title"] = task.title
+        elif chunks and len(chunks[0]) > 10:
+            # 取首行作为标题
+            first_line = chunks[0].strip().split('\n')[0][:100]
+            enhanced_metadata["title_from_content"] = first_line
+        
+        # 记录原文长度（用于评估完整度）
+        enhanced_metadata["original_length"] = len(raw_text) if raw_text else 0
+        enhanced_metadata["chunk_count"] = len(chunks)
+        
+        # 记录使用的分块策略
+        enhanced_metadata["chunking_strategy"] = "hybrid" if CHUNKING_AVAILABLE else "legacy"
 
         if checker:
             checker.check()
@@ -517,12 +647,22 @@ def _run_ingest_pipeline(
                 i = batch_start + j
                 asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
                 title = (task.title or "未命名") + (f" (片段{i+1})" if total > 1 else "")
+                # ===== P3/P4: 合并元数据 =====
                 meta: dict = {
                     "source_task_id": task.task_id,
                     "source_type": task.source_type,
                     "chunk_index": i,
                     "total_chunks": total,
                 }
+                
+                # 合并增强元数据（仅首个块记录整体信息）
+                if i == 0:
+                    meta.update(enhanced_metadata)
+                
+                # 添加P1分块元数据（如果有）
+                if chunk_metadata and i in chunk_metadata:
+                    meta["chunk_info"] = chunk_metadata[i]
+                
                 if ingest_notes and i == 0:
                     meta["ingest_warnings"] = ingest_notes
                 if shared_tags:
@@ -601,40 +741,83 @@ def process_ingest_task(task_id: str) -> None:
             logger.warning(f"[Ingest] Task {task_id} already processed: {task.status}")
             return
 
-        # 执行流水线（软超时，适用于后台线程，禁止使用 signal.SIGALRM）
-        try:
-            _run_ingest_pipeline(
-                db,
-                task,
-                checker=TimeLimitChecker(timeout_seconds),
-            )
-            
-            duration = time.time() - start_time
-            logger.info(f"[Ingest] Completed task {task_id} in {duration:.1f}s")
-            
-        except TimeoutException:
-            duration = time.time() - start_time
-            logger.error(f"[Ingest] Task {task_id} TIMEOUT after {duration:.1f}s")
-            
-            db.refresh(task)
-            task.status = "TIMEOUT"
-            task.error_message = (
-                f"处理超时({timeout_seconds}秒)。"
-                f"建议：1) 压缩文件 2) 拆分成小文件(<5MB) 3) 稍后重试"
-            )
-            db.commit()
-            
-    except Exception as e:
-        duration = time.time() - start_time
-        logger.exception(f"[Ingest] Task {task_id} FAILED after {duration:.1f}s: {e}")
+        # ===== P2: 智能重试 =====
+        max_retries = _get_max_retries()
+        retry_delay = _get_retry_delay()
         
-        try:
-            db.refresh(task)
-            task.status = "FAILED"
-            task.error_message = str(e)[:500]
-            db.commit()
-        except Exception as inner_e:
-            logger.error(f"[Ingest] Failed to update error status: {inner_e}")
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                # 执行流水线（软超时，适用于后台线程，禁止使用 signal.SIGALRM）
+                _run_ingest_pipeline(
+                    db,
+                    task,
+                    checker=TimeLimitChecker(timeout_seconds),
+                )
+                
+                duration = time.time() - start_time
+                logger.info(f"[Ingest] Completed task {task_id} in {duration:.1f}s (attempt {attempt + 1})")
+                return  # 成功，直接返回
+                
+            except TimeoutException:
+                # 超时不重试，直接失败
+                duration = time.time() - start_time
+                logger.error(f"[Ingest] Task {task_id} TIMEOUT after {duration:.1f}s")
+                
+                db.refresh(task)
+                task.status = "TIMEOUT"
+                task.error_message = (
+                    f"处理超时({timeout_seconds}秒)。"
+                    f"建议：1) 压缩文件 2) 拆分成小文件(<5MB) 3) 稍后重试"
+                )
+                db.commit()
+                return
+                
+            except Exception as e:
+                last_error = e
+                duration = time.time() - start_time
+                
+                # 判断是否可重试
+                if attempt < max_retries and _is_retryable_error(e):
+                    backoff = _exponential_backoff(attempt, retry_delay)
+                    logger.warning(
+                        f"[Ingest] Task {task_id} failed (attempt {attempt + 1}/{max_retries + 1}), "
+                        f"retrying in {backoff:.1f}s: {e}"
+                    )
+                    time.sleep(backoff)
+                    # 重新查询任务状态（可能被其他进程修改）
+                    db.expire_all()
+                    task = get_ingest_task(db, task_id)
+                    if not task or task.status != "QUEUED":
+                        logger.warning(f"[Ingest] Task {task_id} no longer QUEUED, aborting retry")
+                        return
+                    continue
+                else:
+                    # 不可重试或已达最大重试次数
+                    logger.error(
+                        f"[Ingest] Task {task_id} FAILED after {attempt + 1} attempt(s): {e}"
+                    )
+                    db.refresh(task)
+                    task.status = "FAILED"
+                    
+                    # 区分可重试和不可重试错误
+                    if attempt >= max_retries:
+                        task.error_message = (
+                            f"重试{attempt}次后仍失败: {str(e)[:400]}"
+                        )
+                    else:
+                        task.error_message = f"失败（不重试）: {str(e)[:400]}"
+                    
+                    task.created_asset_ids = []
+                    db.commit()
+                    return
+        
+        # 兜底（理论上不会走到这里）
+        logger.error(f"[Ingest] Task {task_id} failed unexpectedly after {max_retries + 1} attempts")
+        db.refresh(task)
+        task.status = "FAILED"
+        task.error_message = f"未知错误: {str(last_error)[:400]}" if last_error else "未知错误"
+        db.commit()
     finally:
         db.close()
         gc.collect()

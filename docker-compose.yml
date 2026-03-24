@@ -3,8 +3,9 @@
 # 后端 .env 使用: DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ip_factory
 
 services:
+  # 含 pgvector 扩展，与迁移 008 一致（标准 postgres 镜像无 vector）
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: ip-factory-postgres
     environment:
       POSTGRES_USER: postgres
@@ -19,6 +20,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # 可选：RQ 本地联调（REDIS_URL=redis://localhost:6379/0）
+  redis:
+    image: redis:7-alpine
+    container_name: ip-factory-redis
+    ports:
+      - "6379:6379"
 
   qdrant:
     image: qdrant/qdrant:latest

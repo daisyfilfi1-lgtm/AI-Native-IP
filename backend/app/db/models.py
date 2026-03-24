@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -122,6 +123,7 @@ class IngestTask(Base):
     status = Column(String(32), nullable=False, default="QUEUED")
     error_message = Column(Text, nullable=True)
     created_asset_ids = Column(JSONB, nullable=False, default=list)
+    last_heartbeat = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=now_utc)
     updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
 
@@ -176,7 +178,7 @@ class AssetVector(Base):
 
     asset_id = Column(String(64), ForeignKey("ip_assets.asset_id"), primary_key=True)
     ip_id = Column(String(64), ForeignKey("ip.ip_id"), nullable=False, index=True)
-    embedding = Column(JSONB, nullable=False)
+    embedding = Column(Vector(1536), nullable=False)
     dim = Column(Integer, nullable=False)
     model = Column(String(128), nullable=False)
     created_at = Column(DateTime, nullable=False, default=now_utc)

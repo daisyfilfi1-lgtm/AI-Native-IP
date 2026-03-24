@@ -23,6 +23,7 @@ import requests
 from sqlalchemy.orm import Session
 
 from app.db.models import FileObject, IPAsset, IngestTask, TagConfig
+from app.db.models import now_utc
 from app.services.ai_client import (
     embed_texts_batched,
     suggest_tags_for_content,
@@ -135,6 +136,37 @@ class TimeLimitChecker:
 
 def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
     return db.query(IngestTask).filter(IngestTask.task_id == task_id).first()
+
+
+def mark_stale_processing_as_timeout(db: Session, stale_seconds: int = 300) -> int:
+    """
+    将超时无心跳的 PROCESSING 任务标记为 TIMEOUT（集成执行标准 v1.0）。
+    返回标记数量。
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy import and_, or_
+    threshold = datetime.utcnow() - timedelta(seconds=stale_seconds)
+    stale = (
+        db.query(IngestTask)
+        .filter(
+            and_(
+                IngestTask.status == "PROCESSING",
+                or_(
+                    IngestTask.last_heartbeat == None,
+                    IngestTask.last_heartbeat < threshold,
+                ),
+            )
+        )
+        .all()
+    )
+    for t in stale:
+        t.status = "TIMEOUT"
+        t.error_message = (
+            t.error_message or ""
+        ) + f" [无心跳超过{stale_seconds}秒，系统自动标记]"
+    if stale:
+        db.commit()
+    return len(stale)
 
 
 def _normalize_http_url(url: str | None) -> str:
@@ -364,6 +396,7 @@ def _run_ingest_pipeline(
         logger.info("Starting pipeline for task: %s", task.task_id)
 
     task.status = "PROCESSING"
+    task.last_heartbeat = now_utc()
     db.commit()
 
     try:
@@ -469,6 +502,8 @@ def _run_ingest_pipeline(
         for batch_start in range(0, total, embed_bs):
             if checker:
                 checker.check()
+            task.last_heartbeat = now_utc()
+            db.commit()
             batch_chunks = chunks[batch_start : batch_start + embed_bs]
             if skip_emb:
                 batch_embeddings: List[list[float] | None] = [None] * len(batch_chunks)
@@ -581,7 +616,7 @@ def process_ingest_task(task_id: str) -> None:
             logger.error(f"[Ingest] Task {task_id} TIMEOUT after {duration:.1f}s")
             
             db.refresh(task)
-            task.status = "FAILED"
+            task.status = "TIMEOUT"
             task.error_message = (
                 f"处理超时({timeout_seconds}秒)。"
                 f"建议：1) 压缩文件 2) 拆分成小文件(<5MB) 3) 稍后重试"

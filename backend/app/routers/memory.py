@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.db.models import FileObject, IngestTask, IPAsset
 from app.services.ingest_service import get_ingest_task, process_ingest_task
+from app.queue import enqueue_ingest
 from app.services.memory_config_service import get_ip
 from app.services.storage_service import LOCAL_BUCKET, build_public_url, upload_bytes
 from app.services.vector_service import query_similar_assets
@@ -107,6 +108,7 @@ def ingest_memory(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> Any:
+    # 优先使用 RQ（需 REDIS_URL + worker）；否则回退到 BackgroundTasks
     """
     素材录入：创建任务并加入后台队列，拉取内容后分块写入 ip_assets。
     source_url 与 local_file_id 至少填其一：文本/文档可走 URL 或本地上传；
@@ -139,6 +141,8 @@ def ingest_memory(
     db.add(task)
     db.commit()
 
+    if enqueue_ingest(task_id):
+        return IngestResponse(ingest_task_id=task_id, status="QUEUED")
     background_tasks.add_task(process_ingest_task, task_id)
     return IngestResponse(ingest_task_id=task_id, status="QUEUED")
 

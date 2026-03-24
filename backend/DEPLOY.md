@@ -6,6 +6,17 @@
 
 ---
 
+## 升级后部署检查（RQ + 状态机 + pgvector）
+
+| 项目 | 说明 |
+|------|------|
+| **PostgreSQL** | 必须用 **pgvector 模板**（见下文 4），普通 Postgres 无 `vector` 扩展，迁移 008 会失败 |
+| **DATABASE_URL** | 由 pgvector 版 Postgres 提供，注入到 Web 服务 |
+| **REDIS_URL** | 可选。配置后 ingest 走 RQ；不配则回退 BackgroundTasks |
+| **Worker 服务** | 配置 REDIS_URL 后需单独部署，Start Command = `python scripts/worker.py` |
+
+---
+
 ## 前提
 
 - 代码已推送到 **GitHub** 仓库
@@ -20,8 +31,12 @@
 3. **构建方式二选一**（勿混用：Root Directory 与 Dockerfile 必须匹配）：  
    - **方式 A（推荐）**：在该 Web 服务的 **Settings → Root Directory** 中填写 **`backend`**，保存。仓库内 **`backend/railway.toml`** 会指定用 **`backend/Dockerfile`** 构建（构建上下文仅为 `backend/`，避免「根目录 Dockerfile 在上下文外」导致构建失败）。容器启动时会执行 `scripts/run_migrations.py` 再启动 uvicorn。可选：在 **Pre-deploy Command** 中再写一次 `python scripts/run_migrations.py`（与镜像内迁移重复，一般可省略）。  
    - **方式 B**：**Root Directory 留空**，使用仓库根目录的 **Dockerfile** 与根目录 **`railway.toml`**；迁移同样在容器启动时执行。
-4. **添加 PostgreSQL**：在同一项目里点击 **New → Database → PostgreSQL**。创建后 Railway 会生成数据库，并在项目内暴露 `DATABASE_URL`。若 Web 服务未自动获得该变量，到 Web 服务 **Variables** 中添加：`DATABASE_URL` = `${{Postgres.DATABASE_URL}}`（或按面板上该数据库的变量引用名称填写）。
-5. **部署**：Railway 会识别 `Procfile` 中的 `web: uvicorn app.main:app --host 0.0.0.0 --port $PORT` 并启动服务。首次推送或点击 **Deploy** 后等待构建完成。
+4. **添加 PostgreSQL（必须用 pgvector 版）**：迁移 `008_pgvector.sql` 依赖 `vector` 扩展，**普通 PostgreSQL 模板没有该扩展**。请使用 **pgvector 模板**：
+   - 在同一项目内点击 **New → Template** 或 **New → Database**
+   - 搜索并选择 **"Postgres with pgVector Engine"**（或访问 [railway.com/deploy/postgres-with-pgvector-engine](https://railway.com/deploy/postgres-with-pgvector-engine)）
+   - 部署后 Railway 会暴露 `DATABASE_URL`。在 Web 服务的 **Variables** 中添加：`DATABASE_URL` = `${{Postgres.DATABASE_URL}}`（变量名以实际服务名为准）。
+   - 若已存在普通 Postgres：需新建 pgvector 版并迁移数据，或从零开始用 pgvector 模板部署。
+5. **部署**：Dockerfile 启动时会先执行迁移再启动 uvicorn。首次推送或点击 **Deploy** 后等待构建完成。
 6. **生成公网域名**：在 Web 服务 **Settings → Networking → Generate Domain**，得到类似 `xxx.up.railway.app` 的 HTTPS 地址。
 
 ---
@@ -61,10 +76,26 @@
 | `OPENAI_*` / `OPENAI_TRANSCRIPTION_*` | AI 打标、Embedding、Whisper；详见 `docs/AI_CONFIG.md`。 |
 | `STORAGE_*` | 对象存储（S3 兼容，含阿里云 OSS）；详见 `docs/STORAGE_ALIYUN_OSS.md` 与 `backend/.env.example`。 |
 | `FEISHU_*` | 飞书同步（可选）。 |
+| `REDIS_URL` | 可选。Redis 连接串；配置后 ingest 任务走 RQ 队列，需单独部署 worker 进程。未配置时回退到 FastAPI BackgroundTasks。 |
 | `QDRANT_*` | 向量数据库（可选）；详见下方"五、部署可选服务"。 |
 | `NEO4J_*` | 知识图谱（可选）；详见下方"五、部署可选服务"。 |
 
+**RQ Worker（Railway）**：配置 `REDIS_URL` 后，需单独部署 Worker 服务：
+1. 在 Railway 项目内 **New → GitHub Repo**，选中同一仓库。
+2. 新服务 **Settings → Root Directory** 填 `backend`。
+3. **Settings → Deploy** 中设置 **Start Command** 为：`python scripts/worker.py`（覆盖默认 web 启动）。
+4. 在 **Variables** 中添加 `REDIS_URL`（见下）、`DATABASE_URL`（与 Web 服务一致，引用同一 Postgres），以及 Web 服务已有的 AI/存储等变量（Worker 执行 ingest 时需要）。
+5. 可选：**Settings** 中取消勾选 **Generate Domain**（Worker 不需要公网访问）。
+
+**卡死任务清理（可选）**：建议配置 Cron 每 5 分钟执行 `python scripts/run_stale_task_cleanup.py`，将长期 PROCESSING 且无心跳的任务标记为 TIMEOUT。可通过 `STALE_TASK_THRESHOLD_SECONDS=300` 调整阈值。
+
 ## 五、部署可选服务（Qdrant + Neo4j）
+
+### Redis（RQ 队列，可选）
+
+- 在 Railway 项目内点击 **New → Database → Redis**，或 **Marketplace** 搜索 Redis。
+- 创建后在 Web 服务与 Worker 的 **Variables** 中添加：`REDIS_URL` = `${{Redis.REDIS_URL}}`（以实际变量名为准）。
+- 未配置时，ingest 会回退到 FastAPI BackgroundTasks（可先上线测 API，再加 Redis+Worker）。
 
 ### 方案A：使用 Railway 模板（推荐）
 
@@ -133,6 +164,6 @@
 - **502 / 无法访问**：确认启动使用 `$PORT`（Dockerfile / `Procfile` 已配置）；健康检查路径为 **`/health`**（与 `railway.toml` 一致）。
 - **方式 A 迁移未执行**：镜像启动命令已含迁移；若仍缺表，可在 **Pre-deploy Command** 增加 `python scripts/run_migrations.py`，或在本地 `railway run python scripts/run_migrations.py`。
 - **数据库连接失败**：确认 Web 服务环境变量中有 `DATABASE_URL`（来自 Postgres 插件或 `${{Postgres.DATABASE_URL}}` 引用），且迁移已成功。
-- **迁移报错**：在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001`～`004` 等 SQL 文件。
+- **迁移报错**：在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001`～`008` 等 SQL 文件。若报 `extension "vector" does not exist`，说明数据库非 pgvector 版，需改用 **Postgres with pgVector Engine** 模板。
 - **ingest 任务一直 PROCESSING 或进程被 Killed（OOM）**：大文件会产生极多分块；旧版曾对**每一块**各调一次 LLM 打标与 Embedding，易拖垮内存与 CPU。当前实现已改为**单次打标**、**批量 Embedding**、**正文/分块上限**与**分批 `commit`**。若仍吃紧，在环境中下调 `INGEST_MAX_TEXT_CHARS`、`INGEST_MAX_CHUNKS`，必要时略减 `INGEST_EMBED_BATCH_SIZE`；并设置 `OPENAI_HTTP_TIMEOUT` 避免 API 无限挂起。
 - **浏览器报 CORS / 跨域被拦**：官方前端（Netlify）应使用 **同源** `/api/v1`，由 Next.js `rewrites` 在服务端转发到本服务，**不依赖**浏览器 CORS。若仍用 `NEXT_PUBLIC_API_URL` 直连 Railway，需正确 CORS；**502** 时网关响应无 CORS 头，会表现为 CORS+502 叠加——优先修部署稳定性或改回同源代理。后端默认对 `*.netlify.app` 等放行；直连工具可设 `CORS_ORIGINS=*`。

@@ -33,6 +33,8 @@ ORDER = [
     "004_storage_and_vectors.sql",
     "005_ip_profile_fields.sql",
     "006_integration_bindings.sql",
+    "007_ingest_heartbeat.sql",
+    "008_pgvector.sql",
 ]
 
 

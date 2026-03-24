@@ -1,11 +1,10 @@
 """
-向量存储与检索（Phase 1）。
-当前使用 PostgreSQL JSONB 存储向量，后续可平滑迁移到 pgvector 或外部向量库。
+向量存储与检索。使用 pgvector 原生向量类型，支持高效相似度检索。
 """
 import os
-from math import sqrt
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config.ai_config import get_ai_config
@@ -36,6 +35,8 @@ def upsert_asset_vector(
         if not vectors or not vectors[0]:
             return False
         vec = vectors[0]
+    if len(vec) != 1536:
+        return False
     cfg = get_ai_config()
     model = cfg.get("embedding_model") or "text-embedding-3-small"
     row = db.query(AssetVector).filter(AssetVector.asset_id == asset_id).first()
@@ -56,17 +57,6 @@ def upsert_asset_vector(
     return True
 
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = sqrt(sum(x * x for x in a))
-    nb = sqrt(sum(y * y for y in b))
-    if na <= 0 or nb <= 0:
-        return 0.0
-    return dot / (na * nb)
-
-
 def query_similar_assets(
     db: Session,
     *,
@@ -81,17 +71,18 @@ def query_similar_assets(
     if not qv or not qv[0]:
         return []
     query_vec = qv[0]
+    if len(query_vec) != 1536:
+        return []
 
-    rows = (
-        db.query(AssetVector)
-        .filter(AssetVector.ip_id == ip_id)
-        .all()
+    dist = AssetVector.embedding.cosine_distance(query_vec)
+    stmt = (
+        select(AssetVector.asset_id, dist.label("d"))
+        .where(AssetVector.ip_id == ip_id)
+        .order_by(dist.asc())
+        .limit(max(1, top_k))
     )
-    scored: list[tuple[str, float]] = []
-    for r in rows:
-        vec = r.embedding if isinstance(r.embedding, list) else []
-        sim = _cosine_similarity(query_vec, vec)
-        if sim > 0:
-            scored.append((r.asset_id, sim))
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return [{"asset_id": aid, "similarity": sim} for aid, sim in scored[:top_k]]
+    rows = db.execute(stmt).all()
+    return [
+        {"asset_id": aid, "similarity": max(0, 1.0 - d)}
+        for aid, d in rows
+    ]

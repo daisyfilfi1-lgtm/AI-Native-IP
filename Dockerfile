@@ -7,6 +7,7 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
+RUN chmod +x worker_entrypoint.sh
 
 ENV PORT=8000
 EXPOSE $PORT

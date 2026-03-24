@@ -5,6 +5,8 @@ Simplified version for stability
 import os
 import logging
 
+# Worker service enabled - RQ queue processing
+
 from app.env_loader import load_backend_env
 load_backend_env()
 

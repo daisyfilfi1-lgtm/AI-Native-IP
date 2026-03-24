@@ -2,6 +2,11 @@
 # 与仓库根 Dockerfile 行为一致：迁移后启动 Uvicorn。
 FROM python:3.11-slim
 
+# 安装 SSL 证书（解决 HTTPS 拉取问题）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt .

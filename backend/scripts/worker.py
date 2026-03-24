@@ -1,3 +1,4 @@
+# RQ Worker - processes ingest tasks from Redis queue
 """
 RQ Worker 入口。需配置 REDIS_URL。
 用法：python scripts/worker.py

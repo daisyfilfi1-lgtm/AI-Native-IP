@@ -403,6 +403,7 @@ def _run_ingest_pipeline(
         if checker:
             checker.check()
         st = task.source_type or "text"
+        # 当 local_file_id 与 source_url 同时存在时，优先使用本地上传（用户显式选择的文件）
         if st in ("video", "audio") and task.local_file_id:
             raw_text = _transcribe_from_file_object(db, task)
             if not (raw_text or "").strip():

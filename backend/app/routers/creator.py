@@ -144,6 +144,62 @@ def _target_duration_to_length(seconds: int) -> str:
     return "medium"
 
 
+def _split_content_sections(text: str) -> Dict[str, str]:
+    """将纯文本草稿粗分为 hook/story/opinion/cta，避免前端展示占位。"""
+    content = (text or "").strip()
+    if not content:
+        return {"hook": "", "story": "", "opinion": "", "cta": ""}
+    lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+    hook = lines[0][:200] if lines else ""
+    body = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
+    # 简单拆分：最后一段作为 CTA，其余为观点主体
+    parts = [p.strip() for p in body.split("\n\n") if p.strip()]
+    cta = parts[-1] if len(parts) >= 2 else ""
+    opinion = "\n\n".join(parts[:-1]).strip() if len(parts) >= 2 else body
+    return {"hook": hook, "story": "", "opinion": opinion, "cta": cta}
+
+
+def _save_generated_draft(
+    db: Session,
+    *,
+    draft_id: str,
+    ip_id: str,
+    level: str,
+    title: str,
+    content: str,
+    style: str,
+    generation_source: str,
+    score: float,
+    extra_workflow: Optional[Dict[str, Any]] = None,
+) -> None:
+    sections = _split_content_sections(content)
+    workflow: Dict[str, Any] = {
+        "title": title[:200] or "未命名内容",
+        "topic": title,
+        "body": content,
+        "hook": sections["hook"],
+        "story": sections["story"],
+        "opinion": sections["opinion"],
+        "cta": sections["cta"],
+        "style": style,
+        "generation_source": generation_source,
+        "agent_chain": ["Strategy", "Memory", "Generation", "Compliance"],
+        "display_status": "draft",
+    }
+    if isinstance(extra_workflow, dict) and extra_workflow:
+        workflow.update(extra_workflow)
+    row = ContentDraft(
+        draft_id=draft_id,
+        ip_id=ip_id or "1",
+        level=level,
+        workflow=workflow,
+        quality_score={"score": float(score or 0.0)},
+        compliance_status="passed",
+    )
+    db.add(row)
+    db.commit()
+
+
 # === 场景一：推荐选题生成 ===
 class TopicGenerateRequest(BaseModel):
     topicId: str
@@ -174,8 +230,21 @@ async def generate_from_topic(req: TopicGenerateRequest, db: Session = Depends(g
 
         if results:
             result = results[0]
+            draft_id = f"gen_topic_{uuid.uuid4().hex[:10]}"
+            _save_generated_draft(
+                db,
+                draft_id=draft_id,
+                ip_id=req.ipId or "1",
+                level="topic",
+                title=req.topicId,
+                content=result.content or "",
+                style=req.style,
+                generation_source="topic",
+                score=float(result.score or 0.0),
+                extra_workflow={"source_topic_id": req.topicId},
+            )
             return {
-                "id": f"gen_{req.topicId}",
+                "id": draft_id,
                 "status": "completed",
                 "progress": 100,
                 "estimatedTime": 0,
@@ -222,9 +291,22 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
         )
 
         result = await ContentGenerator.scenario_two(request)
+        draft_id = f"gen_remix_{uuid.uuid4().hex[:10]}"
+        _save_generated_draft(
+            db,
+            draft_id=draft_id,
+            ip_id=req.ipId or "1",
+            level="remix",
+            title="仿写爆款",
+            content=result.content or "",
+            style=req.style,
+            generation_source="remix",
+            score=float(result.score or 0.0),
+            extra_workflow={"source_url": req.url},
+        )
 
         return {
-            "id": "gen_remix_001",
+            "id": draft_id,
             "status": "completed",
             "progress": 100,
             "estimatedTime": 0,
@@ -288,32 +370,21 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
         result = await ContentGenerator.scenario_three(request)
 
         draft_id = f"gen_viral_{uuid.uuid4().hex[:10]}"
-        workflow: Dict[str, Any] = {
-            "title": (req.input or "").strip()[:200] or "爆款原创",
-            "topic": req.input,
-            "body": result.content,
-            # 结果页当前按 hook/story/opinion/cta 四段展示；没有结构化输出时做一个可读的兜底分段
-            "hook": (result.content or "").strip().splitlines()[0][:200] if isinstance(result.content, str) else "",
-            "story": "",
-            "opinion": result.content or "",
-            "cta": "",
-            "style": req.style,
-            "viralElements": req.viralElements or [],
-            "scriptTemplate": req.scriptTemplate or "",
-            "generation_source": "viral",
-            "agent_chain": ["Strategy", "Memory", "Generation", "Compliance"],
-            "display_status": "draft",
-        }
-        row = ContentDraft(
+        _save_generated_draft(
+            db,
             draft_id=draft_id,
             ip_id=req.ipId or "1",
             level="viral",
-            workflow=workflow,
-            quality_score={"score": float(result.score or 0.0)},
-            compliance_status="passed",
+            title=(req.input or "").strip()[:200] or "爆款原创",
+            content=result.content or "",
+            style=req.style,
+            generation_source="viral",
+            score=float(result.score or 0.0),
+            extra_workflow={
+                "viralElements": req.viralElements or [],
+                "scriptTemplate": req.scriptTemplate or "",
+            },
         )
-        db.add(row)
-        db.commit()
 
         return {
             "id": draft_id,
@@ -351,8 +422,20 @@ async def generate_from_voice(req: VoiceGenerateRequest, db: Session = Depends(g
             length="medium",
         )
         result = await ContentGenerator.scenario_three(request)
+        draft_id = f"gen_voice_{uuid.uuid4().hex[:10]}"
+        _save_generated_draft(
+            db,
+            draft_id=draft_id,
+            ip_id=req.ipId or "1",
+            level="voice",
+            title=req.text.strip()[:200] or "语音创作",
+            content=result.content or "",
+            style=req.style,
+            generation_source="voice",
+            score=float(result.score or 0.0),
+        )
         return {
-            "id": "gen_voice_001",
+            "id": draft_id,
             "status": "completed",
             "progress": 100,
             "estimatedTime": 0,

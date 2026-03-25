@@ -68,6 +68,11 @@ class BatchGenerateRequest(BaseModel):
     topics: List[str] = Field(..., description="批量生成的话题列表")
 
 
+class RecommendTopicsRequest(BaseModel):
+    ip_id: str
+    count: int = Field(5, ge=1, le=20, description="推荐选题条数")
+
+
 # ==================== API Endpoints ====================
 
 @router.post("/content/generate", response_model=GenerateContentResponse)
@@ -88,7 +93,7 @@ def generate_content(
     if not ip:
         raise HTTPException(status_code=404, detail=f"IP不存在: {payload.ip_id}")
     
-    # 构建IP画像
+    # 构建IP画像（合并数据库中的风格画像）
     ip_profile = {
         "name": ip.name,
         "expertise": ip.expertise,
@@ -97,8 +102,28 @@ def generate_content(
         "style_features": ip.bio or "专业",
         "vocabulary": ip.expertise or "",
         "tone": "专业亲切",
+        "catchphrases": "",
     }
-    
+    sp = getattr(ip, "style_profile", None)
+    if isinstance(sp, dict) and sp:
+        voc = sp.get("vocabulary")
+        if isinstance(voc, list) and voc:
+            ip_profile["vocabulary"] = ", ".join(str(x) for x in voc[:40])
+        cp = sp.get("catchphrases")
+        if isinstance(cp, list) and cp:
+            ip_profile["catchphrases"] = ", ".join(str(x) for x in cp[:15])
+        if sp.get("tone"):
+            ip_profile["tone"] = str(sp["tone"])
+        bits = [ip.bio or ""]
+        pats = sp.get("sentence_patterns")
+        if isinstance(pats, list) and pats:
+            bits.append("句式偏好: " + "，".join(str(x) for x in pats[:5]))
+        if sp.get("emotion_curve"):
+            bits.append("情感曲线: " + str(sp["emotion_curve"]))
+        merged = " ".join(b for b in bits if b).strip()
+        if merged:
+            ip_profile["style_features"] = merged
+
     # 创建生成管道
     pipeline = create_content_pipeline(payload.ip_id, ip_profile)
     
@@ -130,47 +155,51 @@ def analyze_topics(
         raise HTTPException(status_code=404, detail=f"IP不存在: {payload.ip_id}")
     
     ip_profile = {
+        "name": ip.name,
         "expertise": ip.expertise or "",
         "content_direction": ip.content_direction or "",
         "target_audience": ip.target_audience or "",
+        "unique_value_prop": ip.unique_value_prop or "",
     }
-    
+
     agent = create_strategy_agent(payload.ip_id, ip_profile)
     result = agent.analyze_topics(payload.topics)
-    
+
     return TopicAnalysisResponse(
         recommended_topics=result.get("recommended_topics", []),
-        analysis=str(result),
+        analysis=result.get("analysis") or "",
     )
 
 
 @router.post("/content/topics/recommend")
 def recommend_topics(
-    ip_id: str,
-    count: int = 5,
+    payload: RecommendTopicsRequest,
     db: Session = Depends(get_db),
 ):
     """
     智能推荐选题
     
-    自动获取热点，分析相关性，推荐最佳选题
+    基于 IP 画像由模型生成候选选题（无需外部热点 API）。
     """
-    ip = db.query(IP).filter(IP.ip_id == ip_id).first()
+    ip = db.query(IP).filter(IP.ip_id == payload.ip_id).first()
     if not ip:
-        raise HTTPException(status_code=404, detail=f"IP不存在: {ip_id}")
-    
+        raise HTTPException(status_code=404, detail=f"IP不存在: {payload.ip_id}")
+
     ip_profile = {
+        "name": ip.name,
         "expertise": ip.expertise or "",
         "content_direction": ip.content_direction or "",
         "target_audience": ip.target_audience or "",
+        "unique_value_prop": ip.unique_value_prop or "",
     }
-    
-    agent = create_strategy_agent(ip_id, ip_profile)
-    recommendations = agent.recommend_topics(count=count)
-    
+
+    agent = create_strategy_agent(payload.ip_id, ip_profile)
+    result = agent.recommend_topics(count=payload.count)
+
     return {
-        "ip_id": ip_id,
-        "recommendations": recommendations,
+        "ip_id": payload.ip_id,
+        "recommendations": result.get("recommended_topics", []),
+        "analysis": result.get("analysis", ""),
     }
 
 
@@ -223,8 +252,30 @@ def batch_generate_content(
         "content_direction": ip.content_direction,
         "target_audience": ip.target_audience,
         "style_features": ip.bio or "专业",
+        "vocabulary": ip.expertise or "",
+        "tone": "专业亲切",
+        "catchphrases": "",
     }
-    
+    sp = getattr(ip, "style_profile", None)
+    if isinstance(sp, dict) and sp:
+        voc = sp.get("vocabulary")
+        if isinstance(voc, list) and voc:
+            ip_profile["vocabulary"] = ", ".join(str(x) for x in voc[:40])
+        cp = sp.get("catchphrases")
+        if isinstance(cp, list) and cp:
+            ip_profile["catchphrases"] = ", ".join(str(x) for x in cp[:15])
+        if sp.get("tone"):
+            ip_profile["tone"] = str(sp["tone"])
+        bits = [ip.bio or ""]
+        pats = sp.get("sentence_patterns")
+        if isinstance(pats, list) and pats:
+            bits.append("句式偏好: " + "，".join(str(x) for x in pats[:5]))
+        if sp.get("emotion_curve"):
+            bits.append("情感曲线: " + str(sp["emotion_curve"]))
+        merged = " ".join(b for b in bits if b).strip()
+        if merged:
+            ip_profile["style_features"] = merged
+
     pipeline = create_content_pipeline(payload.ip_id, ip_profile)
     results = pipeline.batch_generate(payload.topics)
     

@@ -1,6 +1,7 @@
 from app.db.session import get_db, engine, SessionLocal
 from app.db.models import (
     Base,
+    CompetitorAccount,
     ConfigHistory,
     ContentDraft,
     FileObject,
@@ -28,4 +29,5 @@ __all__ = [
     "FileObject",
     "AssetVector",
     "IntegrationConfig",
+    "CompetitorAccount",
 ]

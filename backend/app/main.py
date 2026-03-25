@@ -15,18 +15,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from app.routers import (
-    baidu_pan_sync, 
-    config_memory, 
+    baidu_pan_sync,
+    config_memory,
     content,
+    content_generation,
     creator,
-    feishu_sync, 
-    graph, 
-    ip, 
-    memory, 
-    memory_consolidation, 
-    multimodal, 
+    feishu_sync,
+    graph,
+    ip,
+    memory,
+    memory_consolidation,
+    multimodal,
+    strategy_agent,
     style,
-    vector
+    vector,
 )
 from app.middleware.auth import verify_api_key
 
@@ -129,6 +131,10 @@ def create_app() -> FastAPI:
     app.include_router(memory_consolidation.router, prefix="/api/v1", tags=["memory"], dependencies=api_key_dep)
     app.include_router(multimodal.router, prefix="/api/v1", tags=["multimodal"], dependencies=api_key_dep)
     app.include_router(content.router, prefix="/api/v1", tags=["content"], dependencies=api_key_dep)
+    app.include_router(
+        content_generation.router, prefix="/api/v1", tags=["content-generation"], dependencies=api_key_dep
+    )
+    app.include_router(strategy_agent.router, prefix="/api/v1", tags=["strategy"], dependencies=api_key_dep)
     app.include_router(style.router, prefix="/api/v1", tags=["style"], dependencies=api_key_dep)
     app.include_router(creator.router, prefix="/api", tags=["creator"], dependencies=api_key_dep)
 

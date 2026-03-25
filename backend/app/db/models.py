@@ -52,6 +52,27 @@ class IP(Base):
     price_range = Column(String(100), nullable=True)  # 客单价区间
     repurchase_rate = Column(String(50), nullable=True)  # 复购率
 
+    # 从素材提取的风格画像（JSON，与 IPStyleProfile 字段一致）
+    style_profile = Column(JSONB, nullable=True)
+
+    # 策略 Agent：四维权重、选题评分卡滑块、黑名单、抓取配置等
+    strategy_config = Column(JSONB, nullable=True)
+
+
+class CompetitorAccount(Base):
+    """竞品监控账号（按 IP 维度）"""
+
+    __tablename__ = "competitor_accounts"
+
+    competitor_id = Column(String(64), primary_key=True)
+    ip_id = Column(String(64), ForeignKey("ip.ip_id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    platform = Column(String(64), nullable=False, default="")
+    followers_display = Column(String(64), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=now_utc)
+    updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
+
 
 class IPAsset(Base):
     __tablename__ = "ip_assets"

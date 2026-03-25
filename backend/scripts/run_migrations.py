@@ -35,6 +35,8 @@ ORDER = [
     "006_integration_bindings.sql",
     "007_ingest_heartbeat.sql",
     "008_pgvector.sql",
+    "009_style_profile.sql",
+    "010_strategy_agent.sql",
 ]
 
 

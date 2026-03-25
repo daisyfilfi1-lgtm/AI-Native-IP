@@ -1,6 +1,7 @@
 """
 IP风格建模API路由
 """
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -34,6 +35,10 @@ class ApplyStyleRequest(BaseModel):
 class GenerateWithStyleRequest(BaseModel):
     ip_id: str
     topic: str = Field(..., description="生成内容的话题")
+
+
+class StyleTextResponse(BaseModel):
+    content: str
 
 
 class StyleProfileResponse(BaseModel):
@@ -84,11 +89,17 @@ async def extract_style(
     
     # 提取风格
     profile = extract_style_from_assets(asset_list, payload.ip_id)
-    
-    return StyleProfileResponse(**profile.model_dump())
+    data = profile.model_dump()
+    ip.style_profile = data
+    ip.updated_at = datetime.utcnow()
+    db.add(ip)
+    db.commit()
+    db.refresh(ip)
+
+    return StyleProfileResponse(**data)
 
 
-@router.post("/style/apply")
+@router.post("/style/apply", response_model=StyleTextResponse)
 async def apply_ip_style(
     payload: ApplyStyleRequest,
     db: Session = Depends(get_db),
@@ -101,13 +112,15 @@ async def apply_ip_style(
     ip = db.query(IP).filter(IP.ip_id == payload.ip_id).first()
     if not ip:
         raise HTTPException(status_code=404, detail=f"IP不存在: {payload.ip_id}")
-    
-    # TODO: 从缓存或数据库加载已提取的风格画像
-    # 这里简化处理，实际应从数据库读取
-    raise HTTPException(status_code=501, detail="请先调用 /style/extract 提取风格")
+    if not ip.style_profile:
+        raise HTTPException(status_code=400, detail="请先调用 POST /style/extract 从素材提取风格")
+
+    profile = IPStyleProfile.model_validate(dict(ip.style_profile))
+    text = apply_style(payload.content, profile)
+    return StyleTextResponse(content=text)
 
 
-@router.post("/style/generate")
+@router.post("/style/generate", response_model=StyleTextResponse)
 async def generate_with_ip_style(
     payload: GenerateWithStyleRequest,
     db: Session = Depends(get_db),
@@ -120,9 +133,12 @@ async def generate_with_ip_style(
     ip = db.query(IP).filter(IP.ip_id == payload.ip_id).first()
     if not ip:
         raise HTTPException(status_code=404, detail=f"IP不存在: {payload.ip_id}")
-    
-    # TODO: 加载风格画像
-    raise HTTPException(status_code=501, detail="请先调用 /style/extract 提取风格")
+    if not ip.style_profile:
+        raise HTTPException(status_code=400, detail="请先调用 POST /style/extract 从素材提取风格")
+
+    profile = IPStyleProfile.model_validate(dict(ip.style_profile))
+    text = generate_with_style(payload.topic, profile)
+    return StyleTextResponse(content=text)
 
 
 @router.get("/style/{ip_id}", response_model=StyleProfileResponse)
@@ -136,6 +152,7 @@ async def get_style_profile(
     ip = db.query(IP).filter(IP.ip_id == ip_id).first()
     if not ip:
         raise HTTPException(status_code=404, detail=f"IP不存在: {ip_id}")
-    
-    # TODO: 从缓存读取
-    raise HTTPException(status_code=404, detail="风格画像未提取，请先调用 /style/extract")
+    if not ip.style_profile:
+        raise HTTPException(status_code=404, detail="风格画像未提取，请先调用 /style/extract")
+
+    return StyleProfileResponse(**dict(ip.style_profile))

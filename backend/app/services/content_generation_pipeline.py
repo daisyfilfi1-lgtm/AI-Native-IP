@@ -50,20 +50,66 @@ IP_STYLE_PROMPT = """你是一个资深的{ip_name}。
 
 请生成内容："""
 
-TOPIC_ANALYSIS_PROMPT = """分析以下话题，找出与IP最相关的切入角度。
+TOPIC_ANALYSIS_PROMPT = """你是短视频选题策划。根据 IP 画像与给定话题列表，输出严格 JSON（不要 markdown 代码块）。
 
-## IP画像
+## IP 画像
+- 名称: {name}
 - 领域: {expertise}
-- 风格: {content_direction}
+- 内容方向: {content_direction}
 - 目标受众: {target_audience}
+- 独特价值: {unique_value_prop}
 
-## 热点话题
+## 候选话题（每行一条）
 {topics}
 
-请输出：
-1. 最相关的3个话题
-2. 每个话题的切入角度
-3. 建议的内容形式"""
+## 爆款元素 id（每条选题从中选 2-3 个）
+cost, crowd, weird, worst, contrast, nostalgia, hormone, top
+
+## 输出 JSON 格式
+{{
+  "recommended_topics": [
+    {{
+      "title": "string",
+      "score": 85,
+      "reason": "string",
+      "trend": "up",
+      "viral_elements": ["cost", "crowd"]
+    }}
+  ],
+  "analysis": "整体判断与建议（中文）"
+}}
+
+最多输出 8 条 recommended_topics，按 score 降序。"""
+
+
+STRATEGY_RECOMMEND_JSON_PROMPT = """你是短视频选题策划。根据 IP 画像，直接产出适合该 IP 的短视频选题（中文）。
+
+## IP 画像
+- 名称: {name}
+- 领域: {expertise}
+- 内容方向: {content_direction}
+- 目标受众: {target_audience}
+- 独特价值: {unique_value_prop}
+
+## 爆款元素 id（每条选题从中选 2-3 个）
+cost, crowd, weird, worst, contrast, nostalgia, hormone, top
+
+## 任务
+请生成恰好 {count} 条「具体可拍」的选题标题，并评估爆款潜力分数 0-100。
+
+只输出严格 JSON（不要 markdown 代码块），格式：
+{{
+  "recommended_topics": [
+    {{
+      "title": "string",
+      "score": 88,
+      "reason": "string",
+      "trend": "up",
+      "viral_elements": ["worst", "top"]
+    }}
+  ],
+  "analysis": "选题策略简述（中文）"
+}}"""
 
 
 QUALITY_SCORING_PROMPT = """请评估以下内容的质量：
@@ -229,40 +275,112 @@ class TopicStrategyAgent:
             base_url=self.cfg.get("base_url"),
             temperature=0.5,
         )
+        self.json_parser = JsonOutputParser()
     
-    def analyze_topics(self, trending_topics: List[str]) -> Dict:
-        """分析热点话题，返回选题建议"""
-        
+    def _normalize_topic_item(self, raw: Dict) -> Dict[str, Any]:
+        allowed = {
+            "cost",
+            "crowd",
+            "weird",
+            "worst",
+            "contrast",
+            "nostalgia",
+            "hormone",
+            "top",
+        }
+        els = raw.get("viral_elements") or raw.get("elements") or []
+        if not isinstance(els, list):
+            els = []
+        viral = [str(e).strip() for e in els if str(e).strip() in allowed]
+        if len(viral) < 2:
+            viral = (viral + ["crowd", "contrast"])[:3]
+        score = raw.get("score", 0)
+        try:
+            score = int(float(score))
+        except (TypeError, ValueError):
+            score = 70
+        score = max(0, min(100, score))
+        trend = str(raw.get("trend", "stable")).lower()
+        if trend not in ("up", "down", "stable"):
+            trend = "stable"
+        return {
+            "title": str(raw.get("title", "")).strip() or "未命名选题",
+            "score": score,
+            "reason": str(raw.get("reason", "")).strip() or "—",
+            "trend": trend,
+            "viral_elements": viral[:3],
+        }
+
+    def analyze_topics(self, trending_topics: List[str]) -> Dict[str, Any]:
+        """分析热点话题，返回选题建议（JSON）"""
+
         prompt = ChatPromptTemplate.from_template(TOPIC_ANALYSIS_PROMPT)
         chain = prompt | self.llm | self.json_parser
-        
-        result = chain.invoke({
-            "expertise": self.ip_profile.get("expertise", ""),
-            "content_direction": self.ip_profile.get("content_direction", ""),
-            "target_audience": self.ip_profile.get("target_audience", ""),
-            "topics": "\n".join([f"- {t}" for t in trending_topics]),
-        })
-        
-        return result
-    
-    def recommend_topics(self, count: int = 5) -> List[Dict]:
+
+        try:
+            result = chain.invoke(
+                {
+                    "name": self.ip_profile.get("name", ""),
+                    "expertise": self.ip_profile.get("expertise", ""),
+                    "content_direction": self.ip_profile.get("content_direction", ""),
+                    "target_audience": self.ip_profile.get("target_audience", ""),
+                    "unique_value_prop": self.ip_profile.get("unique_value_prop", ""),
+                    "topics": "\n".join([f"- {t}" for t in trending_topics]),
+                }
+            )
+        except Exception:
+            return {
+                "recommended_topics": [],
+                "analysis": "话题分析失败，请稍后重试或检查模型配置。",
+            }
+
+        if not isinstance(result, dict):
+            return {"recommended_topics": [], "analysis": str(result)}
+        raw_list = result.get("recommended_topics") or []
+        if not isinstance(raw_list, list):
+            raw_list = []
+        normalized = [self._normalize_topic_item(x) for x in raw_list if isinstance(x, dict)]
+        normalized.sort(key=lambda x: x["score"], reverse=True)
+        return {
+            "recommended_topics": normalized,
+            "analysis": str(result.get("analysis", "")).strip() or "—",
+        }
+
+    def recommend_topics(self, count: int = 5) -> Dict[str, Any]:
         """
-        推荐选题
-        1. 获取热点
-        2. 分析相关性
-        3. 排序返回
+        基于 IP 画像直接推荐选题（不依赖外部热点 API）。
         """
-        # TODO: 接入真实热点API
-        trending = [
-            "AI医疗",
-            "健康养生",
-            "名医访谈",
-            "最新疗法",
-        ]
-        
-        analysis = self.analyze_topics(trending)
-        
-        return analysis.get("recommended_topics", [])
+        n = max(1, min(20, int(count)))
+        prompt = ChatPromptTemplate.from_template(STRATEGY_RECOMMEND_JSON_PROMPT)
+        chain = prompt | self.llm | self.json_parser
+        try:
+            result = chain.invoke(
+                {
+                    "name": self.ip_profile.get("name", ""),
+                    "expertise": self.ip_profile.get("expertise", ""),
+                    "content_direction": self.ip_profile.get("content_direction", ""),
+                    "target_audience": self.ip_profile.get("target_audience", ""),
+                    "unique_value_prop": self.ip_profile.get("unique_value_prop", ""),
+                    "count": n,
+                }
+            )
+        except Exception:
+            return {
+                "recommended_topics": [],
+                "analysis": "推荐选题失败，请稍后重试或检查模型配置。",
+            }
+
+        if not isinstance(result, dict):
+            return {"recommended_topics": [], "analysis": str(result)}
+        raw_list = result.get("recommended_topics") or []
+        if not isinstance(raw_list, list):
+            raw_list = []
+        normalized = [self._normalize_topic_item(x) for x in raw_list if isinstance(x, dict)]
+        normalized.sort(key=lambda x: x["score"], reverse=True)
+        return {
+            "recommended_topics": normalized[:n],
+            "analysis": str(result.get("analysis", "")).strip() or "—",
+        }
 
 
 # ==================== 质量评分服务 ====================
@@ -280,7 +398,8 @@ class QualityScorer:
             base_url=self.cfg.get("base_url"),
             temperature=0.3,
         )
-    
+        self.json_parser = JsonOutputParser()
+
     def score(self, content: str, ip_style: Optional[Dict] = None) -> Dict:
         """
         多维度质量评分

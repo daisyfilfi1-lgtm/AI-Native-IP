@@ -2,10 +2,10 @@
 IP风格建模API路由
 """
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -18,6 +18,33 @@ from app.services.style_modeling import (
 )
 
 router = APIRouter()
+
+
+def _normalize_style_profile_dict(raw: Any, ip_id: str) -> dict:
+    """JSONB 反序列化后可能缺字段或非列表，补齐以免 model_validate 失败。"""
+    if not isinstance(raw, dict):
+        raw = {}
+    d = dict(raw)
+    d.setdefault("ip_id", ip_id)
+    for key in ("vocabulary", "sentence_patterns", "catchphrases", "topics"):
+        v = d.get(key)
+        if v is None:
+            d[key] = []
+        elif not isinstance(v, list):
+            d[key] = [str(v)]
+    for key in ("emotion_curve", "tone", "length_preference", "format_preference"):
+        if d.get(key) is None:
+            d[key] = ""
+        else:
+            d[key] = str(d[key])
+    return d
+
+
+def _llm_unavailable_detail() -> str:
+    return (
+        "LLM 调用失败或未返回内容。请检查 OPENAI_API_KEY / OPENAI_BASE_URL（或 DeepSeek 等兼容配置）"
+        " 是否已在 Railway 环境变量中设置，且服务可访问。"
+    )
 
 
 # ==================== 请求/响应模型 ====================
@@ -115,8 +142,14 @@ async def apply_ip_style(
     if not ip.style_profile:
         raise HTTPException(status_code=400, detail="请先调用 POST /style/extract 从素材提取风格")
 
-    profile = IPStyleProfile.model_validate(dict(ip.style_profile))
+    try:
+        profile = IPStyleProfile.model_validate(_normalize_style_profile_dict(ip.style_profile, payload.ip_id))
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=f"风格画像数据无效，请重新提取: {e}") from e
+
     text = apply_style(payload.content, profile)
+    if text is None or (isinstance(text, str) and not text.strip()):
+        raise HTTPException(status_code=503, detail=_llm_unavailable_detail())
     return StyleTextResponse(content=text)
 
 
@@ -136,8 +169,14 @@ async def generate_with_ip_style(
     if not ip.style_profile:
         raise HTTPException(status_code=400, detail="请先调用 POST /style/extract 从素材提取风格")
 
-    profile = IPStyleProfile.model_validate(dict(ip.style_profile))
+    try:
+        profile = IPStyleProfile.model_validate(_normalize_style_profile_dict(ip.style_profile, payload.ip_id))
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=f"风格画像数据无效，请重新提取: {e}") from e
+
     text = generate_with_style(payload.topic, profile)
+    if text is None or (isinstance(text, str) and not text.strip()):
+        raise HTTPException(status_code=503, detail=_llm_unavailable_detail())
     return StyleTextResponse(content=text)
 
 

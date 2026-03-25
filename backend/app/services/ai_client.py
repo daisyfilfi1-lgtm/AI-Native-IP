@@ -386,7 +386,8 @@ def chat(
     try:
         resp = client.chat.completions.create(model=model, messages=messages)
         return (resp.choices[0].message.content or "").strip() or None
-    except Exception:
+    except Exception as e:
+        logger.warning("LLM chat failed: %s", e, exc_info=False)
         return None
 
 

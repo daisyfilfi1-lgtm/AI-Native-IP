@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from app.routers import (
+    auth_sms,
     baidu_pan_sync,
     config_memory,
     content,
@@ -30,7 +31,7 @@ from app.routers import (
     style,
     vector,
 )
-from app.middleware.auth import verify_api_key
+from app.middleware.auth import verify_api_key_or_jwt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -117,8 +118,10 @@ def create_app() -> FastAPI:
     def health():
         return {"status": "ok"}
 
-    # API 密钥依赖（公开端点除外）
-    api_key_dep = [Depends(verify_api_key)]
+    # API Key 或用户 JWT（发码/登录见 auth 路由，无需此依赖）
+    api_key_dep = [Depends(verify_api_key_or_jwt)]
+
+    app.include_router(auth_sms.router, prefix="/api/auth", tags=["auth"])
 
     # API routes - 需要认证
     app.include_router(ip.router, prefix="/api/v1", tags=["ip"], dependencies=api_key_dep)

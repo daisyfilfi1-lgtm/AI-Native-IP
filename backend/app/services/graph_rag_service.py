@@ -2,6 +2,7 @@
 Graph RAG 服务 - 知识图谱构建与检索
 基于 Neo4j 实现实体关系提取和图检索
 """
+import json
 import os
 from typing import Any, List, Optional
 from urllib.parse import urlparse
@@ -9,7 +10,7 @@ from urllib.parse import urlparse
 from neo4j import GraphDatabase
 
 from app.config.neo4j_config import get_neo4j_config
-from app.services.ai_client import embed
+from app.services.ai_client import chat, embed
 
 
 def get_neo4j_driver():
@@ -33,8 +34,6 @@ def extract_entities_from_text(text: str, ip_id: str) -> List[dict]:
     使用LLM从文本中提取实体和关系
     返回格式: [{"type": "PERSON", "name": "xxx", "properties": {...}}, ...]
     """
-    from app.services.ai_client import get_client
-    
     prompt = f"""从以下内容中提取实体和关系。
 
 要求：
@@ -53,18 +52,16 @@ def extract_entities_from_text(text: str, ip_id: str) -> List[dict]:
 ]
 """
     try:
-        client = get_client()
-        response = client.chat.completions.create(
-            model=os.environ.get("LLM_MODEL", "deepseek-chat"),
+        model = os.environ.get("LLM_MODEL") or None
+        result_text = chat(
             messages=[
                 {"role": "system", "content": "你是一个实体关系抽取专家。"},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
-            temperature=0.1,
+            model=model,
         )
-        
-        import json
-        result_text = response.choices[0].message.content
+        if not result_text:
+            return []
         # 尝试解析JSON
         if "```json" in result_text:
             result_text = result_text.split("```json")[1].split("```")[0]

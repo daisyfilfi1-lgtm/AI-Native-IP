@@ -3,6 +3,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -204,6 +205,31 @@ class AssetVector(Base):
     model = Column(String(128), nullable=False)
     created_at = Column(DateTime, nullable=False, default=now_utc)
     updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
+
+
+class User(Base):
+    """手机号 + 验证码登录用户"""
+
+    __tablename__ = "users"
+
+    user_id = Column(String(64), primary_key=True)
+    phone = Column(String(20), nullable=False, unique=True)
+    created_at = Column(DateTime, nullable=False, default=now_utc)
+    updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
+    last_login_at = Column(DateTime, nullable=True)
+
+
+class AuthOtp(Base):
+    """短信验证码记录（一次性）"""
+
+    __tablename__ = "auth_otp"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    phone = Column(String(20), nullable=False, index=True)
+    code_hash = Column(String(128), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    consumed = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=now_utc)
 
 
 class ContentDraft(Base):

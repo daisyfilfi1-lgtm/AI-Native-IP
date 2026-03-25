@@ -37,6 +37,8 @@ ORDER = [
     "008_pgvector.sql",
     "009_style_profile.sql",
     "010_strategy_agent.sql",
+    "011_auth_users.sql",
+    "012_link_mantou_ip_owner.sql",
 ]
 
 

@@ -173,8 +173,6 @@ class MemoryConsolidation:
     
     def _generate_core_summary(self, core_contents: List[dict]) -> str:
         """使用LLM从核心记忆提炼摘要"""
-        client = get_client()
-        
         # 取最核心的5条
         content_texts = [f"- {c['title']}: {c['content'][:300]}..." for c in core_contents[:5]]
         content_str = "\n".join(content_texts)
@@ -194,16 +192,14 @@ class MemoryConsolidation:
         cfg = get_ai_config()
         model = cfg.get("llm_model", "deepseek-chat")
         
-        response = chat(
-            model=model,
+        text = chat(
             messages=[
                 {"role": "system", "content": "你是内容策略专家，擅长提炼IP核心特征。"},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
-            temperature=0.3,
+            model=model,
         )
-        
-        return response.choices[0].message.content
+        return text or ""
     
     def get_core_memory(self, limit: int = 10) -> List[dict]:
         """获取核心记忆"""

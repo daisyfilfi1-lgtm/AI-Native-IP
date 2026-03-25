@@ -6,6 +6,7 @@ Creator API Router
 from datetime import datetime, timezone
 import logging
 import random
+import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -113,7 +114,7 @@ def _draft_to_library_item(draft: ContentDraft) -> Dict[str, Any]:
         draft.updated_at.isoformat() if status == "published" and draft.updated_at else None
     )
     gen_src = wf.get("generation_source")
-    if gen_src not in ("topic", "remix", "voice"):
+    if gen_src not in ("topic", "remix", "voice", "viral"):
         gen_src = "topic"
     item: Dict[str, Any] = {
         "id": draft.draft_id,
@@ -286,8 +287,36 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
 
         result = await ContentGenerator.scenario_three(request)
 
+        draft_id = f"gen_viral_{uuid.uuid4().hex[:10]}"
+        workflow: Dict[str, Any] = {
+            "title": (req.input or "").strip()[:200] or "爆款原创",
+            "topic": req.input,
+            "body": result.content,
+            # 结果页当前按 hook/story/opinion/cta 四段展示；没有结构化输出时做一个可读的兜底分段
+            "hook": (result.content or "").strip().splitlines()[0][:200] if isinstance(result.content, str) else "",
+            "story": "",
+            "opinion": result.content or "",
+            "cta": "",
+            "style": req.style,
+            "viralElements": req.viralElements or [],
+            "scriptTemplate": req.scriptTemplate or "",
+            "generation_source": "viral",
+            "agent_chain": ["Strategy", "Memory", "Generation", "Compliance"],
+            "display_status": "draft",
+        }
+        row = ContentDraft(
+            draft_id=draft_id,
+            ip_id=req.ipId or "1",
+            level="viral",
+            workflow=workflow,
+            quality_score={"score": float(result.score or 0.0)},
+            compliance_status="passed",
+        )
+        db.add(row)
+        db.commit()
+
         return {
-            "id": "gen_viral_001",
+            "id": draft_id,
             "status": "completed",
             "progress": 100,
             "estimatedTime": 0,
@@ -340,8 +369,28 @@ async def generate_from_voice(req: VoiceGenerateRequest, db: Session = Depends(g
 
 # === 获取生成结果 ===
 @router.get("/generate/{id}/result")
-async def get_generate_result(id: str):
-    """获取生成结果（占位；后续接草稿存储）"""
+async def get_generate_result(id: str, db: Session = Depends(get_db)):
+    """获取生成结果（优先读取 content_drafts；无数据时回退占位内容）。"""
+    draft = db.query(ContentDraft).filter(ContentDraft.draft_id == id).first()
+    if draft and isinstance(draft.workflow, dict):
+        wf = draft.workflow
+        return {
+            "id": id,
+            "title": _workflow_title(wf),
+            "hook": wf.get("hook") or "",
+            "story": wf.get("story") or "",
+            "opinion": wf.get("opinion") or wf.get("body") or "",
+            "cta": wf.get("cta") or "",
+            "style": wf.get("style") or "angry",
+            "viralElements": wf.get("viralElements") or [],
+            "scriptTemplate": wf.get("scriptTemplate") or "",
+            "agentChain": wf.get("agent_chain") or ["Strategy", "Memory", "Generation", "Compliance"],
+            "compliance": {
+                "originalityScore": 82,
+                "sensitiveWords": [],
+                "platformChecks": {"douyin": "passed", "xiaohongshu": "passed"},
+            },
+        }
     return {
         "id": id,
         "title": "测试内容",

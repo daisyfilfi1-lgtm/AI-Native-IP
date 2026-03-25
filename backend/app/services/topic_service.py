@@ -2,11 +2,14 @@
 热点追踪服务
 实时接入各平台热点，结合IP生成选题
 """
+import logging
 import os
 from typing import Any, Dict, List, Optional
 import requests
 from pydantic import BaseModel
 from app.services.ai_client import chat, get_ai_config
+
+logger = logging.getLogger(__name__)
 
 
 class TrendingTopic(BaseModel):
@@ -80,7 +83,32 @@ class HotTopicService:
         ]
     
     async def _fetch_douyin(self) -> List[TrendingTopic]:
-        """抖音热搜（模拟）"""
+        """抖音热点：优先 TikHub 高播热榜，失败或未配置时回退占位"""
+        try:
+            from app.services import tikhub_client
+
+            if tikhub_client.is_configured():
+                raw = await tikhub_client.fetch_douyin_high_play_hot_list(
+                    page=1, page_size=12, date_window=2
+                )
+                cards = tikhub_client.billboard_to_topic_cards(raw, limit=12)
+                if cards:
+                    return [
+                        TrendingTopic(
+                            platform="抖音",
+                            title=c["title"],
+                            hot_score=float(c["score"]) * 20.0,
+                            category=(
+                                (c.get("tags") or ["热榜"])[0]
+                                if isinstance(c.get("tags"), list) and c["tags"]
+                                else "热榜"
+                            ),
+                        )
+                        for c in cards
+                    ]
+        except Exception as e:
+            logger.warning("TikHub 抖音热点拉取失败，使用占位: %s", e)
+
         return [
             TrendingTopic(
                 platform="抖音",

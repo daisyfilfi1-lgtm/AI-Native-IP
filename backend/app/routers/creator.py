@@ -4,10 +4,11 @@ Creator API Router
 """
 
 from datetime import datetime, timezone
+import logging
 import random
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -21,8 +22,10 @@ from app.services.content_scenario import (
     ScenarioThreeRequest,
     FourDimWeights,
 )
+from app.services import remix_recommendation_service, tikhub_client
 
 router = APIRouter(prefix="/creator", tags=["creator"])
+logger = logging.getLogger(__name__)
 
 
 def get_ip_profile(db: Session, ip_id: str) -> Optional[Dict[str, Any]]:
@@ -201,13 +204,17 @@ class RemixGenerateRequest(BaseModel):
 
 @router.post("/generate/remix")
 async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(get_db)):
-    """场景二：仿写爆款（当前将链接文本作为待解构内容；后续可接爬虫）"""
+    """场景二：仿写爆款（抖音 Web 单条优先，否则 hybrid；未配置或失败时退回原始 URL 文本）"""
     try:
         ip_profile = get_ip_profile(db, req.ipId or "") or {}
 
+        competitor_text = req.url.strip()[:8000]
+        if tikhub_client.is_configured():
+            competitor_text = await tikhub_client.extract_competitor_text_for_remix(req.url.strip())
+
         request = ScenarioTwoRequest(
             ip_id=req.ipId or "1",
-            competitor_content=req.url[:8000],
+            competitor_content=competitor_text,
             competitor_platform=None,
             ip_profile=ip_profile,
             rewrite_level="medium",
@@ -229,6 +236,26 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
             "status": "failed",
             "error": str(e),
         }
+
+
+@router.get("/remix/recommendations")
+async def get_remix_recommendations(
+    ipId: str = Query("1", description="IP 画像 id"),
+    limit: int = Query(12, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """
+    仿写推荐：结合 IP 关键词匹配抖音低粉爆款榜，并拉取配置的小红书话题笔记链接。
+    需配置 TIKHUB_API_KEY；无数据或未配置时返回空列表。
+    """
+    try:
+        items = await remix_recommendation_service.build_remix_recommendations(
+            db, ip_id=ipId, limit=limit
+        )
+        return {"items": items}
+    except Exception as e:
+        logger.warning("仿写推荐失败: %s", e)
+        return {"items": []}
 
 
 # === 场景三：爆款原创 ===
@@ -344,16 +371,29 @@ async def get_generate_progress(id: str):
 
 
 # === 推荐选题 / 刷新 ===
+async def _topics_from_tikhub_or_fallback() -> List[Dict[str, Any]]:
+    if tikhub_client.is_configured():
+        try:
+            cards = await tikhub_client.get_recommended_topic_cards(limit=12)
+            if cards:
+                return cards
+        except Exception as e:
+            logger.warning("TikHub 推荐选题不可用，使用内置占位: %s", e)
+    return list(_RECOMMENDED_TOPICS)
+
+
 @router.get("/topics/recommended")
 async def get_recommended_topics():
-    """获取推荐选题"""
-    return {"topics": list(_RECOMMENDED_TOPICS)}
+    """获取推荐选题（优先抖音高播热榜 TikHub，失败或未配置时用占位数据）"""
+    topics = await _topics_from_tikhub_or_fallback()
+    return {"topics": topics}
 
 
 @router.get("/topics/refresh")
 async def refresh_topics():
-    """刷新选题（打乱顺序，字段与 recommended 一致）"""
-    shuffled = list(_RECOMMENDED_TOPICS)
+    """刷新选题（优先 TikHub；打乱顺序；失败或未配置时用占位数据）"""
+    topics = await _topics_from_tikhub_or_fallback()
+    shuffled = list(topics)
     random.shuffle(shuffled)
     return {"topics": shuffled}
 

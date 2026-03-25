@@ -1,0 +1,13 @@
+# AutoTune 优化结果
+# 最佳参数配置 (20次实验)
+
+# 分块参数
+CHUNK_CHUNK_SIZE=2000
+CHUNK_OVERLAP=100
+CHUNK_PARENT_SIZE=5000
+
+# 录入参数
+INGEST_EMBED_BATCH_SIZE=32
+INGEST_COMMIT_EVERY=20
+
+# 使用方法：把这些参数复制到你的.env文件中

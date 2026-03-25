@@ -373,6 +373,7 @@ def embed_texts_batched(
 def chat(
     messages: list[dict[str, str]],
     model: str | None = None,
+    temperature: float | None = None,
 ) -> str | None:
     """
     LLM 对话。未配置或失败时返回 None。
@@ -384,7 +385,10 @@ def chat(
     cfg = get_ai_config()
     model = model or cfg.get("llm_model") or "gpt-4o-mini"
     try:
-        resp = client.chat.completions.create(model=model, messages=messages)
+        kwargs: dict[str, Any] = {"model": model, "messages": messages}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        resp = client.chat.completions.create(**kwargs)
         return (resp.choices[0].message.content or "").strip() or None
     except Exception as e:
         logger.warning("LLM chat failed: %s", e, exc_info=False)

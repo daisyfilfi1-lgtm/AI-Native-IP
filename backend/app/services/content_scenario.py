@@ -73,28 +73,7 @@ class ScenarioOneGenerator:
     
     async def generate(self, platform: str = "all", count: int = 5) -> List[ContentResult]:
         """执行场景一"""
-        
-        # Step 1: 获取热点
-        trending = await self.topic_service.fetch_trending(platform)
-        
-        # Step 2: 计算每个话题的四维得分
-        scored_topics = []
-        for topic in trending:
-            scores = self._calculate_scores(topic)
-            scored_topics.append({
-                "topic": topic,
-                "scores": scores,
-                "total_score": sum([
-                    scores["relevance"] * self.weights.relevance,
-                    scores["hotness"] * self.weights.hotness,
-                    scores["competition"] * self.weights.competition,
-                    scores["conversion"] * self.weights.conversion,
-                ])
-            })
-        
-        # Step 3: 排序选题
-        scored_topics.sort(key=lambda x: x["total_score"], reverse=True)
-        selected = scored_topics[:count]
+        selected = await self.recommend_only(platform=platform, count=count)
         
         # Step 4: 为每个选题生成内容
         results = []
@@ -116,6 +95,30 @@ class ScenarioOneGenerator:
             ))
         
         return results
+
+    async def recommend_only(self, platform: str = "all", count: int = 5) -> List[Dict]:
+        """仅推荐，不生成正文。"""
+        # Step 1: 获取热点
+        trending = await self.topic_service.fetch_trending(platform)
+
+        # Step 2: 计算每个话题的四维得分
+        scored_topics = []
+        for topic in trending:
+            scores = self._calculate_scores(topic)
+            scored_topics.append({
+                "topic": topic,
+                "scores": scores,
+                "total_score": sum([
+                    scores["relevance"] * self.weights.relevance,
+                    scores["hotness"] * self.weights.hotness,
+                    scores["competition"] * self.weights.competition,
+                    scores["conversion"] * self.weights.conversion,
+                ])
+            })
+
+        # Step 3: 排序选题
+        scored_topics.sort(key=lambda x: x["total_score"], reverse=True)
+        return scored_topics[:count]
     
     def _calculate_scores(self, topic) -> Dict[str, float]:
         """计算四维得分"""
@@ -632,6 +635,31 @@ class ContentGenerator:
         weights = request.weights or FourDimWeights()
         generator = ScenarioOneGenerator(request.ip_profile, weights)
         return await generator.generate(request.platform, request.count)
+
+    @staticmethod
+    async def scenario_one_recommend_topics(request: ScenarioOneRequest) -> List[Dict]:
+        """场景一：仅推荐选题，不生成正文。"""
+        weights = request.weights or FourDimWeights()
+        generator = ScenarioOneGenerator(request.ip_profile, weights)
+        return await generator.recommend_only(request.platform, request.count)
+    
+    @staticmethod
+    async def scenario_one_generate_from_selected_topic(
+        *,
+        ip_profile: Dict,
+        topic: str,
+        category: str = "selected_topic",
+    ) -> ContentResult:
+        """场景一：基于已选题目生成正文（推荐与生成解耦后的第二步）"""
+        generator = ScenarioOneGenerator(ip_profile or {}, FourDimWeights())
+        content = await generator._generate_content(topic, category)
+        score = generator._calc_relevance(topic, category)
+        return ContentResult(
+            content=content,
+            score=score,
+            scenario="scenario_1_selected_topic",
+            metadata={"topic": topic, "category": category},
+        )
     
     @staticmethod
     async def scenario_two(request: ScenarioTwoRequest) -> ContentResult:

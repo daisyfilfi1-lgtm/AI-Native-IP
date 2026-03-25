@@ -343,59 +343,45 @@ def _save_generated_draft(
 # === 场景一：推荐选题生成 ===
 class TopicGenerateRequest(BaseModel):
     topicId: str
+    topicTitle: Optional[str] = ""
     style: str  # angry/calm/humor
     ipId: Optional[str] = "1"
 
 
 @router.post("/generate/topic")
 async def generate_from_topic(req: TopicGenerateRequest, db: Session = Depends(get_db)):
-    """场景一：从选题生成内容"""
+    """场景一第二步：用户选择选题后再生成正文"""
     try:
         ip_profile = get_ip_profile(db, req.ipId or "") or {}
+        selected_topic = (req.topicTitle or "").strip() or (req.topicId or "").strip()
+        if not selected_topic:
+            return {"id": "gen_topic_invalid", "status": "failed", "error": "topic is required"}
 
-        request = ScenarioOneRequest(
-            ip_id=req.ipId or "1",
-            platform="douyin",
+        result = await ContentGenerator.scenario_one_generate_from_selected_topic(
             ip_profile=ip_profile,
-            weights=FourDimWeights(
-                relevance=0.3,
-                hotness=0.3,
-                competition=0.2,
-                conversion=0.2,
-            ),
-            count=1,
+            topic=selected_topic,
+            category="selected",
         )
-
-        results = await ContentGenerator.scenario_one(request)
-
-        if results:
-            result = results[0]
-            draft_id = f"gen_topic_{uuid.uuid4().hex[:10]}"
-            _save_generated_draft(
-                db,
-                draft_id=draft_id,
-                ip_id=req.ipId or "1",
-                level="topic",
-                title=req.topicId,
-                content=result.content or "",
-                style=req.style,
-                generation_source="topic",
-                score=float(result.score or 0.0),
-                extra_workflow={"source_topic_id": req.topicId},
-            )
-            return {
-                "id": draft_id,
-                "status": "completed",
-                "progress": 100,
-                "estimatedTime": 0,
-                "content": result.content,
-                "score": result.score,
-            }
+        draft_id = f"gen_topic_{uuid.uuid4().hex[:10]}"
+        _save_generated_draft(
+            db,
+            draft_id=draft_id,
+            ip_id=req.ipId or "1",
+            level="topic",
+            title=selected_topic,
+            content=result.content or "",
+            style=req.style,
+            generation_source="topic",
+            score=float(result.score or 0.0),
+            extra_workflow={"source_topic_id": req.topicId, "source_topic_title": selected_topic},
+        )
         return {
-            "id": f"gen_{req.topicId}",
-            "status": "failed",
-            "progress": 0,
-            "error": "生成失败",
+            "id": draft_id,
+            "status": "completed",
+            "progress": 100,
+            "estimatedTime": 0,
+            "content": result.content,
+            "score": result.score,
         }
     except Exception as e:
         return {
@@ -492,31 +478,54 @@ class ViralGenerateRequest(BaseModel):
     ipId: Optional[str] = "1"
 
 
+def _build_scenario_three_request(
+    db: Session,
+    *,
+    ip_id: str,
+    input_text: str,
+    script_template: str,
+    viral_elements: Optional[List[str]],
+    target_duration: int,
+) -> ScenarioThreeRequest:
+    """
+    统一构建场景三（爆款原创）请求，供文字与语音入口复用。
+    """
+    ip_profile = get_ip_profile(db, ip_id) or {}
+    # 兜底：确保 xiaomin1 默认昵称稳定为「小敏」
+    if ip_id == "xiaomin1":
+        ip_profile["self_name"] = "小敏"
+
+    guardrails = _extract_style_guardrails_from_assets(db, ip_id)
+    template = get_viral_template(script_template or "opinion")
+    few_shot_examples = _build_dynamic_few_shots(db, ip_id, input_text or "", k=3)
+    ip_profile["self_intro"] = guardrails.get("self_intro") or ""
+    ip_profile["forbidden_self_names"] = guardrails.get("forbidden_self_names") or []
+    ip_profile["style_evidence"] = guardrails.get("style_evidence") or []
+    ip_profile["few_shot_examples"] = few_shot_examples
+    ip_profile["strategy_template_name"] = template.get("name") or ""
+    ip_profile["strategy_template_instruction"] = template.get("instruction") or ""
+
+    length = _target_duration_to_length(int(target_duration or 60))
+    return ScenarioThreeRequest(
+        ip_id=ip_id,
+        topic=input_text,
+        style_profile=ip_profile,
+        key_points=viral_elements or [],
+        length=length,
+    )
+
+
 @router.post("/generate/viral")
 async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depends(get_db)):
     """场景三：爆款原创"""
     try:
-        ip_profile = get_ip_profile(db, req.ipId or "") or {}
-        # 兜底：确保 xiaomin1 默认昵称稳定为「小敏」
-        if (req.ipId or "") == "xiaomin1":
-            ip_profile["self_name"] = "小敏"
-        guardrails = _extract_style_guardrails_from_assets(db, req.ipId or "1")
-        template = get_viral_template(req.scriptTemplate or "opinion")
-        few_shot_examples = _build_dynamic_few_shots(db, req.ipId or "1", req.input or "", k=3)
-        ip_profile["self_intro"] = guardrails.get("self_intro") or ""
-        ip_profile["forbidden_self_names"] = guardrails.get("forbidden_self_names") or []
-        ip_profile["style_evidence"] = guardrails.get("style_evidence") or []
-        ip_profile["few_shot_examples"] = few_shot_examples
-        ip_profile["strategy_template_name"] = template.get("name") or ""
-        ip_profile["strategy_template_instruction"] = template.get("instruction") or ""
-        length = _target_duration_to_length(int(req.targetDuration or 60))
-
-        request = ScenarioThreeRequest(
+        request = _build_scenario_three_request(
+            db,
             ip_id=req.ipId or "1",
-            topic=req.input,
-            style_profile=ip_profile,
-            key_points=req.viralElements,
-            length=length,
+            input_text=req.input,
+            script_template=req.scriptTemplate or "opinion",
+            viral_elements=req.viralElements or [],
+            target_duration=int(req.targetDuration or 60),
         )
 
         result = await ContentGenerator.scenario_three(request)
@@ -535,6 +544,7 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
             extra_workflow={
                 "viralElements": req.viralElements or [],
                 "scriptTemplate": req.scriptTemplate or "",
+                "inputMode": req.inputMode or "text",
             },
         )
 
@@ -555,36 +565,45 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
 
 
 # === 语音 / 文字快生成（走场景三）===
-class VoiceGenerateRequest(BaseModel):
+class OriginalGenerateRequest(BaseModel):
     text: str
     style: str
+    scriptTemplate: Optional[str] = "opinion"
+    viralElements: Optional[List[str]] = None
+    targetDuration: Optional[int] = 60
     ipId: Optional[str] = "1"
 
 
+@router.post("/generate/original")
 @router.post("/generate/voice")
-async def generate_from_voice(req: VoiceGenerateRequest, db: Session = Depends(get_db)):
-    """语音创作：将转写文本按场景三生成"""
+async def generate_from_original(req: OriginalGenerateRequest, db: Session = Depends(get_db)):
+    """场景三：爆款原创（支持文本/语音输入；voice 路由兼容保留）"""
     try:
-        ip_profile = get_ip_profile(db, req.ipId or "") or {}
-        request = ScenarioThreeRequest(
+        request = _build_scenario_three_request(
+            db,
             ip_id=req.ipId or "1",
-            topic=req.text.strip(),
-            style_profile=ip_profile,
-            key_points=None,
-            length="medium",
+            input_text=req.text.strip(),
+            script_template=req.scriptTemplate or "opinion",
+            viral_elements=req.viralElements or [],
+            target_duration=int(req.targetDuration or 60),
         )
         result = await ContentGenerator.scenario_three(request)
-        draft_id = f"gen_voice_{uuid.uuid4().hex[:10]}"
+        draft_id = f"gen_original_{uuid.uuid4().hex[:10]}"
         _save_generated_draft(
             db,
             draft_id=draft_id,
             ip_id=req.ipId or "1",
-            level="voice",
-            title=req.text.strip()[:200] or "语音创作",
+            level="viral",
+            title=req.text.strip()[:200] or "爆款原创",
             content=result.content or "",
             style=req.style,
-            generation_source="voice",
+            generation_source="original",
             score=float(result.score or 0.0),
+            extra_workflow={
+                "viralElements": req.viralElements or [],
+                "scriptTemplate": req.scriptTemplate or "opinion",
+                "inputMode": "voice",
+            },
         )
         return {
             "id": draft_id,
@@ -596,7 +615,7 @@ async def generate_from_voice(req: VoiceGenerateRequest, db: Session = Depends(g
         }
     except Exception as e:
         return {
-            "id": "gen_voice_001",
+            "id": "gen_original_001",
             "status": "failed",
             "error": str(e),
         }
@@ -655,10 +674,59 @@ async def get_generate_progress(id: str):
 
 
 # === 推荐选题 / 刷新 ===
-async def _topics_from_tikhub_or_fallback() -> List[Dict[str, Any]]:
+async def _topics_from_algorithm_or_fallback(
+    db: Session,
+    *,
+    ip_id: str,
+    limit: int = 12,
+) -> List[Dict[str, Any]]:
+    """场景一第一步：四维评分推荐（失败时回退 TikHub/占位）。"""
+    try:
+        ip_profile = get_ip_profile(db, ip_id) or {}
+        request = ScenarioOneRequest(
+            ip_id=ip_id,
+            platform="douyin",
+            ip_profile=ip_profile,
+            weights=FourDimWeights(
+                relevance=0.3,
+                hotness=0.3,
+                competition=0.2,
+                conversion=0.2,
+            ),
+            count=limit,
+        )
+        scored = await ContentGenerator.scenario_one_recommend_topics(request)
+        if scored:
+            cards: List[Dict[str, Any]] = []
+            for idx, item in enumerate(scored, start=1):
+                topic = item.get("topic")
+                scores = item.get("scores") or {}
+                if not topic:
+                    continue
+                cards.append(
+                    {
+                        "id": f"topic_{idx:03d}",
+                        "title": getattr(topic, "title", "") or "",
+                        "score": round(float(item.get("total_score") or 0.0) * 5.0, 2),
+                        "tags": [getattr(topic, "category", "")] if getattr(topic, "category", "") else [],
+                        "reason": (
+                            f"四维评分 R/H/CV="
+                            f"{round(float(scores.get('relevance', 0.0)), 2)}/"
+                            f"{round(float(scores.get('hotness', 0.0)), 2)}/"
+                            f"{round(float(scores.get('competition', 0.0)), 2)}/"
+                            f"{round(float(scores.get('conversion', 0.0)), 2)}"
+                        ),
+                        "agentChain": ["Strategy", "Memory", "Generation", "Compliance"],
+                    }
+                )
+            if cards:
+                return cards
+    except Exception as e:
+        logger.warning("算法推荐选题失败，降级到 TikHub/占位: %s", e)
+
     if tikhub_client.is_configured():
         try:
-            cards = await tikhub_client.get_recommended_topic_cards(limit=12)
+            cards = await tikhub_client.get_recommended_topic_cards(limit=limit)
             if cards:
                 return cards
         except Exception as e:
@@ -667,16 +735,24 @@ async def _topics_from_tikhub_or_fallback() -> List[Dict[str, Any]]:
 
 
 @router.get("/topics/recommended")
-async def get_recommended_topics():
-    """获取推荐选题（优先抖音高播热榜 TikHub，失败或未配置时用占位数据）"""
-    topics = await _topics_from_tikhub_or_fallback()
+async def get_recommended_topics(
+    ipId: str = Query("1", description="IP 画像 id"),
+    limit: int = Query(12, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """场景一第一步：推荐选题（四维评分；不生成正文）。"""
+    topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
     return {"topics": topics}
 
 
 @router.get("/topics/refresh")
-async def refresh_topics():
-    """刷新选题（优先 TikHub；打乱顺序；失败或未配置时用占位数据）"""
-    topics = await _topics_from_tikhub_or_fallback()
+async def refresh_topics(
+    ipId: str = Query("1", description="IP 画像 id"),
+    limit: int = Query(12, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """刷新推荐选题（四维评分推荐后打散）。"""
+    topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
     shuffled = list(topics)
     random.shuffle(shuffled)
     return {"topics": shuffled}

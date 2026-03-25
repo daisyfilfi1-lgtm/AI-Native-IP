@@ -142,3 +142,17 @@ def get_ip_by_id(ip_id: str, db: Session = Depends(get_db)):
     if not row:
         raise HTTPException(status_code=404, detail=f"IP 不存在: {ip_id}")
     return ip_to_response(row)
+
+
+@router.delete("/ip/{ip_id}")
+def delete_ip(ip_id: str, db: Session = Depends(get_db)):
+    """
+    删除 IP 及其关联数据（素材、向量、配置、任务、竞品等）。
+    不可恢复，请前端二次确认后再调用。
+    """
+    from app.services.ip_delete_service import delete_ip_and_related
+
+    ok = delete_ip_and_related(db, ip_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"IP 不存在: {ip_id}")
+    return {"success": True, "ip_id": ip_id}

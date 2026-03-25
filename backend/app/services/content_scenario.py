@@ -536,6 +536,6 @@ class ContentGenerator:
     @staticmethod
     async def scenario_three(request: ScenarioThreeRequest) -> ContentResult:
         """场景三：自定义原创生成"""
-        style = request.style_profile or {}
-        generator = ScenarioThreeGenerator(request.ip_profile, style)
+        profile = request.style_profile or {}
+        generator = ScenarioThreeGenerator(profile, profile)
         return await generator.generate(request.topic, request.key_points, request.length)

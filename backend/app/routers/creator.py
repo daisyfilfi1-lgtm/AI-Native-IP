@@ -17,7 +17,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.db import get_db
 from app.db.models import ContentDraft, IP, IPAsset
-from app.prompts.viral_strategy_templates import get_viral_template
+from app.prompts.viral_strategy_templates import get_viral_template, resolve_viral_elements
 from app.services.content_scenario import (
     ContentGenerator,
     ScenarioOneRequest,
@@ -496,7 +496,9 @@ def _build_scenario_three_request(
         ip_profile["self_name"] = "小敏"
 
     guardrails = _extract_style_guardrails_from_assets(db, ip_id)
-    template = get_viral_template(script_template or "opinion")
+    normalized_template = script_template or "opinion"
+    template = get_viral_template(normalized_template)
+    resolved_elements = resolve_viral_elements(normalized_template, viral_elements or [])
     few_shot_examples = _build_dynamic_few_shots(db, ip_id, input_text or "", k=3)
     ip_profile["self_intro"] = guardrails.get("self_intro") or ""
     ip_profile["forbidden_self_names"] = guardrails.get("forbidden_self_names") or []
@@ -510,7 +512,7 @@ def _build_scenario_three_request(
         ip_id=ip_id,
         topic=input_text,
         style_profile=ip_profile,
-        key_points=viral_elements or [],
+        key_points=resolved_elements,
         length=length,
     )
 
@@ -542,9 +544,17 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
             generation_source="viral",
             score=float(result.score or 0.0),
             extra_workflow={
-                "viralElements": req.viralElements or [],
+                "viralElements": resolve_viral_elements(
+                    req.scriptTemplate or "opinion", req.viralElements or []
+                ),
                 "scriptTemplate": req.scriptTemplate or "",
                 "inputMode": req.inputMode or "text",
+                "elementConfigMode": (
+                    "auto"
+                    if not (req.viralElements or [])
+                    or any(x in {"auto", "system_auto"} for x in (req.viralElements or []))
+                    else "manual"
+                ),
             },
         )
 
@@ -600,9 +610,17 @@ async def generate_from_original(req: OriginalGenerateRequest, db: Session = Dep
             generation_source="original",
             score=float(result.score or 0.0),
             extra_workflow={
-                "viralElements": req.viralElements or [],
+                "viralElements": resolve_viral_elements(
+                    req.scriptTemplate or "opinion", req.viralElements or []
+                ),
                 "scriptTemplate": req.scriptTemplate or "opinion",
                 "inputMode": "voice",
+                "elementConfigMode": (
+                    "auto"
+                    if not (req.viralElements or [])
+                    or any(x in {"auto", "system_auto"} for x in (req.viralElements or []))
+                    else "manual"
+                ),
             },
         )
         return {

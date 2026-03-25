@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Iterable, List
 
 
 VIRAL_SCRIPT_TEMPLATE_MAP: Dict[str, Dict[str, str]] = {
@@ -41,8 +41,54 @@ VIRAL_SCRIPT_TEMPLATE_MAP: Dict[str, Dict[str, str]] = {
     },
 }
 
+# 四大脚本 × 八大爆款（映射到前端元素ID：cost/crowd/weird/worst/contrast/nostalgia/hormone/top）
+AUTO_VIRAL_ELEMENT_MAP: Dict[str, List[str]] = {
+    # 反差 + 情绪共鸣（过程型更重真实与共情）
+    "process": ["contrast", "nostalgia"],
+    # 权威 + 利益 + 认知反转（知识型强调专业与可得收益）
+    "knowledge": ["top", "cost", "contrast"],
+    # 情绪 + 反差（故事型以情感牵引为主）
+    "story": ["nostalgia", "contrast"],
+    # 认知反转 + 冲突 + 热点感（观点型更重冲突与传播）
+    "opinion": ["contrast", "top", "weird"],
+}
+
+VALID_VIRAL_ELEMENTS = {
+    "cost",
+    "crowd",
+    "weird",
+    "worst",
+    "contrast",
+    "nostalgia",
+    "hormone",
+    "top",
+}
+
 
 def get_viral_template(script_template: str) -> Dict[str, str]:
     key = (script_template or "opinion").strip().lower()
     return VIRAL_SCRIPT_TEMPLATE_MAP.get(key, VIRAL_SCRIPT_TEMPLATE_MAP["opinion"])
+
+
+def resolve_viral_elements(script_template: str, requested: Iterable[str] | None) -> List[str]:
+    """
+    解析最终使用的爆款元素：
+    - 若用户未选、或选择了 auto/system_auto，则按脚本模板自动配置；
+    - 否则使用用户手选（仅保留合法ID）。
+    """
+    req = [str(x).strip().lower() for x in (requested or []) if str(x).strip()]
+    req = [x for x in req if x in VALID_VIRAL_ELEMENTS or x in {"auto", "system_auto"}]
+
+    should_auto = (not req) or any(x in {"auto", "system_auto"} for x in req)
+    if should_auto:
+        key = (script_template or "opinion").strip().lower()
+        auto = AUTO_VIRAL_ELEMENT_MAP.get(key, AUTO_VIRAL_ELEMENT_MAP["opinion"])
+        return list(auto)
+
+    # 去重保序
+    out: List[str] = []
+    for x in req:
+        if x in VALID_VIRAL_ELEMENTS and x not in out:
+            out.append(x)
+    return out
 

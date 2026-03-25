@@ -36,7 +36,9 @@ def get_ip_profile(db: Session, ip_id: str) -> Optional[Dict[str, Any]]:
         return None
     sp = ip.style_profile if isinstance(ip.style_profile, dict) else {}
     base: Dict[str, Any] = {
+        # name 用于对外“IP名称”，self_name 用于文案自称（优先昵称）
         "name": ip.name,
+        "self_name": (ip.nickname or "").strip() or ip.name,
         "style": "",
         "target_audience": ip.target_audience or "",
         "content_preference": ip.content_direction or "",

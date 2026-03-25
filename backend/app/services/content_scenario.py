@@ -456,10 +456,19 @@ class ScenarioThreeGenerator:
         # 风格特征
         style = self.style_profile or {}
         
+        self_name = (
+            str(self.ip_profile.get("self_name") or "").strip()
+            or str(self.ip_profile.get("nickname") or "").strip()
+            or str(self.ip_profile.get("name") or "IP").strip()
+        )
+        banned_self_names = [n for n in {str(self.ip_profile.get("name") or "").strip()} if n and n != self_name]
+        viral_elements = [str(p) for p in (key_points or []) if str(p).strip()]
+
         prompt = f"""你是一个资深的自媒体创作者。
 
 ## IP信息
-- 名称: {self.ip_profile.get('name', 'IP')}
+- IP名称: {self.ip_profile.get('name', 'IP')}
+- 文案自称: {self_name}
 - 领域: {self.ip_profile.get('expertise', '')}
 - 风格: {self.ip_profile.get('content_direction', '')}
 
@@ -472,13 +481,14 @@ class ScenarioThreeGenerator:
 ## 话题
 {topic}
 
-## 关键要点
-{chr(10).join(f"- {p}" for p in (key_points or []))}
+## 爆款元素（表达策略，不是内容主题关键词）
+{chr(10).join(f"- {p}" for p in viral_elements) if viral_elements else "- （无）"}
 
 ## 要求
 1. 严格按照IP风格输出
-2. 内容有个人见解和价值
-3. 运用爆款逻辑：开头钩子 + 干货内容 + 情绪价值 + 结尾引导
+2. 文案里自称必须使用「{self_name}」，禁止自称为其他名字（如：{', '.join(banned_self_names) if banned_self_names else '无'}）
+3. 内容必须围绕「话题」展开，爆款元素仅用于选角度/组织表达，禁止把爆款元素写成“文章围绕的三个关键词/三大主题”
+4. 运用爆款逻辑：开头钩子 + 干货内容 + 情绪价值 + 结尾引导
 4. 长度: {length_map.get(length, length_map['medium'])}
 
 请生成内容："""

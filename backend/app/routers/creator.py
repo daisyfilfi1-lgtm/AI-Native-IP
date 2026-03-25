@@ -6,6 +6,7 @@ Creator API Router
 from datetime import datetime, timezone
 import logging
 import random
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -103,6 +104,87 @@ def _extract_style_guardrails_from_assets(db: Session, ip_id: str) -> Dict[str, 
         "forbidden_self_names": uniq_forbidden[:8],
         "style_evidence": evidence[:4],
     }
+
+
+def _extract_topic_keywords(topic: str) -> List[str]:
+    kws = re.findall(r"[\u4e00-\u9fa5]{2,}|[A-Za-z0-9_]{2,}", topic or "")
+    uniq: List[str] = []
+    for k in kws:
+        if k not in uniq:
+            uniq.append(k)
+    return uniq[:10]
+
+
+def _score_text_relevance(text: str, keywords: List[str]) -> int:
+    if not text or not keywords:
+        return 0
+    t = text.lower()
+    score = 0
+    for kw in keywords:
+        if kw.lower() in t:
+            score += 1
+    return score
+
+
+def _build_dynamic_few_shots(db: Session, ip_id: str, topic: str, k: int = 3) -> List[str]:
+    """
+    Phase B：动态 few-shot 组装
+    来源：优先 content_drafts（已验证生成样本）+ 补充 IPAsset（知识库片段）
+    """
+    keywords = _extract_topic_keywords(topic)
+    examples: List[str] = []
+
+    draft_rows = (
+        db.query(ContentDraft)
+        .filter(ContentDraft.ip_id == ip_id)
+        .order_by(ContentDraft.created_at.desc())
+        .limit(80)
+        .all()
+    )
+    scored_drafts: List[tuple[int, str]] = []
+    for d in draft_rows:
+        wf = d.workflow if isinstance(d.workflow, dict) else {}
+        text = "\n".join(
+            [
+                str(wf.get("hook") or "").strip(),
+                str(wf.get("opinion") or wf.get("body") or "").strip(),
+                str(wf.get("cta") or "").strip(),
+            ]
+        ).strip()
+        if not text:
+            continue
+        score = _score_text_relevance(text, keywords)
+        if score <= 0:
+            continue
+        scored_drafts.append((score, text[:320]))
+    scored_drafts.sort(key=lambda x: x[0], reverse=True)
+    for _, t in scored_drafts[:k]:
+        examples.append(f"[历史成稿样本] {t}")
+
+    if len(examples) < k:
+        asset_rows = (
+            db.query(IPAsset)
+            .filter(IPAsset.ip_id == ip_id)
+            .order_by(IPAsset.created_at.desc())
+            .limit(120)
+            .all()
+        )
+        scored_assets: List[tuple[int, str]] = []
+        for a in asset_rows:
+            text = (a.content or "").strip()
+            if not text:
+                continue
+            score = _score_text_relevance(text, keywords)
+            if score <= 0:
+                continue
+            scored_assets.append((score, f"{(a.title or '知识库素材').strip()}: {text[:260]}"))
+        scored_assets.sort(key=lambda x: x[0], reverse=True)
+        for _, t in scored_assets:
+            if len(examples) >= k:
+                break
+            examples.append(f"[知识库样本] {t}")
+
+    return examples[:k]
 
 
 _RECOMMENDED_TOPICS = [
@@ -420,9 +502,11 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
             ip_profile["self_name"] = "小敏"
         guardrails = _extract_style_guardrails_from_assets(db, req.ipId or "1")
         template = get_viral_template(req.scriptTemplate or "opinion")
+        few_shot_examples = _build_dynamic_few_shots(db, req.ipId or "1", req.input or "", k=3)
         ip_profile["self_intro"] = guardrails.get("self_intro") or ""
         ip_profile["forbidden_self_names"] = guardrails.get("forbidden_self_names") or []
         ip_profile["style_evidence"] = guardrails.get("style_evidence") or []
+        ip_profile["few_shot_examples"] = few_shot_examples
         ip_profile["strategy_template_name"] = template.get("name") or ""
         ip_profile["strategy_template_instruction"] = template.get("instruction") or ""
         length = _target_duration_to_length(int(req.targetDuration or 60))

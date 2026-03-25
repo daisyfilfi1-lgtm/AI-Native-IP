@@ -5,6 +5,7 @@
 场景三：自定义原创 + IP风格 + 爆款逻辑
 """
 from typing import Any, Dict, List, Optional
+import re
 from pydantic import BaseModel, Field
 
 from app.services.ai_client import chat, get_ai_config
@@ -416,12 +417,28 @@ class ScenarioThreeGenerator:
         # Step 1: 构建生成提示
         prompt = self._build_prompt(topic, key_points, length)
         
-        # Step 2: 生成内容
+        # Step 2: 生成内容（含一次一致性失败自动重试）
         content = chat(
             model=self.cfg.get("llm_model", "deepseek-chat"),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
         )
+        consistency = self._consistency_check(content or "", topic, key_points)
+        if consistency.get("overall", 0.0) < 0.78:
+            repair_prompt = (
+                prompt
+                + "\n\n【纠偏指令】\n"
+                + f"- 上一版问题: {', '.join(consistency.get('issues', [])) or '风格一致性不足'}\n"
+                + "- 严格执行：自称、主题聚焦、禁用词、策略元素仅作表达策略。\n"
+                + "- 现在请给出修正版完整文案。"
+            )
+            retry = chat(
+                model=self.cfg.get("llm_model", "deepseek-chat"),
+                messages=[{"role": "user", "content": repair_prompt}],
+                temperature=0.5,
+            )
+            if retry and retry.strip():
+                content = retry
         
         # Step 3: 质量评分
         score = await self._score(content)
@@ -483,6 +500,10 @@ class ScenarioThreeGenerator:
             f"- 证据{i+1}: {str(x)[:180]}" for i, x in enumerate(style_evidence[:4]) if str(x).strip()
         )
         self_intro = str(self.ip_profile.get("self_intro") or "").strip()
+        few_shot_examples = self.ip_profile.get("few_shot_examples") or []
+        few_shot_text = "\n".join(
+            f"- 样本{i+1}: {str(x)[:260]}" for i, x in enumerate(few_shot_examples[:3]) if str(x).strip()
+        )
 
         prompt = f"""你是一个资深的自媒体创作者。
 
@@ -511,6 +532,9 @@ class ScenarioThreeGenerator:
 ## 风格证据（来自知识库，必须尽量贴合）
 {style_evidence_text or "- （无）"}
 
+## 动态Few-shot样本（优先模仿结构与语感，不抄袭事实）
+{few_shot_text or "- （无）"}
+
 ## 要求
 1. 严格按照IP风格输出
 2. 文案里自称必须使用「{self_name}」，禁止自称为其他名字（如：{', '.join(banned_self_names) if banned_self_names else '无'}）
@@ -522,6 +546,54 @@ class ScenarioThreeGenerator:
 请生成内容："""
         
         return prompt
+
+    def _consistency_check(self, content: str, topic: str, key_points: Optional[List[str]]) -> Dict[str, Any]:
+        text = (content or "").strip()
+        if not text:
+            return {"overall": 0.0, "issues": ["空内容"]}
+        issues: List[str] = []
+        score = 1.0
+
+        self_name = (
+            str(self.ip_profile.get("self_name") or "").strip()
+            or str(self.ip_profile.get("name") or "").strip()
+        )
+        if self_name and self_name not in text[:120]:
+            score -= 0.2
+            issues.append("开场未使用指定自称")
+
+        banned = [str(x).strip() for x in (self.ip_profile.get("forbidden_self_names") or []) if str(x).strip()]
+        for b in banned:
+            if b and b in text:
+                score -= 0.2
+                issues.append(f"出现禁用称呼:{b}")
+                break
+
+        # 爆款元素不应被写成“主线三关键词”
+        if re.search(r"(三个关键词|三大关键词|围绕.*关键词)", text):
+            score -= 0.2
+            issues.append("把策略元素写成了内容主线")
+        for p in (key_points or []):
+            if str(p) and f"围绕{p}" in text:
+                score -= 0.1
+                issues.append("策略元素被当作主题")
+                break
+
+        # 主题聚焦：至少命中一个主题词
+        topic_tokens = re.findall(r"[\u4e00-\u9fa5]{2,}|[A-Za-z0-9_]{2,}", topic or "")
+        if topic_tokens:
+            hit = any(t in text for t in topic_tokens[:6])
+            if not hit:
+                score -= 0.2
+                issues.append("主题词命中不足")
+
+        # 禁用大厂黑话（来自 IP克隆参考）
+        blacklist = ["闭环", "赋能", "赛道", "颗粒度", "底层逻辑", "垂直领域"]
+        if any(w in text for w in blacklist):
+            score -= 0.1
+            issues.append("出现禁用黑话")
+
+        return {"overall": max(0.0, score), "issues": issues}
     
     async def _score(self, content: str) -> float:
         """质量评分"""

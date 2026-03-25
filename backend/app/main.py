@@ -116,7 +116,23 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health():
-        return {"status": "ok"}
+        import inspect
+        from app.services.ai_client import chat
+        from app.config.ai_config import get_ai_config
+
+        cfg = get_ai_config()
+        sig = inspect.signature(chat)
+        return {
+            "status": "ok",
+            "git_sha": os.getenv("RAILWAY_GIT_COMMIT_SHA")
+            or os.getenv("RAILWAY_GIT_SHA")
+            or os.getenv("GIT_SHA")
+            or "",
+            "llm_available": bool(cfg.get("llm_available")),
+            "has_api_key": bool(cfg.get("api_key")),
+            "llm_model": cfg.get("llm_model") or "",
+            "chat_supports_temperature": "temperature" in sig.parameters,
+        }
 
     # API Key 或用户 JWT（发码/登录见 auth 路由，无需此依赖）
     api_key_dep = [Depends(verify_api_key_or_jwt)]

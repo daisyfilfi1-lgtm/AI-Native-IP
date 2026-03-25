@@ -20,6 +20,12 @@ _CN_PHONE = re.compile(r"^1[3-9]\d{9}$")
 
 OTP_TTL_SEC = int(os.environ.get("OTP_TTL_SEC", "300"))
 OTP_RESEND_SEC = int(os.environ.get("OTP_RESEND_SEC", "60"))
+OTP_BYPASS_ENABLED = os.environ.get("OTP_BYPASS_ENABLED", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+OTP_BYPASS_CODE = os.environ.get("OTP_BYPASS_CODE", "123456").strip() or "123456"
 
 
 def _pepper() -> bytes:
@@ -80,6 +86,24 @@ def send_code(db: Session, phone: str) -> Tuple[bool, str]:
 
 def verify_code_and_upsert_user(db: Session, phone: str, code: str) -> Optional[User]:
     """校验验证码，创建或更新用户，失败返回 None。"""
+    # 临时免短信模式：用于短信通道未开通时的联调/压测。
+    if OTP_BYPASS_ENABLED and code.strip() == OTP_BYPASS_CODE:
+        now = datetime.utcnow()
+        user = db.query(User).filter(User.phone == phone).first()
+        if not user:
+            user = User(
+                user_id=f"u_{uuid.uuid4().hex[:16]}",
+                phone=phone,
+                last_login_at=now,
+            )
+            db.add(user)
+        else:
+            user.last_login_at = now
+            user.updated_at = now
+        db.commit()
+        db.refresh(user)
+        return user
+
     now = datetime.utcnow()
     rows = (
         db.query(AuthOtp)

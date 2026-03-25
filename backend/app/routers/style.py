@@ -26,7 +26,7 @@ def _normalize_style_profile_dict(raw: Any, ip_id: str) -> dict:
         raw = {}
     d = dict(raw)
     d.setdefault("ip_id", ip_id)
-    for key in ("vocabulary", "sentence_patterns", "catchphrases", "topics"):
+    for key in ("vocabulary", "sentence_patterns", "catchphrases", "topics", "forbidden_self_names"):
         v = d.get(key)
         if v is None:
             d[key] = []
@@ -37,6 +37,10 @@ def _normalize_style_profile_dict(raw: Any, ip_id: str) -> dict:
             d[key] = ""
         else:
             d[key] = str(d[key])
+    if d.get("self_intro") is None:
+        d["self_intro"] = ""
+    else:
+        d["self_intro"] = str(d["self_intro"])
     return d
 
 
@@ -81,6 +85,8 @@ class StyleProfileResponse(BaseModel):
     humor_style: Optional[str] = None
     formality: Optional[float] = None
     emotion_density: Optional[float] = None
+    self_intro: Optional[str] = None
+    forbidden_self_names: Optional[List[str]] = None
 
 
 # ==================== API端点 ====================

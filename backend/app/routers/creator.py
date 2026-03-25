@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.db import get_db
-from app.db.models import ContentDraft, IP
+from app.db.models import ContentDraft, IP, IPAsset
+from app.prompts.viral_strategy_templates import get_viral_template
 from app.services.content_scenario import (
     ContentGenerator,
     ScenarioOneRequest,
@@ -47,6 +48,61 @@ def get_ip_profile(db: Session, ip_id: str) -> Optional[Dict[str, Any]]:
     }
     merged = {**base, **sp}
     return merged
+
+
+def _extract_style_guardrails_from_assets(db: Session, ip_id: str) -> Dict[str, Any]:
+    """
+    从知识库提取风格强约束字段：
+    - self_intro: 推荐自我介绍句
+    - forbidden_self_names: 禁止自称
+    - style_evidence: 语感证据片段（用于提示词 grounding）
+    """
+    rows = (
+        db.query(IPAsset)
+        .filter(IPAsset.ip_id == ip_id)
+        .order_by(IPAsset.created_at.desc())
+        .limit(120)
+        .all()
+    )
+    if not rows:
+        return {"self_intro": "", "forbidden_self_names": [], "style_evidence": []}
+
+    evidence: List[str] = []
+    forbidden: List[str] = []
+    self_intro = ""
+    for r in rows:
+        title = (r.title or "").strip()
+        content = (r.content or "").strip()
+        if not content:
+            continue
+        if "专属语感" in title or "口癖" in title or "词典" in title:
+            # 读取“首选称呼/禁用称呼”类信息
+            for ln in content.splitlines():
+                s = ln.strip()
+                if not s:
+                    continue
+                if ("首选称呼" in s or "自称" in s) and not self_intro:
+                    self_intro = s[:80]
+                if "禁用称呼" in s:
+                    raw = s.replace("禁用称呼", "").replace("：", " ").replace(":", " ")
+                    parts = [p.strip("，,。；; ") for p in raw.split() if p.strip("，,。；; ")]
+                    forbidden.extend([p for p in parts if len(p) <= 8])
+            evidence.append(content[:280])
+        elif "IP定位" in title or "爆款总结" in title:
+            evidence.append(content[:220])
+        if len(evidence) >= 4:
+            break
+
+    # 去重保序
+    uniq_forbidden: List[str] = []
+    for x in forbidden:
+        if x and x not in uniq_forbidden:
+            uniq_forbidden.append(x)
+    return {
+        "self_intro": self_intro,
+        "forbidden_self_names": uniq_forbidden[:8],
+        "style_evidence": evidence[:4],
+    }
 
 
 _RECOMMENDED_TOPICS = [
@@ -359,6 +415,16 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
     """场景三：爆款原创"""
     try:
         ip_profile = get_ip_profile(db, req.ipId or "") or {}
+        # 兜底：确保 xiaomin1 默认昵称稳定为「小敏」
+        if (req.ipId or "") == "xiaomin1":
+            ip_profile["self_name"] = "小敏"
+        guardrails = _extract_style_guardrails_from_assets(db, req.ipId or "1")
+        template = get_viral_template(req.scriptTemplate or "opinion")
+        ip_profile["self_intro"] = guardrails.get("self_intro") or ""
+        ip_profile["forbidden_self_names"] = guardrails.get("forbidden_self_names") or []
+        ip_profile["style_evidence"] = guardrails.get("style_evidence") or []
+        ip_profile["strategy_template_name"] = template.get("name") or ""
+        ip_profile["strategy_template_instruction"] = template.get("instruction") or ""
         length = _target_duration_to_length(int(req.targetDuration or 60))
 
         request = ScenarioThreeRequest(

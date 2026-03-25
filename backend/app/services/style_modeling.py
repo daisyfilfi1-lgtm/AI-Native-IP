@@ -28,6 +28,8 @@ class IPStyleProfile(BaseModel):
     humor_style: Optional[str] = None      # 幽默风格
     formality: Optional[float] = 0.5        # 正式程度 0-1
     emotion_density: Optional[float] = 0.5  # 情感密度 0-1
+    self_intro: Optional[str] = None
+    forbidden_self_names: Optional[List[str]] = None
 
 
 class StyleExtractor:

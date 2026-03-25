@@ -39,6 +39,7 @@ ORDER = [
     "010_strategy_agent.sql",
     "011_auth_users.sql",
     "012_link_mantou_ip_owner.sql",
+    "013_set_xiaomin_nickname.sql",
 ]
 
 

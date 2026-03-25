@@ -462,7 +462,27 @@ class ScenarioThreeGenerator:
             or str(self.ip_profile.get("name") or "IP").strip()
         )
         banned_self_names = [n for n in {str(self.ip_profile.get("name") or "").strip()} if n and n != self_name]
+        banned_self_names.extend(
+            [
+                str(x).strip()
+                for x in (self.ip_profile.get("forbidden_self_names") or [])
+                if str(x).strip()
+            ]
+        )
+        # 去重保序
+        _bn: List[str] = []
+        for x in banned_self_names:
+            if x not in _bn:
+                _bn.append(x)
+        banned_self_names = _bn
         viral_elements = [str(p) for p in (key_points or []) if str(p).strip()]
+        strategy_template_name = str(self.ip_profile.get("strategy_template_name") or "").strip()
+        strategy_template_instruction = str(self.ip_profile.get("strategy_template_instruction") or "").strip()
+        style_evidence = self.ip_profile.get("style_evidence") or []
+        style_evidence_text = "\n".join(
+            f"- 证据{i+1}: {str(x)[:180]}" for i, x in enumerate(style_evidence[:4]) if str(x).strip()
+        )
+        self_intro = str(self.ip_profile.get("self_intro") or "").strip()
 
         prompt = f"""你是一个资深的自媒体创作者。
 
@@ -481,15 +501,23 @@ class ScenarioThreeGenerator:
 ## 话题
 {topic}
 
+## 策略指令模板
+- 选择模板: {strategy_template_name or "说观点"}
+- 模板指令: {strategy_template_instruction or "开头钩子 + 干货论证 + 情绪价值 + CTA"}
+
 ## 爆款元素（表达策略，不是内容主题关键词）
 {chr(10).join(f"- {p}" for p in viral_elements) if viral_elements else "- （无）"}
+
+## 风格证据（来自知识库，必须尽量贴合）
+{style_evidence_text or "- （无）"}
 
 ## 要求
 1. 严格按照IP风格输出
 2. 文案里自称必须使用「{self_name}」，禁止自称为其他名字（如：{', '.join(banned_self_names) if banned_self_names else '无'}）
+2.1 开场优先使用该自我介绍语感（可同义改写，不要照抄）：{self_intro or "我是{self_name}"}
 3. 内容必须围绕「话题」展开，爆款元素仅用于选角度/组织表达，禁止把爆款元素写成“文章围绕的三个关键词/三大主题”
 4. 运用爆款逻辑：开头钩子 + 干货内容 + 情绪价值 + 结尾引导
-4. 长度: {length_map.get(length, length_map['medium'])}
+5. 长度: {length_map.get(length, length_map['medium'])}
 
 请生成内容："""
         

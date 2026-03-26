@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -67,6 +67,32 @@ def keywords_from_ip(ip: IP) -> List[str]:
     return out[:40]
 
 
+def keywords_from_env_only() -> List[str]:
+    """无 IP 记录时仅用 TIKHUB_REMIX_EXTRA_KEYWORDS 等环境变量做标题匹配。"""
+    words: List[str] = []
+    extra = os.environ.get("TIKHUB_REMIX_EXTRA_KEYWORDS", "").strip()
+    if extra:
+        for x in extra.split(","):
+            x = x.strip()
+            if len(x) >= 2:
+                words.append(x)
+    seen: set = set()
+    out: List[str] = []
+    for w in words:
+        lw = w.lower()
+        if lw in seen:
+            continue
+        seen.add(lw)
+        out.append(w)
+    return out[:40]
+
+
+def remix_keywords_for_ip(ip: Optional[IP]) -> List[str]:
+    if ip is None:
+        return keywords_from_env_only()
+    return keywords_from_ip(ip)
+
+
 def _match_score(title: str, keywords: List[str]) -> int:
     if not title or not keywords:
         return 0
@@ -91,15 +117,30 @@ def _xhs_topic_page_ids_for_ip(ip: IP) -> List[str]:
     return ids
 
 
+def _xhs_topic_page_ids_env_only() -> List[str]:
+    ids: List[str] = []
+    env_ids = os.environ.get("TIKHUB_XHS_TOPIC_PAGE_IDS", "").strip()
+    if env_ids:
+        for x in env_ids.split(","):
+            x = x.strip()
+            if x and x not in ids:
+                ids.append(x)
+    return ids
+
+
+def _xhs_topic_page_ids_for_remix(ip: Optional[IP]) -> List[str]:
+    if ip is None:
+        return _xhs_topic_page_ids_env_only()
+    return _xhs_topic_page_ids_for_ip(ip)
+
+
 async def build_remix_recommendations(
     db: Session,
     ip_id: str,
     limit: int = 12,
 ) -> List[Dict[str, Any]]:
     ip = db.query(IP).filter(IP.ip_id == ip_id).first()
-    if not ip:
-        return []
-    kws = keywords_from_ip(ip)
+    kws = remix_keywords_for_ip(ip)
     items: List[Dict[str, Any]] = []
     seen_urls: set = set()
 
@@ -122,7 +163,8 @@ async def build_remix_recommendations(
                 seen_urls.add(u)
                 reason = "抖音低粉爆款榜"
                 if kws and p["_match"] > 0:
-                    reason = f"与IP方向匹配 · 低粉爆款（命中 {p['_match']} 个关键词）"
+                    label = "关键词配置" if ip is None else "IP方向"
+                    reason = f"与{label}匹配 · 低粉爆款（命中 {p['_match']} 个关键词）"
                 items.append(
                     {
                         "url": u,
@@ -136,7 +178,7 @@ async def build_remix_recommendations(
         except Exception as e:
             logger.warning("抖音低粉爆款榜拉取失败: %s", e)
 
-    for page_id in _xhs_topic_page_ids_for_ip(ip):
+    for page_id in _xhs_topic_page_ids_for_remix(ip):
         if len(items) >= limit:
             break
         topic_name = ""
@@ -161,7 +203,8 @@ async def build_remix_recommendations(
                 label = n.get("topic_name") or topic_name
                 reason = f"小红书话题「{label[:32]}」"
                 if kws and m > 0:
-                    reason = f"与IP方向匹配 · {reason}"
+                    lbl = "关键词配置" if ip is None else "IP方向"
+                    reason = f"与{lbl}匹配 · {reason}"
                 items.append(
                     {
                         "url": u,

@@ -19,7 +19,6 @@ from app.routers import (
     baidu_pan_sync,
     config_memory,
     content,
-    content_generation,
     creator,
     feishu_sync,
     graph,
@@ -59,6 +58,14 @@ if cors_env:
     CORS_ORIGINS = [o.strip() for o in cors_env.split(",") if o.strip()]
 
 logger.info(f"CORS origins: {CORS_ORIGINS}")
+
+# Optional heavy router import: some local environments may lack torch DLLs.
+# Keep core auth/login APIs available even when content-generation extras are unavailable.
+try:
+    from app.routers import content_generation
+except Exception as e:
+    content_generation = None
+    logger.warning("content_generation router disabled: %s", e)
 
 ROOT_HTML = """
 <!DOCTYPE html>
@@ -150,9 +157,10 @@ def create_app() -> FastAPI:
     app.include_router(memory_consolidation.router, prefix="/api/v1", tags=["memory"], dependencies=api_key_dep)
     app.include_router(multimodal.router, prefix="/api/v1", tags=["multimodal"], dependencies=api_key_dep)
     app.include_router(content.router, prefix="/api/v1", tags=["content"], dependencies=api_key_dep)
-    app.include_router(
-        content_generation.router, prefix="/api/v1", tags=["content-generation"], dependencies=api_key_dep
-    )
+    if content_generation is not None:
+        app.include_router(
+            content_generation.router, prefix="/api/v1", tags=["content-generation"], dependencies=api_key_dep
+        )
     app.include_router(strategy_agent.router, prefix="/api/v1", tags=["strategy"], dependencies=api_key_dep)
     app.include_router(style.router, prefix="/api/v1", tags=["style"], dependencies=api_key_dep)
     app.include_router(creator.router, prefix="/api", tags=["creator"], dependencies=api_key_dep)

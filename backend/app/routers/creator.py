@@ -236,6 +236,27 @@ _RECOMMENDED_TOPICS = [
     {"id": "3", "title": "月入3万的私域运营", "score": 4.7, "tags": ["私域", "变现"], "reason": "策略推荐"},
 ]
 
+# 按 IP 定义强约束白名单关键词（命中任一即可通过）
+_IP_TOPIC_WHITELIST = {
+    "xiaomin1": ["创业", "翻身", "变现", "私域"],
+}
+
+
+def _topic_hit_whitelist(topic: Dict[str, Any], keywords: List[str]) -> bool:
+    if not keywords:
+        return True
+    title = str(topic.get("title") or "")
+    tags = ",".join(str(x) for x in (topic.get("tags") or []) if x is not None)
+    text = f"{title} {tags}"
+    return any(kw and kw in text for kw in keywords)
+
+
+def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
+    if not keywords:
+        return topics
+    return [t for t in topics if _topic_hit_whitelist(t, keywords)]
+
 
 def _workflow_title(wf: Optional[dict]) -> str:
     if not isinstance(wf, dict):
@@ -460,6 +481,7 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
     """场景二：仿写爆款（抖音 Web 单条优先，否则 hybrid；未配置或失败时退回原始 URL 文本）"""
     try:
         ip_profile = get_ip_profile(db, req.ipId or "") or {}
+        ip_profile["ip_id"] = req.ipId or "1"
 
         competitor_text = req.url.strip()[:8000]
         if tikhub_client.is_configured():
@@ -502,6 +524,10 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
             extra_workflow={
                 "source_url": req.url,
                 "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
+                "structureSnapshot": (result.metadata or {}).get("structure_snapshot"),
+                "retrievalTrace": (result.metadata or {}).get("retrieval_trace"),
+                "validationReport": (result.metadata or {}).get("validation_report"),
+                "remixV2Enabled": (result.metadata or {}).get("remix_v2_enabled"),
             },
         )
 
@@ -744,6 +770,10 @@ async def get_generate_result(id: str, db: Session = Depends(get_db)):
             "viralElements": wf.get("viralElements") or [],
             "scriptTemplate": wf.get("scriptTemplate") or "",
             "agentChain": wf.get("agent_chain") or ["Strategy", "Memory", "Generation", "Compliance"],
+            "structureSnapshot": wf.get("structureSnapshot") or None,
+            "retrievalTrace": wf.get("retrievalTrace") or None,
+            "validationReport": wf.get("validationReport") or None,
+            "remixV2Enabled": bool(wf.get("remixV2Enabled")),
             "compliance": {
                 "originalityScore": 82,
                 "sensitiveWords": [],
@@ -786,6 +816,8 @@ async def _topics_from_algorithm_or_fallback(
     limit: int = 12,
 ) -> List[Dict[str, Any]]:
     """场景一第一步：四维评分推荐（失败时回退 TikHub/占位）。"""
+    relevance_floor = 0.6
+    whitelist_keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
     try:
         ip_profile = get_ip_profile(db, ip_id) or {}
         request = ScenarioOneRequest(
@@ -808,6 +840,10 @@ async def _topics_from_algorithm_or_fallback(
                 scores = item.get("scores") or {}
                 if not topic:
                     continue
+                relevance = float(scores.get("relevance", 0.0) or 0.0)
+                # 强制过滤与当前 IP 画像弱相关的话题，避免出现跨领域推荐
+                if relevance < relevance_floor:
+                    continue
                 cards.append(
                     {
                         "id": f"topic_{idx:03d}",
@@ -825,7 +861,14 @@ async def _topics_from_algorithm_or_fallback(
                     }
                 )
             if cards:
-                return cards
+                whitelisted_cards = _apply_topic_whitelist(ip_id, cards)
+                if whitelisted_cards:
+                    return whitelisted_cards
+                logger.warning(
+                    "推荐选题全部被白名单过滤，ip_id=%s, whitelist=%s",
+                    ip_id,
+                    whitelist_keywords,
+                )
     except Exception as e:
         logger.warning("算法推荐选题失败，降级到 TikHub/占位: %s", e)
 
@@ -833,9 +876,20 @@ async def _topics_from_algorithm_or_fallback(
         try:
             cards = await tikhub_client.get_recommended_topic_cards(limit=limit)
             if cards:
-                return cards
+                whitelisted_cards = _apply_topic_whitelist(ip_id, cards)
+                if whitelisted_cards:
+                    return whitelisted_cards
+                logger.warning(
+                    "TikHub 推荐全部被白名单过滤，ip_id=%s, whitelist=%s",
+                    ip_id,
+                    whitelist_keywords,
+                )
         except Exception as e:
             logger.warning("TikHub 推荐选题不可用，使用内置占位: %s", e)
+    fallback_topics = _apply_topic_whitelist(ip_id, list(_RECOMMENDED_TOPICS))
+    if fallback_topics:
+        return fallback_topics
+    # 极端兜底：白名单配置异常时至少保证有返回
     return list(_RECOMMENDED_TOPICS)
 
 

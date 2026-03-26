@@ -20,12 +20,21 @@ _CN_PHONE = re.compile(r"^1[3-9]\d{9}$")
 
 OTP_TTL_SEC = int(os.environ.get("OTP_TTL_SEC", "300"))
 OTP_RESEND_SEC = int(os.environ.get("OTP_RESEND_SEC", "60"))
-OTP_BYPASS_ENABLED = os.environ.get("OTP_BYPASS_ENABLED", "").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-)
-OTP_BYPASS_CODE = os.environ.get("OTP_BYPASS_CODE", "123456").strip() or "123456"
+
+
+def _otp_bypass_enabled() -> bool:
+    """
+    运行时读取免短信开关，避免进程启动后环境变量变更不生效。
+    兼容：当未显式配置 OTP_BYPASS_ENABLED 且 SMS_PROVIDER=mock 时，默认允许联调免短信登录。
+    """
+    raw = os.environ.get("OTP_BYPASS_ENABLED")
+    if raw is not None and str(raw).strip() != "":
+        return str(raw).strip().lower() in ("1", "true", "yes")
+    return os.environ.get("SMS_PROVIDER", "mock").strip().lower() == "mock"
+
+
+def _otp_bypass_code() -> str:
+    return os.environ.get("OTP_BYPASS_CODE", "123456").strip() or "123456"
 
 
 def _pepper() -> bytes:
@@ -87,7 +96,7 @@ def send_code(db: Session, phone: str) -> Tuple[bool, str]:
 def verify_code_and_upsert_user(db: Session, phone: str, code: str) -> Optional[User]:
     """校验验证码，创建或更新用户，失败返回 None。"""
     # 临时免短信模式：用于短信通道未开通时的联调/压测。
-    if OTP_BYPASS_ENABLED and code.strip() == OTP_BYPASS_CODE:
+    if _otp_bypass_enabled() and code.strip() == _otp_bypass_code():
         now = datetime.utcnow()
         user = db.query(User).filter(User.phone == phone).first()
         if not user:

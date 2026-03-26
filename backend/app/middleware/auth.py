@@ -63,7 +63,7 @@ async def verify_api_key_or_jwt(
     if IS_PRODUCTION:
         if not API_KEY:
             raise HTTPException(
-                status_code=500,
+                status_code=503,
                 detail="Server misconfiguration: API_KEY not set",
             )
         if api_key != API_KEY:

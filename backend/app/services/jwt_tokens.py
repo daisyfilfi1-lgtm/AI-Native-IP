@@ -33,7 +33,12 @@ def mint_access_token(user_id: str, phone: str) -> str:
 
 
 def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
+    """
+    解码失败返回 None。生产环境若未配置 JWT_SECRET，_jwt_secret() 可能抛错，须捕获以免鉴权中间件 500。
+    """
     try:
         return jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALGORITHM])
     except jwt.InvalidTokenError:
+        return None
+    except Exception:
         return None

@@ -5,6 +5,7 @@ Creator API Router
 
 from datetime import datetime, timezone
 import logging
+import math
 import random
 import re
 import uuid
@@ -418,16 +419,20 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
 
         result = await ContentGenerator.scenario_two(request)
         draft_id = f"gen_remix_{uuid.uuid4().hex[:10]}"
+        raw_score = float(result.score or 0.0)
+        if not math.isfinite(raw_score):
+            raw_score = 0.0
+        safe_content = (result.content if isinstance(result.content, str) else "") or ""
         _save_generated_draft(
             db,
             draft_id=draft_id,
             ip_id=req.ipId or "1",
             level="remix",
             title="仿写爆款",
-            content=result.content or "",
+            content=safe_content,
             style=req.style,
             generation_source="remix",
-            score=float(result.score or 0.0),
+            score=raw_score,
             extra_workflow={"source_url": req.url},
         )
 
@@ -436,10 +441,11 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
             "status": "completed",
             "progress": 100,
             "estimatedTime": 0,
-            "content": result.content,
-            "score": result.score,
+            "content": safe_content,
+            "score": raw_score,
         }
     except Exception as e:
+        logger.exception("generate_from_remix failed: %s", e)
         return {
             "id": "gen_remix_001",
             "status": "failed",

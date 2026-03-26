@@ -9,6 +9,7 @@ import re
 from pydantic import BaseModel, Field
 
 from app.services.ai_client import chat, get_ai_config
+from app.services.style_corpus_service import StyleCorpusService
 from app.services.topic_service import HotTopicService, TopicRecommender
 
 
@@ -70,6 +71,7 @@ class ScenarioOneGenerator:
         self.weights = weights
         self.cfg = get_ai_config()
         self.topic_service = HotTopicService()
+        self.style_corpus = StyleCorpusService()
     
     async def generate(self, platform: str = "all", count: int = 5) -> List[ContentResult]:
         """执行场景一"""
@@ -192,7 +194,17 @@ IP领域: {', '.join(ip_topics)}
     
     async def _generate_content(self, topic: str, category: str) -> str:
         """生成热点内容"""
-        
+        style_layer = str(self.ip_profile.get("style_constraint_layer") or "").strip()
+        style_examples = str(self.ip_profile.get("style_retrieved_examples_text") or "").strip()
+        if not style_layer:
+            retrieved = self.style_corpus.search_samples(
+                topic=topic,
+                emotion=str(self.ip_profile.get("content_direction") or ""),
+                audience=str(self.ip_profile.get("target_audience") or ""),
+                top_k=3,
+            )
+            style_layer = self.style_corpus.build_style_constraint_layer(retrieved)
+
         prompt = f"""你是一个资深的自媒体内容创作者。
 
 ## IP定位
@@ -211,6 +223,11 @@ IP领域: {', '.join(ip_topics)}
 4. 适合短视频口播或图文发布
 5. 长度适中（300-500字）
 
+{style_layer}
+
+## 检索样本速览
+{style_examples or "- （无）"}
+
 请生成内容："""
         
         result = chat(
@@ -219,6 +236,23 @@ IP领域: {', '.join(ip_topics)}
             temperature=0.7,
         )
         
+        style_diag = self.style_corpus.score_human_likeness(result or "")
+        if not style_diag.get("pass"):
+            repair_prompt = (
+                prompt
+                + "\n\n【对抗校验未通过，强制重写】\n"
+                + f"- 问题：{'; '.join(style_diag.get('issues') or ['风格指标不足'])}\n"
+                + "- 重写要求：提升句长波动、增加自然语气词与口语停顿、保持真实人味。\n"
+                + "请仅输出修正版完整文案。"
+            )
+            repaired = chat(
+                model=self.cfg.get("llm_model", "deepseek-chat"),
+                messages=[{"role": "user", "content": repair_prompt}],
+                temperature=0.65,
+            )
+            if repaired and repaired.strip():
+                result = repaired
+
         return result
 
 
@@ -233,6 +267,7 @@ class ScenarioTwoGenerator:
     def __init__(self, ip_profile: Dict):
         self.ip_profile = ip_profile
         self.cfg = get_ai_config()
+        self.style_corpus = StyleCorpusService()
     
     async def generate(
         self,
@@ -253,6 +288,7 @@ class ScenarioTwoGenerator:
         
         # Step 4: 质量评分
         score = await self._score_quality(rewritten, structure)
+        style_diag = self.style_corpus.score_human_likeness(rewritten or "")
         
         return ContentResult(
             content=rewritten,
@@ -262,6 +298,7 @@ class ScenarioTwoGenerator:
                 "original_structure": structure,
                 "key_elements": key_elements,
                 "rewrite_level": rewrite_level,
+                "style_diagnostics": style_diag,
             }
         )
     
@@ -337,6 +374,18 @@ class ScenarioTwoGenerator:
             "heavy": "完全重构，提取内核后重新创作",
         }
         
+        topic_hint = str(elements.get("topic") or self.ip_profile.get("content_direction") or "")
+        style_layer = str(self.ip_profile.get("style_constraint_layer") or "").strip()
+        style_examples = str(self.ip_profile.get("style_retrieved_examples_text") or "").strip()
+        if not style_layer:
+            retrieved = self.style_corpus.search_samples(
+                topic=topic_hint,
+                emotion=str(self.ip_profile.get("content_direction") or ""),
+                audience=str(self.ip_profile.get("target_audience") or ""),
+                top_k=3,
+            )
+            style_layer = self.style_corpus.build_style_constraint_layer(retrieved)
+
         prompt = f"""你是一个自媒体内容创作者。
 
 ## IP定位
@@ -349,6 +398,11 @@ class ScenarioTwoGenerator:
 
 ## 改写要求
 {level_map.get(level, level_map['medium'])}
+
+{style_layer}
+
+## 检索样本速览
+{style_examples or "- （无）"}
 
 请用你的风格改写内容，保持爆款逻辑但具有个人特色。
 
@@ -366,6 +420,23 @@ class ScenarioTwoGenerator:
             temperature=0.7,
         )
         
+        style_diag = self.style_corpus.score_human_likeness(result or "")
+        if not style_diag.get("pass"):
+            repair_prompt = (
+                prompt
+                + "\n\n【对抗校验未通过，强制重写】\n"
+                + f"- 问题：{'; '.join(style_diag.get('issues') or ['风格指标不足'])}\n"
+                + "- 重写要求：避免模板腔，增加口语不完美感和真实叙述感。\n"
+                + "请输出修正版完整文案。"
+            )
+            repaired = chat(
+                model=self.cfg.get("llm_model", "deepseek-chat"),
+                messages=[{"role": "user", "content": repair_prompt}],
+                temperature=0.65,
+            )
+            if repaired and repaired.strip():
+                result = repaired
+
         return result
     
     async def _score_quality(self, content: str, structure: Dict) -> float:
@@ -408,6 +479,7 @@ class ScenarioThreeGenerator:
         self.ip_profile = ip_profile
         self.style_profile = style_profile
         self.cfg = get_ai_config()
+        self.style_corpus = StyleCorpusService()
     
     async def generate(
         self,
@@ -442,6 +514,23 @@ class ScenarioThreeGenerator:
             )
             if retry and retry.strip():
                 content = retry
+        style_diag = self.style_corpus.score_human_likeness(content or "")
+        if not style_diag.get("pass"):
+            repair_prompt = (
+                prompt
+                + "\n\n【对抗校验未通过，强制重写】\n"
+                + f"- 问题：{'; '.join(style_diag.get('issues') or ['风格指标不足'])}\n"
+                + "- 重写要求：去掉AI腔，增强口语化与自然瑕疵，保留真实人设和数据细节。\n"
+                + "请直接输出修正版完整文案。"
+            )
+            retry2 = chat(
+                model=self.cfg.get("llm_model", "deepseek-chat"),
+                messages=[{"role": "user", "content": repair_prompt}],
+                temperature=0.6,
+            )
+            if retry2 and retry2.strip():
+                content = retry2
+                style_diag = self.style_corpus.score_human_likeness(content or "")
         
         # Step 3: 质量评分
         score = await self._score(content)
@@ -455,6 +544,7 @@ class ScenarioThreeGenerator:
                 "key_points": key_points or [],
                 "length": length,
                 "style_applied": True,
+                "style_diagnostics": style_diag,
             }
         )
     
@@ -475,6 +565,16 @@ class ScenarioThreeGenerator:
         
         # 风格特征
         style = self.style_profile or {}
+        style_layer = str(self.ip_profile.get("style_constraint_layer") or "").strip()
+        style_examples = str(self.ip_profile.get("style_retrieved_examples_text") or "").strip()
+        if not style_layer:
+            retrieved = self.style_corpus.search_samples(
+                topic=topic,
+                emotion=str(self.ip_profile.get("content_direction") or ""),
+                audience=str(self.ip_profile.get("target_audience") or ""),
+                top_k=3,
+            )
+            style_layer = self.style_corpus.build_style_constraint_layer(retrieved)
         
         self_name = (
             str(self.ip_profile.get("self_name") or "").strip()
@@ -537,6 +637,11 @@ class ScenarioThreeGenerator:
 
 ## 动态Few-shot样本（优先模仿结构与语感，不抄袭事实）
 {few_shot_text or "- （无）"}
+
+{style_layer}
+
+## 检索样本速览
+{style_examples or "- （无）"}
 
 ## 要求
 1. 严格按照IP风格输出
@@ -654,11 +759,12 @@ class ContentGenerator:
         generator = ScenarioOneGenerator(ip_profile or {}, FourDimWeights())
         content = await generator._generate_content(topic, category)
         score = generator._calc_relevance(topic, category)
+        style_diag = generator.style_corpus.score_human_likeness(content or "")
         return ContentResult(
             content=content,
             score=score,
             scenario="scenario_1_selected_topic",
-            metadata={"topic": topic, "category": category},
+            metadata={"topic": topic, "category": category, "style_diagnostics": style_diag},
         )
     
     @staticmethod

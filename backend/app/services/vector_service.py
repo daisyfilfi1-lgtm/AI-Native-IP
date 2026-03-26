@@ -12,6 +12,18 @@ from app.db.models import AssetVector
 from app.services.ai_client import embed
 
 
+def _normalize_embedding_dim(vec: list[float], target_dim: int = 1536) -> list[float]:
+    """将任意维度 embedding 归一到 pgvector 列维度。"""
+    if not vec:
+        return []
+    if len(vec) == target_dim:
+        return vec
+    if len(vec) > target_dim:
+        return vec[:target_dim]
+    # 短向量右侧补零，保持语义方向并兼容固定维度存储
+    return vec + [0.0] * (target_dim - len(vec))
+
+
 def upsert_asset_vector(
     db: Session,
     *,
@@ -36,6 +48,7 @@ def upsert_asset_vector(
         if not vectors or not vectors[0]:
             return False
         vec = vectors[0]
+    vec = _normalize_embedding_dim(vec, 1536)
     if len(vec) != 1536:
         return False
     cfg = get_ai_config()
@@ -72,6 +85,7 @@ def query_similar_assets(
     if not qv or not qv[0]:
         return []
     query_vec = qv[0]
+    query_vec = _normalize_embedding_dim(query_vec, 1536)
     if len(query_vec) != 1536:
         return []
 

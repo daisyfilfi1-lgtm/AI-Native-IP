@@ -27,6 +27,7 @@ from app.services.content_scenario import (
     FourDimWeights,
 )
 from app.services import remix_recommendation_service, tikhub_client
+from app.services.style_corpus_service import StyleCorpusService
 
 router = APIRouter(prefix="/creator", tags=["creator"])
 logger = logging.getLogger(__name__)
@@ -186,6 +187,47 @@ def _build_dynamic_few_shots(db: Session, ip_id: str, topic: str, k: int = 3) ->
             examples.append(f"[知识库样本] {t}")
 
     return examples[:k]
+
+
+def _build_style_context_from_vector(
+    db: Session,
+    *,
+    ip_id: str,
+    topic: str,
+    emotion: str,
+    audience: str,
+    top_k: int = 3,
+) -> Dict[str, Any]:
+    """
+    最终形态：优先复用现有 embedding + pgvector 检索 style corpus 样本。
+    """
+    svc = StyleCorpusService()
+    samples = svc.search_samples_by_pgvector(
+        db,
+        ip_id=ip_id,
+        topic=topic,
+        emotion=emotion,
+        audience=audience,
+        top_k=top_k,
+    )
+    if not samples:
+        # 兜底：防止向量未回填时，生成链路失去风格约束
+        samples = svc.search_samples(topic=topic, emotion=emotion, audience=audience, top_k=top_k)
+    style_layer = svc.build_style_constraint_layer(samples)
+    sample_lines: List[str] = []
+    for i, s in enumerate(samples[:top_k], start=1):
+        fp = s.get("style_fingerprint") or {}
+        kf = s.get("key_fragments") or {}
+        sample_lines.append(
+            f"- 样本{i}: topic={s.get('raw_topic') or s.get('sample_id')}; "
+            f"rhythm={fp.get('sentence_rhythm', '')}; "
+            f"hook={str(kf.get('golden_hook') or '')[:100]}"
+        )
+    return {
+        "style_constraint_layer": style_layer,
+        "style_retrieved_examples_text": "\n".join(sample_lines),
+        "style_retrieved_sample_ids": [str(s.get("sample_id") or "") for s in samples[:top_k] if str(s.get("sample_id") or "")],
+    }
 
 
 _RECOMMENDED_TOPICS = [
@@ -357,6 +399,16 @@ async def generate_from_topic(req: TopicGenerateRequest, db: Session = Depends(g
         selected_topic = (req.topicTitle or "").strip() or (req.topicId or "").strip()
         if not selected_topic:
             return {"id": "gen_topic_invalid", "status": "failed", "error": "topic is required"}
+        ip_profile.update(
+            _build_style_context_from_vector(
+                db,
+                ip_id=req.ipId or "1",
+                topic=selected_topic,
+                emotion=str(ip_profile.get("content_direction") or ""),
+                audience=str(ip_profile.get("target_audience") or ""),
+                top_k=3,
+            )
+        )
 
         result = await ContentGenerator.scenario_one_generate_from_selected_topic(
             ip_profile=ip_profile,
@@ -374,7 +426,11 @@ async def generate_from_topic(req: TopicGenerateRequest, db: Session = Depends(g
             style=req.style,
             generation_source="topic",
             score=float(result.score or 0.0),
-            extra_workflow={"source_topic_id": req.topicId, "source_topic_title": selected_topic},
+            extra_workflow={
+                "source_topic_id": req.topicId,
+                "source_topic_title": selected_topic,
+                "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
+            },
         )
         return {
             "id": draft_id,
@@ -408,6 +464,16 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
         competitor_text = req.url.strip()[:8000]
         if tikhub_client.is_configured():
             competitor_text = await tikhub_client.extract_competitor_text_for_remix(req.url.strip())
+        ip_profile.update(
+            _build_style_context_from_vector(
+                db,
+                ip_id=req.ipId or "1",
+                topic=(competitor_text or req.url or "")[:200],
+                emotion=str(ip_profile.get("content_direction") or ""),
+                audience=str(ip_profile.get("target_audience") or ""),
+                top_k=3,
+            )
+        )
 
         request = ScenarioTwoRequest(
             ip_id=req.ipId or "1",
@@ -433,7 +499,10 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
             style=req.style,
             generation_source="remix",
             score=raw_score,
-            extra_workflow={"source_url": req.url},
+            extra_workflow={
+                "source_url": req.url,
+                "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
+            },
         )
 
         return {
@@ -512,6 +581,16 @@ def _build_scenario_three_request(
     ip_profile["few_shot_examples"] = few_shot_examples
     ip_profile["strategy_template_name"] = template.get("name") or ""
     ip_profile["strategy_template_instruction"] = template.get("instruction") or ""
+    ip_profile.update(
+        _build_style_context_from_vector(
+            db,
+            ip_id=ip_id,
+            topic=input_text or "",
+            emotion=str(ip_profile.get("content_direction") or ""),
+            audience=str(ip_profile.get("target_audience") or ""),
+            top_k=3,
+        )
+    )
 
     length = _target_duration_to_length(int(target_duration or 60))
     return ScenarioThreeRequest(
@@ -555,6 +634,7 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
                 ),
                 "scriptTemplate": req.scriptTemplate or "",
                 "inputMode": req.inputMode or "text",
+                "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
                 "elementConfigMode": (
                     "auto"
                     if not (req.viralElements or [])
@@ -621,6 +701,7 @@ async def generate_from_original(req: OriginalGenerateRequest, db: Session = Dep
                 ),
                 "scriptTemplate": req.scriptTemplate or "opinion",
                 "inputMode": "voice",
+                "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
                 "elementConfigMode": (
                     "auto"
                     if not (req.viralElements or [])

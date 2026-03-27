@@ -1085,19 +1085,36 @@ async def _topics_from_algorithm_or_fallback(
     """场景一第一步：大数据源拉池（TikHub -> douyin-hot-hub）+ 四维重排 + IP约束。"""
     relevance_floor = 0.6
     whitelist_keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
+    ip_profile: Dict[str, Any] = {}
     try:
         ip_profile = get_ip_profile(db, ip_id) or {}
-        weights = _resolve_topic_weights(db, ip_id)
-        cards: List[Dict[str, Any]] = []
+    except Exception as e:
+        logger.warning("读取IP画像失败，按默认画像继续: %s", e)
+    weights = _resolve_topic_weights(db, ip_id)
+
+    cards: List[Dict[str, Any]] = []
+    try:
         if tikhub_client.is_configured():
             cards = await tikhub_client.get_recommended_topic_cards(limit=max(limit, 12))
-        if not cards:
-            cards = await douyin_hot_hub_client.get_recommended_topic_cards(limit=max(limit, 12))
+    except Exception as e:
+        logger.warning("TikHub 拉取失败，切换到 douyin-hot-hub: %s", e)
 
+    if not cards:
+        try:
+            cards = await douyin_hot_hub_client.get_recommended_topic_cards(limit=max(limit, 12))
+        except Exception as e:
+            logger.warning("douyin-hot-hub 拉取失败: %s", e)
+
+    try:
         if cards:
-            ranked_cards = _rerank_tikhub_candidates(
-                cards=cards, ip_profile=ip_profile, limit=limit, weights=weights
-            )
+            try:
+                ranked_cards = _rerank_tikhub_candidates(
+                    cards=cards, ip_profile=ip_profile, limit=limit, weights=weights
+                )
+            except Exception as e:
+                logger.warning("四维重排失败，回退为原始热榜卡片: %s", e)
+                ranked_cards = cards[:limit]
+
             filtered = [c for c in ranked_cards if float(c.get("_relevance") or 0.0) >= relevance_floor]
             if not filtered:
                 # 大数据优先：相关度不足时也返回重排后的热点，后续交给 IP 过滤/改写

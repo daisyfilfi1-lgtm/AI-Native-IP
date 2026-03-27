@@ -72,4 +72,7 @@ def login_with_code(body: LoginBody, db: Session = Depends(get_db)):
 @router.get("/me")
 def auth_me(user: User = Depends(get_current_user)):
     """当前登录用户信息（需 Bearer）。"""
-    return {"userId": user.user_id, "phone": user.phone}
+    out: dict = {"userId": user.user_id, "phone": user.phone or ""}
+    if user.email:
+        out["email"] = user.email
+    return out

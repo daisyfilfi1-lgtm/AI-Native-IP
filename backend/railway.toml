@@ -4,3 +4,9 @@
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
+# 让边缘网关知道应用何时就绪；路径与 app.main 中 /health 一致。
+# 若仍 502，请看 Deploy Logs 里 Uvicorn 监听的端口，与 Networking「转发端口」必须相同。
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+

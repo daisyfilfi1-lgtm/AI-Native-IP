@@ -15,6 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN chmod +x worker_entrypoint.sh
 
-ENV PORT=8000
-EXPOSE $PORT
+# 不在镜像里写死 PORT：生产由 Railway 注入；本地未设置时 CMD 里回退 8000。
+EXPOSE 8000
 CMD sh -c "python scripts/run_migrations.py && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"

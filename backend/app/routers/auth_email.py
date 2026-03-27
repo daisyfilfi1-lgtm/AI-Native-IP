@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.db.models import User
+from app.services.jwt_tokens import mint_access_token
 
 router = APIRouter()
 
@@ -69,17 +70,22 @@ def login(body: LoginBody, db: Session = Depends(get_db)):
     # 更新最后登录时间
     user.last_login_at = datetime.utcnow()
     db.commit()
-    
-    # 生成简单token (生产环境建议用JWT)
-    token = f"tok_{user.user_id}_{datetime.utcnow().timestamp()}"
-    
+    db.refresh(user)
+
+    # 与 /api/auth/sms/login 一致：签发 JWT，后续 Authorization Bearer 与 /api/auth/me 才能通过
+    token = mint_access_token(
+        user.user_id,
+        str(user.phone or ""),
+        user.email,
+    )
+
     return {
         "token": token,
         "user": {
             "userId": user.user_id,
             "email": user.email,
             "phone": user.phone,
-        }
+        },
     }
 
 

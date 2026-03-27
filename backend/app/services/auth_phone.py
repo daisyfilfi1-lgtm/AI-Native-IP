@@ -225,4 +225,8 @@ def verify_code_and_upsert_user(db: Session, phone: str, code: str) -> Optional[
 
 
 def issue_token_for_user(user: User) -> str:
-    return mint_access_token(user.user_id, user.phone)
+    return mint_access_token(
+        user.user_id,
+        str(user.phone or ""),
+        user.email if user.email else None,
+    )

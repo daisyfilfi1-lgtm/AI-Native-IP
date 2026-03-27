@@ -161,7 +161,11 @@
 ## 六、故障排查
 
 - **构建失败 / 推不上去 / 找不到 Dockerfile**：若 **Root Directory = `backend`**，构建上下文不包含仓库根目录，**不能**再指向根目录的 `Dockerfile`。应使用已提交的 **`backend/Dockerfile`** + **`backend/railway.toml`**，或将 Root Directory 清空并改用根目录 Dockerfile（二选一）。推送后需在 Railway 上 **Redeploy**。
-- **502 / 无法访问**：确认启动使用 `$PORT`（Dockerfile / `Procfile` 已配置）；健康检查路径为 **`/health`**（与 `railway.toml` 一致）。
+- **502 / 无法访问**：
+  1. 打开 **Deploy Logs**，找到 **`Uvicorn running on http://0.0.0.0:XXXX`**，记下 **XXXX**。
+  2. 打开 **Settings → Networking**，公网域名转发到容器的端口 **必须与 XXXX 完全一致**。若日志是 **8000**，Networking 也必须填 **8000**（填 8080 而进程在 8000 会稳定 502）。
+  3. **不要**在 Variables 里手动写一个与 Networking 冲突的 `PORT`（除非你有意固定端口）；Railway 通常会注入 `PORT`；若手动设置，须与 Networking、日志中的监听端口三者一致。
+  4. 启动命令已使用 `$PORT`（Dockerfile / `Procfile`）；健康检查路径为 **`/health`**（与 `railway.toml` 一致）。
 - **方式 A 迁移未执行**：镜像启动命令已含迁移；若仍缺表，可在 **Pre-deploy Command** 增加 `python scripts/run_migrations.py`，或在本地 `railway run python scripts/run_migrations.py`。
 - **数据库连接失败**：确认 Web 服务环境变量中有 `DATABASE_URL`（来自 Postgres 插件或 `${{Postgres.DATABASE_URL}}` 引用），且迁移已成功。
 - **迁移报错**：在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001`～`008` 等 SQL 文件。若报 `extension "vector" does not exist`，说明数据库非 pgvector 版，需改用 **Postgres with pgVector Engine** 模板。

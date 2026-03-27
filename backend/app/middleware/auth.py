@@ -34,6 +34,8 @@ def _is_public_auth_route(path: str, method: str) -> bool:
     return (path, method.upper()) in (
         ("/api/auth/sms/send-code", "POST"),
         ("/api/auth/sms/login", "POST"),
+        ("/api/auth/login", "POST"),
+        ("/api/auth/register", "POST"),
     )
 
 

@@ -20,7 +20,11 @@ def _jwt_secret() -> str:
     return "dev-only-jwt-secret-do-not-use-in-production"
 
 
-def mint_access_token(user_id: str, phone: str) -> str:
+def mint_access_token(
+    user_id: str,
+    phone: str,
+    email: Optional[str] = None,
+) -> str:
     exp_sec = int(os.environ.get("JWT_EXPIRE_SEC", str(7 * 24 * 3600)))
     now = int(time.time())
     payload: Dict[str, Any] = {
@@ -29,6 +33,8 @@ def mint_access_token(user_id: str, phone: str) -> str:
         "iat": now,
         "exp": now + exp_sec,
     }
+    if email and str(email).strip():
+        payload["email"] = str(email).strip()
     return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALGORITHM)
 
 

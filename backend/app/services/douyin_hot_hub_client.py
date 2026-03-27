@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 README_URL = "https://raw.githubusercontent.com/SnailDev/douyin-hot-hub/main/README.md"
 _HOT_LINE_RE = re.compile(r"^\s*\d+\.\s+\[(.*?)\]\((https?://[^\s)]+)\)\s*$")
+_BUNDLED_SNAPSHOT_PATH = Path(__file__).resolve().parent / "data" / "douyin_hot_hub_snapshot.json"
 
 
 def _default_cache_path() -> Path:
@@ -62,6 +63,23 @@ def _save_cache(path: Path, cards: List[Dict[str, Any]]) -> None:
         path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         logger.warning("douyin-hot-hub cache write failed: %s", e)
+
+
+def _load_bundled_snapshot(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+        cards = obj.get("cards")
+        if not isinstance(cards, list):
+            return []
+        out = [c for c in cards if isinstance(c, dict)]
+        if out:
+            logger.info("douyin-hot-hub using bundled snapshot, count=%s", len(out))
+        return out
+    except Exception as e:
+        logger.warning("douyin-hot-hub bundled snapshot read failed: %s", e)
+        return []
 
 
 def _parse_hot_cards(markdown: str, limit: int) -> List[Dict[str, Any]]:
@@ -127,5 +145,9 @@ async def get_recommended_topic_cards(limit: int = 12, max_age_hours: int = 24) 
             return cards[:limit]
     except Exception as e:
         logger.warning("douyin-hot-hub fetch failed: %s", e)
+
+    bundled = _load_bundled_snapshot(_BUNDLED_SNAPSHOT_PATH)
+    if bundled:
+        return bundled[:limit]
     return []
 

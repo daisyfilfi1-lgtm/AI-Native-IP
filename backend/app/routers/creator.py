@@ -2164,3 +2164,15 @@ async def test_tikhub_fetch():
     # 可能是 TikHub 调用频率限制，暂时跳过详细测试
     
     return result
+
+
+# === 检查 ip_id 测试 ===
+@router.get("/test/check-ipid")
+async def test_check_ipid(ipId: str = Query("1", description="IP 画像 id")):
+    """检查传入的 ip_id 参数"""
+    return {
+        "received_ipId": ipId,
+        "is_xiaomin1": ipId == "xiaomin1",
+        "length": len(ipId),
+        "repr": repr(ipId),
+    }

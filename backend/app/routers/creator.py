@@ -1227,7 +1227,7 @@ def _generate_fallback_topics(db: Session, ip_id: str, limit: int) -> List[Dict[
     ]
     
     topics = []
-    kw = core_keywords[0] if keywords else "创业"
+    kw = core_keywords[0] if core_keywords else "创业"
     
     for i, title in enumerate(templates[:limit]):
         title = title.replace("{kw}", kw)

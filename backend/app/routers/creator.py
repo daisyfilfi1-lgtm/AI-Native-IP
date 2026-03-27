@@ -1502,10 +1502,14 @@ async def _topics_from_algorithm_or_fallback(
             
             # === 小敏IP：强制核心词过滤，宁可少而精 ===
             if ip_id == "xiaomin1":
-                logger.info("xiaomin1: Applying strict core keyword filter before whitelist")
+                logger.info(f"xiaomin1: Applying strict core keyword filter, filtered count: {len(filtered)}")
+                # 调试：检查第一条数据的原始标题
+                if filtered:
+                    first_original = filtered[0].get("originalTitle", "N/A")
+                    logger.info(f"xiaomin1: First card originalTitle: {first_original[:50]}")
                 strict_filtered = [c for c in filtered if _topic_hit_core_keywords(c)]
+                logger.info(f"xiaomin1: Core keyword matched {len(strict_filtered)} topics")
                 if strict_filtered:
-                    logger.info(f"xiaomin1: Core keyword matched {len(strict_filtered)} topics")
                     for c in strict_filtered:
                         c.pop("_relevance", None)
                         c['filter_method'] = 'core_matched'

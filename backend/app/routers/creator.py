@@ -2276,3 +2276,34 @@ async def test_multi_source(limit: int = Query(6, ge=1, le=20)):
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
+
+
+# === 核心词匹配测试 ===
+@router.get("/test/core-match")
+async def test_core_match():
+    """测试核心词匹配"""
+    from app.services import multi_source_client
+    
+    # 获取多数据源数据
+    cards = await multi_source_client.get_multi_source_topics(limit=10)
+    
+    results = []
+    for card in cards:
+        title = card.get("title", "")
+        original = card.get("originalTitle", "")
+        
+        # 测试核心词匹配
+        hit = _topic_hit_core_keywords(card)
+        
+        results.append({
+            "title": title[:40],
+            "original": original[:40],
+            "hit": hit,
+        })
+    
+    return {
+        "total": len(cards),
+        "core_keywords": _XIAOMIN_CORE_KEYWORDS,
+        "matched": sum(1 for r in results if r["hit"]),
+        "results": results,
+    }

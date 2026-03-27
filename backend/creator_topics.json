@@ -1,0 +1,94 @@
+{
+  "topics": [
+    {
+      "id": "dyhub_1",
+      "title": "国足2:0库拉索：从创业到翻身的可复制打法",
+      "score": 3.36,
+      "tags": [
+        "抖音",
+        "热榜",
+        "创业",
+        "翻身"
+      ],
+      "reason": "热点迁移到IP定位（xiaomin1）+ 抖音热榜（douyin-hot-hub） + 四维重排 R/H/CV=0.6/0.99/0.51/0.5",
+      "agentChain": [
+        "Strategy",
+        "Memory",
+        "Generation",
+        "Compliance"
+      ]
+    },
+    {
+      "id": "dyhub_2",
+      "title": "一天连轴转的留学生活：从创业到翻身的可复制打法",
+      "score": 3.36,
+      "tags": [
+        "抖音",
+        "热榜",
+        "创业",
+        "翻身"
+      ],
+      "reason": "热点迁移到IP定位（xiaomin1）+ 抖音热榜（douyin-hot-hub） + 四维重排 R/H/CV=0.6/0.98/0.51/0.5",
+      "agentChain": [
+        "Strategy",
+        "Memory",
+        "Generation",
+        "Compliance"
+      ]
+    },
+    {
+      "id": "dyhub_3",
+      "title": "社保第六险已覆盖超3亿人：从创业到翻身的可复制打法",
+      "score": 3.35,
+      "tags": [
+        "抖音",
+        "热榜",
+        "创业",
+        "翻身"
+      ],
+      "reason": "热点迁移到IP定位（xiaomin1）+ 抖音热榜（douyin-hot-hub） + 四维重排 R/H/CV=0.6/0.98/0.51/0.5",
+      "agentChain": [
+        "Strategy",
+        "Memory",
+        "Generation",
+        "Compliance"
+      ]
+    },
+    {
+      "id": "dyhub_4",
+      "title": "妆前双胞胎妆后您哪位：从创业到翻身的可复制打法",
+      "score": 3.34,
+      "tags": [
+        "抖音",
+        "热榜",
+        "创业",
+        "翻身"
+      ],
+      "reason": "热点迁移到IP定位（xiaomin1）+ 抖音热榜（douyin-hot-hub） + 四维重排 R/H/CV=0.6/0.97/0.51/0.5",
+      "agentChain": [
+        "Strategy",
+        "Memory",
+        "Generation",
+        "Compliance"
+      ]
+    },
+    {
+      "id": "dyhub_5",
+      "title": "生活是一本充满故事的书：从创业到翻身的可复制打法",
+      "score": 3.34,
+      "tags": [
+        "抖音",
+        "热榜",
+        "创业",
+        "翻身"
+      ],
+      "reason": "热点迁移到IP定位（xiaomin1）+ 抖音热榜（douyin-hot-hub） + 四维重排 R/H/CV=0.6/0.97/0.52/0.5",
+      "agentChain": [
+        "Strategy",
+        "Memory",
+        "Generation",
+        "Compliance"
+      ]
+    }
+  ]
+}

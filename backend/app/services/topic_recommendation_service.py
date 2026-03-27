@@ -340,7 +340,7 @@ def _generate_algorithm_topics(keywords: List[str], limit: int, ip_profile: Dict
 # ==================== 主推荐逻辑 ====================
 
 async def recommend_topics(db: Session, ip_id: str, limit: int = 12) -> List[TopicScore]:
-    """智能选题推荐 - TIKHUB优先 + 算法兜底"""
+    """智能选题推荐 - 使用creator的推荐接口"""
     
     # 1. 获取IP信息
     ip = db.query(IP).filter(IP.ip_id == ip_id).first()
@@ -361,52 +361,91 @@ async def recommend_topics(db: Session, ip_id: str, limit: int = 12) -> List[Top
         "traffic": 30, "monetization": 30, "fit": 25, "cost": 15,
     })
     
-    # 2. 提取IP关键词
-    keywords = _extract_ip_keywords(ip)
+    # 2. 从creator接口获取推荐选题
+    from app.routers.creator import _topics_from_algorithm_or_fallback
     
-    # 3. TIKHUB优先获取真实数据
-    raw_topics = await _fetch_tikhub_topics(keywords, limit)
+    try:
+        creator_topics = await _topics_from_algorithm_or_fallback(db, ip_id=ip_id, limit=limit)
+    except Exception as e:
+        print(f"Creator topics error: {e}")
+        creator_topics = []
     
-    # 4. 如果TIKHUB没数据，用算法生成
-    if not raw_topics:
-        raw_topics = _generate_algorithm_topics(keywords, limit, ip_profile)
-    
-    # 5. 评分
     scored_topics = []
-    for topic_data in raw_topics:
-        topic = topic_data.get("title", "")
-        url = topic_data.get("url", "")
+    
+    for topic_data in creator_topics:
+        # 转换为统一格式
+        title = topic_data.get("title", "")
+        score = topic_data.get("score", 0.5)
         
-        likes = topic_data.get("likes", 0)
-        comments = topic_data.get("comments", 0)
-        shares = topic_data.get("shares", 0)
-        author_followers = topic_data.get("author_followers", 0)
-        source = topic_data.get("source", "algorithm")
+        if not title:
+            continue
         
-        viral_elements = detect_viral_elements(topic)
+        viral_elements = detect_viral_elements(title)
         
-        traffic = calculate_traffic_score(likes, comments, shares, author_followers)
-        monetization = calculate_monetization_score(
-            topic, ip_profile.get("monetization_model", ""), ip_profile.get("product_service", "")
-        )
-        fit = calculate_fit_score(topic, ip_profile)
-        cost = calculate_cost_score(topic, viral_elements)
+        # 使用creator提供的评分
+        traffic = score * 20  # 转换到0-100
+        monetization = calculate_monetization_score(title, ip_profile.get("monetization_model", ""), ip_profile.get("product_service", ""))
+        fit = calculate_fit_score(title, ip_profile)
+        cost = calculate_cost_score(title, viral_elements)
         
         topic_score = TopicScore(
-            topic=topic, url=url, platform=topic_data.get("platform", "douyin"),
-            traffic_score=traffic, monetization_score=monetization,
-            fit_score=fit, cost_score=cost,
-            likes=likes, comments=comments, shares=shares,
-            author_followers=author_followers, viral_elements=viral_elements,
-            source=source,
-            overall_score=0, total_score=0,
+            topic=title,
+            url=topic_data.get("url", ""),
+            platform="douyin-hot-hub",
+            traffic_score=traffic,
+            monetization_score=monetization,
+            fit_score=fit,
+            cost_score=cost,
+            likes=0,
+            comments=0,
+            shares=0,
+            author_followers=0,
+            viral_elements=viral_elements,
+            source="douyin-hot-hub",
+            overall_score=0,
+            total_score=0,
         )
         
         topic_score.overall_score = calculate_overall_score(topic_score, weights)
         topic_score.total_score = traffic + monetization + fit + cost
         scored_topics.append(topic_score)
     
-    # 6. 排序返回
+    # 3. 如果creator没有数据，回退到算法
+    if not scored_topics:
+        keywords = _extract_ip_keywords(ip)
+        algo_topics = _generate_algorithm_topics(keywords, limit, ip_profile)
+        
+        for topic_data in algo_topics:
+            title = topic_data.get("title", "")
+            viral_elements = detect_viral_elements(title)
+            
+            traffic = calculate_traffic_score(topic_data.get("likes", 0), topic_data.get("comments", 0), topic_data.get("shares", 0), topic_data.get("author_followers", 0))
+            monetization = calculate_monetization_score(title, ip_profile.get("monetization_model", ""), ip_profile.get("product_service", ""))
+            fit = calculate_fit_score(title, ip_profile)
+            cost = calculate_cost_score(title, viral_elements)
+            
+            topic_score = TopicScore(
+                topic=title,
+                url=topic_data.get("url", ""),
+                platform=topic_data.get("platform", "algorithm"),
+                traffic_score=traffic,
+                monetization_score=monetization,
+                fit_score=fit,
+                cost_score=cost,
+                likes=topic_data.get("likes", 0),
+                comments=topic_data.get("comments", 0),
+                shares=topic_data.get("shares", 0),
+                author_followers=topic_data.get("author_followers", 0),
+                viral_elements=viral_elements,
+                source=topic_data.get("source", "algorithm"),
+                overall_score=0,
+                total_score=0,
+            )
+            
+            topic_score.overall_score = calculate_overall_score(topic_score, weights)
+            topic_score.total_score = traffic + monetization + fit + cost
+            scored_topics.append(topic_score)
+    
     scored_topics.sort(key=lambda x: x.overall_score, reverse=True)
     return scored_topics[:limit]
 

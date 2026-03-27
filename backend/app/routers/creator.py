@@ -1878,3 +1878,52 @@ async def test_tikhub_data_detail():
         result["error"] = f"{type(e).__name__}: {str(e)}"
     
     return result
+
+
+# === TikHub 嵌套数据结构测试 ===
+@router.get("/test/tikhub-nested")
+async def test_tikhub_nested():
+    """查看 TikHub 嵌套 data 的详细结构"""
+    import os
+    import httpx
+    
+    key = os.environ.get("TIKHUB_API_KEY", "").strip()
+    
+    try:
+        headers = {"Authorization": f"Bearer {key}"}
+        payload = {"page": 1, "page_size": 3, "date_window": 1, "tags": []}
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.tikhub.io/api/v1/douyin/billboard/fetch_hot_total_high_play_list",
+                headers=headers,
+                json=payload
+            )
+            
+            full_data = response.json()
+            inner_data = full_data.get("data", {})
+            
+            result = {
+                "outer_code": full_data.get("code"),
+                "inner_type": type(inner_data).__name__,
+                "inner_keys": list(inner_data.keys()) if isinstance(inner_data, dict) else None,
+            }
+            
+            if isinstance(inner_data, dict):
+                result["inner_code"] = inner_data.get("code")
+                result["inner_message"] = inner_data.get("message")
+                
+                # 查找列表
+                for k in ("list", "data", "items", "records", "aweme_list", "hot_list"):
+                    v = inner_data.get(k)
+                    if isinstance(v, list):
+                        result["found_list_key"] = k
+                        result["list_length"] = len(v)
+                        if v:
+                            result["first_item_keys"] = list(v[0].keys()) if isinstance(v[0], dict) else None
+                        break
+            
+            return result
+                
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {str(e)}"}

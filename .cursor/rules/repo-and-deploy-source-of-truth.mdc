@@ -1,0 +1,15 @@
+---
+description: Prevent wrong repo or directory when committing and deploying
+alwaysApply: true
+---
+
+# Repo and Deploy Source of Truth
+
+- Before any commit/push, identify whether the target is the root repo or a nested repo (for this project: `frontend` is a separate Git repo).
+- Never assume deploy source by filename only; verify actual tracked files with Git in the active repo.
+- When user says "push/deploy", confirm and state explicitly:
+  - which repository remote will receive the push
+  - which branch will be pushed
+  - which directory/repo is the deploy source (`frontend` for frontend deploys).
+- Do not mix commits across root repo and `frontend` repo in one operation.
+- After push, report the exact commit SHA and repo/branch so user can verify deployment source.

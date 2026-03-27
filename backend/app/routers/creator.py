@@ -2101,14 +2101,26 @@ async def test_tikhub_fetch():
         result["raw_type"] = type(raw).__name__
         if isinstance(raw, dict):
             result["raw_keys"] = list(raw.keys())
+            inner = raw.get("data")
+            result["inner_type"] = type(inner).__name__
+            if isinstance(inner, dict):
+                result["inner_keys"] = list(inner.keys())
         result["has_raw"] = bool(raw)
+        
+        # 直接测试 billboard_to_topic_cards
+        cards = tikhub_client.billboard_to_topic_cards(raw, limit=3)
+        result["direct_cards_count"] = len(cards)
     except Exception as e:
+        import traceback
         result["fetch_error"] = f"{type(e).__name__}: {str(e)}"
+        result["traceback"] = traceback.format_exc()
     
     try:
         cards = await tikhub_client.get_recommended_topic_cards(limit=5)
         result["cards_count"] = len(cards)
     except Exception as e:
+        import traceback
         result["get_cards_error"] = f"{type(e).__name__}: {str(e)}"
+        result["get_cards_traceback"] = traceback.format_exc()
     
     return result

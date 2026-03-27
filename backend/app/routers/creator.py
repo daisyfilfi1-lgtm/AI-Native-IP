@@ -640,7 +640,8 @@ def _adapt_topics_to_ip_angle(
         
         nt["tags"] = merged_tags[:6]
         nt["reason"] = f"IP2.0改写({hotspot_type}) + 原热点：{title[:20]}..."
-        nt["original_title"] = title
+        nt["originalTitle"] = title  # 使用驼峰命名，与前端一致
+        nt["sourceUrl"] = str(t.get("sourceUrl") or t.get("source_url") or "")  # 保留原链接
         nt["hotspot_type"] = hotspot_type
         out.append(nt)
     return out

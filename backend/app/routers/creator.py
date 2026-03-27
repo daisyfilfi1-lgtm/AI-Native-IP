@@ -2003,3 +2003,30 @@ async def test_tikhub_parse():
     except Exception as e:
         import traceback
         return {"error": f"{type(e).__name__}: {str(e)}", "traceback": traceback.format_exc()}
+
+
+# === TikHub 完整数据流测试 ===
+@router.get("/test/tikhub-flow")
+async def test_tikhub_flow(ipId: str = Query("xiaomin1")):
+    """测试 TikHub 数据完整流程"""
+    from app.services import tikhub_client
+    import os
+    
+    result = {
+        "tikhub_configured": tikhub_client.is_configured(),
+        "tikhub_cards": None,
+        "error": None,
+    }
+    
+    try:
+        # 直接调用 TikHub
+        cards = await tikhub_client.get_recommended_topic_cards(limit=5)
+        result["tikhub_cards_count"] = len(cards)
+        if cards:
+            result["first_card_id"] = cards[0].get("id")
+            result["first_card_title"] = cards[0].get("title")
+            result["first_card_reason"] = cards[0].get("reason")
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {str(e)}"
+    
+    return result

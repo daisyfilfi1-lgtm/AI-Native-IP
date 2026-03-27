@@ -283,10 +283,26 @@ async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> 
     headers.Authorization = `Bearer ${jwt}`;
   }
 
-  const response = await fetch(`${getApiOriginOrEmpty()}${endpoint}`, {
+  const isLocalBrowser =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const apiOrigin = isLocalBrowser ? '' : getApiOriginOrEmpty();
+
+  const response = await fetch(`${apiOrigin}${endpoint}`, {
     ...options,
     headers,
   });
+  if (response.status === 404 && endpoint.startsWith('/api/creator/')) {
+    const altEndpoint = endpoint.replace('/api/creator/', '/api/v1/creator/');
+    const fallback = await fetch(`${apiOrigin}${altEndpoint}`, {
+      ...options,
+      headers,
+    });
+    if (!fallback.ok) {
+      throw new Error(`API error: ${fallback.status}`);
+    }
+    return fallback.json();
+  }
   
   if (!response.ok) {
     throw new Error(`API error: ${response.status}`);

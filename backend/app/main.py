@@ -21,6 +21,7 @@ from app.routers import (
     config_memory,
     content,
     creator,
+    debug,
     feishu_sync,
     graph,
     ip,
@@ -169,6 +170,7 @@ def create_app() -> FastAPI:
     app.include_router(style.router, prefix="/api/v1", tags=["style"], dependencies=api_key_dep)
     app.include_router(remix.router, prefix="/api/v1", tags=["remix"], dependencies=api_key_dep)
     app.include_router(topic_recommendation.router, prefix="/api/v1", tags=["topic"], dependencies=api_key_dep)
+    app.include_router(debug.router, prefix="/api/v1", tags=["debug"], dependencies=api_key_dep)
     app.include_router(creator.router, prefix="/api", tags=["creator"], dependencies=api_key_dep)
 
     return app

@@ -357,6 +357,9 @@ _RECOMMENDED_TOPICS = [
 _IP_TOPIC_WHITELIST = {
     "xiaomin1": ["创业", "翻身", "变现", "私域"],
 }
+_IP_TOPIC_BLOCKLIST = {
+    "xiaomin1": ["医生", "医疗", "科普", "健康", "问诊", "医院", "药"],
+}
 
 
 def _topic_hit_whitelist(topic: Dict[str, Any], keywords: List[str]) -> bool:
@@ -368,20 +371,42 @@ def _topic_hit_whitelist(topic: Dict[str, Any], keywords: List[str]) -> bool:
     return any(kw and kw in text for kw in keywords)
 
 
+def _topic_hit_blocklist(topic: Dict[str, Any], keywords: List[str]) -> bool:
+    if not keywords:
+        return False
+    title = str(topic.get("title") or "")
+    tags = ",".join(str(x) for x in (topic.get("tags") or []) if x is not None)
+    text = f"{title} {tags}"
+    return any(kw and kw in text for kw in keywords)
+
+
 def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    blocklist = _IP_TOPIC_BLOCKLIST.get(ip_id) or []
+    if blocklist:
+        blocked_filtered = [t for t in topics if not _topic_hit_blocklist(t, blocklist)]
+        if blocked_filtered:
+            topics = blocked_filtered
+        else:
+            logger.warning(
+                "IP 话题候选全部命中屏蔽词，返回空并继续降级，ip_id=%s, blocklist=%s",
+                ip_id,
+                blocklist,
+            )
+            return []
+
     keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
     if not keywords:
         return topics
     filtered = [t for t in topics if _topic_hit_whitelist(t, keywords)]
     if filtered:
         return filtered
-    # 当白名单过严导致“全灭”时，退回原候选，避免把动态推荐完全降级为静态占位。
+
     logger.warning(
-        "IP 白名单未命中任何候选，降级为不过滤返回，ip_id=%s, keywords=%s",
+        "IP 白名单未命中任何候选，返回空并继续降级，ip_id=%s, keywords=%s",
         ip_id,
         keywords,
     )
-    return topics
+    return []
 
 
 def _workflow_title(wf: Optional[dict]) -> str:

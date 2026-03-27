@@ -46,8 +46,9 @@ def unwrap_response(resp: Dict[str, Any]) -> Any:
         try:
             c = int(code)
         except (TypeError, ValueError):
-            c = 200
-        if c >= 400:
+            c = -1
+        # TikHub 常见成功码为 0（部分接口可能返回 200）；其余视为业务失败。
+        if c not in (0, 200):
             msg = resp.get("message_zh") or resp.get("message") or str(resp)
             raise TikHubError(msg)
     data = resp.get("data")
@@ -173,6 +174,7 @@ def looks_like_douyin_share_url(url: str) -> bool:
 
 
 _URL_RE = re.compile(r"https?://[^\s<>\"']+")
+_GENERIC_TOPIC_TITLE_RE = re.compile(r"^热点选题\s*\d+$")
 
 
 def collect_http_urls(obj: Any) -> List[str]:
@@ -397,8 +399,18 @@ def _score_from_item(item: Any, idx: int) -> float:
 
 
 def _title_from_item(item: Any, idx: int) -> str:
+    def _clean_title(v: Any) -> str:
+        if not isinstance(v, str):
+            return ""
+        s = v.strip()[:200]
+        if not s:
+            return ""
+        if _GENERIC_TOPIC_TITLE_RE.match(s):
+            return ""
+        return s
+
     if isinstance(item, str) and item.strip():
-        return item.strip()[:200]
+        return _clean_title(item)
     if isinstance(item, dict):
         for k in (
             "title",
@@ -409,16 +421,16 @@ def _title_from_item(item: Any, idx: int) -> str:
             "challenge_name",
             "desc",
         ):
-            v = item.get(k)
-            if isinstance(v, str) and v.strip():
-                return v.strip()[:200]
+            s = _clean_title(item.get(k))
+            if s:
+                return s
         for k in ("aweme_info", "aweme", "video"):
             sub = item.get(k)
             if isinstance(sub, dict):
                 t = _title_from_item(sub, idx)
                 if t:
                     return t
-    return f"热点选题 {idx + 1}"
+    return ""
 
 
 def _tags_from_item(item: Any) -> List[str]:
@@ -441,13 +453,11 @@ def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]
     if isinstance(data, list):
         items = data
     elif isinstance(data, dict):
-        for k in ("list", "data", "items", "records", "aweme_list", "hot_list"):
+        for k in ("list", "data", "items", "records", "aweme_list", "hot_list", "objs"):
             v = data.get(k)
             if isinstance(v, list):
                 items = v
                 break
-        if not items:
-            items = [data]
 
     out: List[Dict[str, Any]] = []
     seen: set = set()
@@ -455,6 +465,8 @@ def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]
         if len(out) >= limit:
             break
         title = _title_from_item(item, i)
+        if not title:
+            continue
         key = title.lower()
         if key in seen:
             continue

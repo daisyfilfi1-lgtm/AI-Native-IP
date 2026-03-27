@@ -28,6 +28,7 @@ from app.services.content_scenario import (
 )
 from app.services import remix_recommendation_service, tikhub_client
 from app.services.style_corpus_service import StyleCorpusService
+from app.services.strategy_config_service import get_merged_config
 
 router = APIRouter(prefix="/creator", tags=["creator"])
 logger = logging.getLogger(__name__)
@@ -126,6 +127,122 @@ def _score_text_relevance(text: str, keywords: List[str]) -> int:
         if kw.lower() in t:
             score += 1
     return score
+
+
+def _tokenize_cn_en(text: str) -> List[str]:
+    tokens = re.findall(r"[\u4e00-\u9fa5]{2,}|[A-Za-z0-9_]{2,}", text or "")
+    uniq: List[str] = []
+    for t in tokens:
+        if t not in uniq:
+            uniq.append(t)
+    return uniq
+
+
+def _calc_relevance_for_candidate(
+    *,
+    title: str,
+    tags: List[str],
+    ip_profile: Dict[str, Any],
+) -> float:
+    ip_text = " ".join(
+        [
+            str(ip_profile.get("expertise") or ""),
+            str(ip_profile.get("content_direction") or ""),
+            str(ip_profile.get("target_audience") or ""),
+            str(ip_profile.get("monetization_model") or ""),
+            str(ip_profile.get("product_service") or ""),
+        ]
+    )
+    ip_tokens = set(_tokenize_cn_en(ip_text.lower()))
+    if not ip_tokens:
+        return 0.6
+    candidate_tokens = set(_tokenize_cn_en(f"{title} {' '.join(tags)}".lower()))
+    if not candidate_tokens:
+        return 0.4
+    overlap = len(ip_tokens & candidate_tokens)
+    ratio = overlap / max(1, min(len(candidate_tokens), 8))
+    # 归一化到 [0.4, 1.0]，避免极端 0 值导致全量过滤
+    return max(0.4, min(1.0, 0.4 + ratio * 0.6))
+
+
+def _calc_conversion_for_candidate(title: str, tags: List[str]) -> float:
+    text = f"{title} {' '.join(tags)}"
+    high_conv = ["测评", "教程", "推荐", "避坑", "省钱", "赚钱", "变现", "副业", "私域", "获客"]
+    medium_conv = ["知识", "科普", "观点", "分析", "方法", "经验", "复盘"]
+    if any(k in text for k in high_conv):
+        return 0.9
+    if any(k in text for k in medium_conv):
+        return 0.65
+    return 0.5
+
+
+def _resolve_topic_weights(db: Session, ip_id: str) -> Dict[str, float]:
+    """
+    读取策略配置中的四维权重，兼容两套键名：
+    - relevance/hotness/competition/conversion
+    - fit/traffic/cost/monetization
+    """
+    default = {"relevance": 0.3, "hotness": 0.3, "competition": 0.2, "conversion": 0.2}
+    try:
+        cfg = get_merged_config(db, ip_id)
+        raw = cfg.get("four_dim_weights") if isinstance(cfg, dict) else None
+        if not isinstance(raw, dict):
+            return default
+        mapped = {
+            "relevance": float(raw.get("relevance", raw.get("fit", default["relevance"])) or 0.0),
+            "hotness": float(raw.get("hotness", raw.get("traffic", default["hotness"])) or 0.0),
+            "competition": float(raw.get("competition", raw.get("cost", default["competition"])) or 0.0),
+            "conversion": float(raw.get("conversion", raw.get("monetization", default["conversion"])) or 0.0),
+        }
+        total = sum(max(0.0, v) for v in mapped.values())
+        if total <= 0:
+            return default
+        return {k: round(max(0.0, v) / total, 6) for k, v in mapped.items()}
+    except Exception as e:
+        logger.warning("读取四维权重失败，使用默认权重: %s", e)
+        return default
+
+
+def _rerank_tikhub_candidates(
+    *,
+    cards: List[Dict[str, Any]],
+    ip_profile: Dict[str, Any],
+    limit: int,
+    weights: Dict[str, float],
+) -> List[Dict[str, Any]]:
+    wr = float(weights.get("relevance", 0.3) or 0.3)
+    wh = float(weights.get("hotness", 0.3) or 0.3)
+    wc = float(weights.get("competition", 0.2) or 0.2)
+    wv = float(weights.get("conversion", 0.2) or 0.2)
+    ranked: List[Dict[str, Any]] = []
+    for idx, card in enumerate(cards, start=1):
+        title = str(card.get("title") or "").strip()
+        if not title:
+            continue
+        tags = [str(x) for x in (card.get("tags") or []) if str(x).strip()]
+        base_score = float(card.get("score") or 0.0)
+        hotness = max(0.0, min(1.0, base_score / 5.0))
+        relevance = _calc_relevance_for_candidate(title=title, tags=tags, ip_profile=ip_profile)
+        competition = max(0.0, min(1.0, 1.0 - hotness * 0.5))
+        conversion = _calc_conversion_for_candidate(title, tags)
+        total = relevance * wr + hotness * wh + competition * wc + conversion * wv
+        ranked.append(
+            {
+                "id": str(card.get("id") or f"topic_{idx:03d}"),
+                "title": title,
+                "score": round(total * 5.0, 2),
+                "tags": tags,
+                "reason": (
+                    f"TikHub候选 + 四维重排 R/H/CV="
+                    f"{round(relevance, 2)}/{round(hotness, 2)}/"
+                    f"{round(competition, 2)}/{round(conversion, 2)}"
+                ),
+                "agentChain": ["Strategy", "Memory", "Generation", "Compliance"],
+                "_relevance": relevance,
+            }
+        )
+    ranked.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
+    return ranked[:limit]
 
 
 def _build_dynamic_few_shots(db: Session, ip_id: str, topic: str, k: int = 3) -> List[str]:
@@ -815,20 +932,46 @@ async def _topics_from_algorithm_or_fallback(
     ip_id: str,
     limit: int = 12,
 ) -> List[Dict[str, Any]]:
-    """场景一第一步：四维评分推荐（失败时回退 TikHub/占位）。"""
+    """场景一第一步：优先 TikHub 拉池 + 四维重排（失败时回退算法/占位）。"""
     relevance_floor = 0.6
     whitelist_keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
     try:
         ip_profile = get_ip_profile(db, ip_id) or {}
+        weights = _resolve_topic_weights(db, ip_id)
+        # 先拉 TikHub 候选池，再做本地四维重排
+        if tikhub_client.is_configured():
+            cards = await tikhub_client.get_recommended_topic_cards(limit=max(limit, 12))
+            if cards:
+                ranked_cards = _rerank_tikhub_candidates(
+                    cards=cards, ip_profile=ip_profile, limit=limit, weights=weights
+                )
+                filtered = [
+                    c for c in ranked_cards if float(c.get("_relevance") or 0.0) >= relevance_floor
+                ]
+                if filtered:
+                    whitelisted_cards = _apply_topic_whitelist(ip_id, filtered)
+                    if whitelisted_cards:
+                        for c in whitelisted_cards:
+                            c.pop("_relevance", None)
+                        return whitelisted_cards
+                    logger.warning(
+                        "TikHub+重排推荐全部被白名单过滤，ip_id=%s, whitelist=%s",
+                        ip_id,
+                        whitelist_keywords,
+                    )
+                else:
+                    logger.warning("TikHub 候选相关度不足，降级旧算法路径")
+
+        # 兼容旧路径：算法自取热点再排序
         request = ScenarioOneRequest(
             ip_id=ip_id,
             platform="douyin",
             ip_profile=ip_profile,
             weights=FourDimWeights(
-                relevance=0.3,
-                hotness=0.3,
-                competition=0.2,
-                conversion=0.2,
+                relevance=float(weights.get("relevance", 0.3)),
+                hotness=float(weights.get("hotness", 0.3)),
+                competition=float(weights.get("competition", 0.2)),
+                conversion=float(weights.get("conversion", 0.2)),
             ),
             count=limit,
         )
@@ -863,6 +1006,8 @@ async def _topics_from_algorithm_or_fallback(
             if cards:
                 whitelisted_cards = _apply_topic_whitelist(ip_id, cards)
                 if whitelisted_cards:
+                    for c in whitelisted_cards:
+                        c.pop("_relevance", None)
                     return whitelisted_cards
                 logger.warning(
                     "推荐选题全部被白名单过滤，ip_id=%s, whitelist=%s",

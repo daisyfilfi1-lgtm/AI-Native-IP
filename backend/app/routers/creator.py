@@ -242,6 +242,9 @@ def _rerank_tikhub_candidates(
                 "title": title,
                 "score": round(total * 5.0, 2),
                 "tags": tags,
+                "estimatedViews": str(card.get("estimatedViews") or "—"),
+                "estimatedCompletion": int(card.get("estimatedCompletion") or 0),
+                "sourceUrl": str(card.get("sourceUrl") or ""),
                 "reason": (
                     f"{(source_reason or '大数据候选')} + 四维重排 R/H/CV="
                     f"{round(relevance, 2)}/{round(hotness, 2)}/"
@@ -370,6 +373,8 @@ _IP_TOPIC_WHITELIST = {
 _IP_TOPIC_BLOCKLIST = {
     "xiaomin1": ["医生", "医疗", "科普", "健康", "问诊", "医院", "药"],
 }
+# 可选语义过滤数据缓存（若未加载则为空，不影响主流程）
+_IP_DATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def _topic_hit_whitelist(topic: Dict[str, Any], keywords: List[str]) -> bool:
@@ -448,20 +453,22 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
     
     # 关键词没匹配时，使用语义相似度过滤
     # 获取IP配置
-    ip_config = _IP_DATA_CACHE.get(ip_id)
+    ip_config = _IP_DATA_CACHE.get(ip_id) if isinstance(_IP_DATA_CACHE, dict) else None
     if ip_config:
-        # 使用语义过滤，降低阈值到0.2以获取更多结果
-        semantic_filtered = filter_topics_by_similarity(
-            topics=topics,
-            ip_data=ip_config,
-            threshold=0.2
-        )
-        
-        if semantic_filtered:
-            logger.info(f"Semantic filter matched {len(semantic_filtered)} topics")
-            for t in semantic_filtered:
-                t['filter_method'] = 'semantic'
-            return semantic_filtered
+        try:
+            # 使用语义过滤，降低阈值到0.2以获取更多结果
+            semantic_filtered = filter_topics_by_similarity(
+                topics=topics,
+                ip_data=ip_config,
+                threshold=0.2
+            )
+            if semantic_filtered:
+                logger.info(f"Semantic filter matched {len(semantic_filtered)} topics")
+                for t in semantic_filtered:
+                    t['filter_method'] = 'semantic'
+                return semantic_filtered
+        except Exception as e:
+            logger.warning("Semantic filter failed, fallback to IP angle adaptation: %s", e)
     
     # 都没有匹配：执行「热点 x IP」角度改写，确保仍返回大数据热点
     logger.warning("No topics match IP directly, adapt to IP angle, ip_id=%s", ip_id)

@@ -2176,3 +2176,36 @@ async def test_check_ipid(ipId: str = Query("1", description="IP 画像 id")):
         "length": len(ipId),
         "repr": repr(ipId),
     }
+
+
+# === 检查核心词匹配 ===
+@router.get("/test/check-core")
+async def test_check_core(ipId: str = Query("xiaomin1", description="IP 画像 id")):
+    """检查核心词匹配情况"""
+    from app.services import tikhub_client
+    
+    # 获取 TikHub 数据
+    cards = await tikhub_client.get_recommended_topic_cards(limit=5)
+    
+    results = []
+    for card in cards:
+        title = str(card.get("title") or "")
+        original = str(card.get("originalTitle") or card.get("original_title") or "")
+        text = f"{title} {original}"
+        
+        # 检查是否命中核心词
+        hit_keywords = [kw for kw in _XIAOMIN_CORE_KEYWORDS if kw in text]
+        
+        results.append({
+            "title": title[:50],
+            "original": original[:50],
+            "hit_keywords": hit_keywords,
+            "has_hit": len(hit_keywords) > 0,
+        })
+    
+    return {
+        "ipId": ipId,
+        "total_cards": len(cards),
+        "core_keywords": _XIAOMIN_CORE_KEYWORDS,
+        "results": results,
+    }

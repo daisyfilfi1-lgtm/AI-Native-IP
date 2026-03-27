@@ -2086,3 +2086,29 @@ async def test_tikhub_request():
         result["traceback"] = traceback.format_exc()
     
     return result
+
+
+# === TikHub fetch 函数测试 ===
+@router.get("/test/tikhub-fetch")
+async def test_tikhub_fetch():
+    """测试 TikHub fetch_douyin_high_play_hot_list"""
+    from app.services import tikhub_client
+    
+    result = {}
+    
+    try:
+        raw = await tikhub_client.fetch_douyin_high_play_hot_list(page=1, page_size=5, date_window=1)
+        result["raw_type"] = type(raw).__name__
+        if isinstance(raw, dict):
+            result["raw_keys"] = list(raw.keys())
+        result["has_raw"] = bool(raw)
+    except Exception as e:
+        result["fetch_error"] = f"{type(e).__name__}: {str(e)}"
+    
+    try:
+        cards = await tikhub_client.get_recommended_topic_cards(limit=5)
+        result["cards_count"] = len(cards)
+    except Exception as e:
+        result["get_cards_error"] = f"{type(e).__name__}: {str(e)}"
+    
+    return result

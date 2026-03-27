@@ -39,7 +39,7 @@ def get_ip_profile(db: Session, ip_id: str) -> Optional[Dict[str, Any]]:
         return None
     sp = ip.style_profile if isinstance(ip.style_profile, dict) else {}
     base: Dict[str, Any] = {
-        # name 用于对外“IP名称”，self_name 用于文案自称（优先昵称）
+        # name 用于对外"IP名称"，self_name 用于文案自称（优先昵称）
         "name": ip.name,
         "self_name": (ip.nickname or "").strip() or ip.name,
         "style": "",
@@ -78,7 +78,7 @@ def _extract_style_guardrails_from_assets(db: Session, ip_id: str) -> Dict[str, 
         if not content:
             continue
         if "专属语感" in title or "口癖" in title or "词典" in title:
-            # 读取“首选称呼/禁用称呼”类信息
+            # 读取"首选称呼/禁用称呼"类信息
             for ln in content.splitlines():
                 s = ln.strip()
                 if not s:
@@ -386,7 +386,7 @@ def _adapt_topics_to_ip_angle(
     keywords: List[str],
 ) -> List[Dict[str, Any]]:
     """
-    当热点未直接命中 IP 白名单关键词时，做“热点 x IP 视角”改写，
+    当热点未直接命中 IP 白名单关键词时，做"热点 x IP 视角"改写，
     保持大数据来源不丢失，同时让题目更贴近当前 IP 定位。
     """
     if not topics or not keywords:
@@ -432,17 +432,14 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
     if filtered:
         return filtered
 
-    # 白名单未命中：执行“热点 x IP 视角”改写，确保结果符合该 IP 内容方向。
-    adapted = _adapt_topics_to_ip_angle(ip_id=ip_id, topics=topics, keywords=keywords)
-    if adapted:
-        return adapted
-
+    # No match - don't do fake adaptation, just return empty
     logger.warning(
-        "IP 白名单未命中且无可改写候选，返回原候选，ip_id=%s, keywords=%s",
+        "No topics match IP whitelist, ip_id=%s, keywords=%s, topics_count=%s",
         ip_id,
         keywords,
+        len(topics),
     )
-    return topics
+    return []
 
 
 def _workflow_title(wf: Optional[dict]) -> str:

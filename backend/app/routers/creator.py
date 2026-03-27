@@ -242,7 +242,7 @@ def _rerank_tikhub_candidates(
                 "title": title,
                 "score": round(total * 5.0, 2),
                 "tags": tags,
-                "estimatedViews": str(card.get("estimatedViews") or "—"),
+                "estimatedViews": str(card.get("estimatedViews") or "-"),
                 "estimatedCompletion": int(card.get("estimatedCompletion") or 0),
                 "sourceUrl": str(card.get("sourceUrl") or ""),
                 "reason": (
@@ -443,14 +443,14 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
             # 这里保留原始热点，后续仍会走语义/角度改写
 
     keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
-    
+
     # 先尝试关键词匹配
     if keywords:
         filtered = [t for t in topics if _topic_hit_whitelist(t, keywords)]
         if filtered:
             logger.info(f"Keyword matched {len(filtered)} topics")
             return filtered
-    
+
     # 关键词没匹配时，使用语义相似度过滤
     # 获取IP配置
     ip_config = _IP_DATA_CACHE.get(ip_id) if isinstance(_IP_DATA_CACHE, dict) else None
@@ -469,7 +469,7 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
                 return semantic_filtered
         except Exception as e:
             logger.warning("Semantic filter failed, fallback to IP angle adaptation: %s", e)
-    
+
     # 都没有匹配：执行「热点 x IP」角度改写，确保仍返回大数据热点
     logger.warning("No topics match IP directly, adapt to IP angle, ip_id=%s", ip_id)
     if topics:
@@ -863,7 +863,7 @@ def _build_scenario_three_request(
 
 def _auto_pick_script_template(topic_text: str) -> str:
     """
-    当用户选择“自由创作(custom)”且未给结构提示时，
+    当用户选择"自由创作(custom)"且未给结构提示时，
     按话题语义自动路由到最合适的模板。
     """
     text = (topic_text or "").strip()
@@ -1163,13 +1163,13 @@ async def get_recommended_topics(
 ):
     """场景一第一步：推荐选题（四维评分；不生成正文）。"""
     topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
-    
+
     # 如果外部API都失败，使用算法兜底生成选题
     if not topics:
         topics = _generate_hotlist_snapshot_topics(db, ipId, limit)
     if not topics:
         topics = _generate_fallback_topics(db, ipId, limit)
-    
+
     return {"topics": topics}
 
 
@@ -1181,7 +1181,7 @@ async def refresh_topics(
 ):
     """刷新推荐选题（四维评分推荐后打散）。"""
     topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
-    
+
     # 如果外部API都失败，使用算法兜底
     if not topics:
         topics = _generate_hotlist_snapshot_topics(db, ipId, limit)
@@ -1191,7 +1191,7 @@ async def refresh_topics(
         shuffled = list(topics)
         random.shuffle(shuffled)
         topics = shuffled
-    
+
     return {"topics": topics}
 
 
@@ -1200,25 +1200,26 @@ def _generate_fallback_topics(db: Session, ip_id: str, limit: int) -> List[Dict[
     ip = db.query(IP).filter(IP.ip_id == ip_id).first()
     if not ip:
         return []
-    
+
     # 从IP配置中提取关键词生成选题（支持多种分隔符）
     keywords = []
     for field in (ip.expertise, ip.content_direction, ip.target_audience, ip.passion, ip.market_demand):
         if field and isinstance(field, str):
             # 支持 / 、 、 和 等分隔符
             keywords.extend([w.strip() for w in re.split(r'[,，、/和\s]+', field) if len(w.strip()) >= 2])
-    
+
     # 去重
     keywords = list(set(keywords))[:20]
-    
+
     # 优先选择与创业相关的核心关键词
     core_keywords = [k for k in keywords if any(x in k for x in ['创业', '馒头', '私域', '变现', '女性', '副业', '赚钱', '独立'])]
-    if core_keywords:
-        
-    
+
+    if not core_keywords:
+        core_keywords = keywords[:10]
+
     if not keywords:
         keywords = ["创业", "赚钱", "副业", "女性", "独立"]
-    
+
     # 选题模板（多样化）
     templates = [
         "{kw}到底能不能赚钱",
@@ -1232,10 +1233,10 @@ def _generate_fallback_topics(db: Session, ip_id: str, limit: int) -> List[Dict[
         "{kw}变现新模式",
         "90%的人不知道的{kw}技巧",
     ]
-    
+
     topics = []
     kw = core_keywords[0] if core_keywords else "创业"
-    
+
     for i, title in enumerate(templates[:limit]):
         title = title.replace("{kw}", kw)
         topics.append({
@@ -1248,7 +1249,7 @@ def _generate_fallback_topics(db: Session, ip_id: str, limit: int) -> List[Dict[
             "estimatedCompletion": 38 + i,
             "sourceUrl": "",
         })
-    
+
     return topics
 
 

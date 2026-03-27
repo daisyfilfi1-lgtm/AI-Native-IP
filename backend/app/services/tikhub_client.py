@@ -493,6 +493,16 @@ def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]
                 if isinstance(v, list):
                     items = v
                     break
+        # 再尝试更深一层 data.data.objs（TikHub 高播榜格式）
+        if not items and "data" in data and isinstance(data["data"], dict):
+            nested = data["data"]
+            if "data" in nested and isinstance(nested["data"], dict):
+                deep_nested = nested["data"]
+                for k in ("list", "data", "items", "records", "aweme_list", "hot_list", "objs"):
+                    v = deep_nested.get(k)
+                    if isinstance(v, list):
+                        items = v
+                        break
 
     out: List[Dict[str, Any]] = []
     seen: set = set()

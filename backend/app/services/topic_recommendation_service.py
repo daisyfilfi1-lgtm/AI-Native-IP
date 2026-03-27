@@ -199,11 +199,17 @@ async def _fetch_tikhub_topics(keywords: List[str], limit: int) -> List[Dict]:
         logger.info("DEBUG: TIKHUB configured, fetching data...")
         
         # 1. 获取抖音低粉爆款榜 (<10万粉, >1万赞)
-        raw = await tikhub_client.fetch_douyin_low_fan_hot_list(
-            page=1,
-            page_size=min(limit * 2, 30),
-            date_window=3,  # 近3天
-        )
+        try:
+            raw = await tikhub_client.fetch_douyin_low_fan_hot_list(
+                page=1,
+                page_size=min(limit * 2, 30),
+                date_window=3,  # 近3天
+            )
+            logger.info(f"DEBUG: fetch_douyin_low_fan_hot_list returned type: {type(raw)}")
+            logger.info(f"DEBUG: fetch result keys: {raw.keys() if isinstance(raw, dict) else 'not dict'}")
+        except Exception as e:
+            logger.info(f"DEBUG: fetch error: {e}")
+        
         items = tikhub_client.parse_low_fan_explosion_items(raw)
         
         for item in items:

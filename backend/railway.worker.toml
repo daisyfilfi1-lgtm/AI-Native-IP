@@ -1,0 +1,9 @@
+# RQ Worker 专用：与 Web 共用同一 Dockerfile 构建，但不配置 HTTP 健康检查。
+# Worker 进程不监听 $PORT，若沿用 railway.toml 的 /health，部署会报 service unavailable 直至失败。
+# 在 Railway 该服务的 Settings 中将「Config as code」路径设为 backend/railway.worker.toml（或仓库内等价路径）。
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python scripts/worker.py"

@@ -1938,3 +1938,61 @@ async def test_tikhub_nested():
                 
     except Exception as e:
         return {"error": f"{type(e).__name__}: {str(e)}"}
+
+
+# === TikHub 解析调试 ===
+@router.get("/test/tikhub-parse")
+async def test_tikhub_parse():
+    """调试 TikHub 数据解析过程"""
+    import os
+    import httpx
+    from app.services import tikhub_client
+    
+    key = os.environ.get("TIKHUB_API_KEY", "").strip()
+    
+    try:
+        headers = {"Authorization": f"Bearer {key}"}
+        payload = {"page": 1, "page_size": 5, "date_window": 1, "tags": []}
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.tikhub.io/api/v1/douyin/billboard/fetch_hot_total_high_play_list",
+                headers=headers,
+                json=payload
+            )
+            
+            full_data = response.json()
+            
+            # 模拟 unwrap_response
+            unwrapped = full_data.get("data") if isinstance(full_data, dict) else full_data
+            
+            result = {
+                "full_data_keys": list(full_data.keys()) if isinstance(full_data, dict) else None,
+                "unwrapped_type": type(unwrapped).__name__,
+                "unwrapped_keys": list(unwrapped.keys()) if isinstance(unwrapped, dict) else None,
+            }
+            
+            if isinstance(unwrapped, dict):
+                result["unwrapped_code"] = unwrapped.get("code")
+                inner_data = unwrapped.get("data")
+                result["inner_data_type"] = type(inner_data).__name__
+                
+                if isinstance(inner_data, dict):
+                    result["inner_data_keys"] = list(inner_data.keys())
+                    objs = inner_data.get("objs")
+                    result["objs_type"] = type(objs).__name__
+                    result["objs_length"] = len(objs) if isinstance(objs, list) else 0
+                    
+                    if isinstance(objs, list) and objs:
+                        result["first_item_keys"] = list(objs[0].keys()) if isinstance(objs[0], dict) else None
+                        result["first_item_title"] = objs[0].get("title") or objs[0].get("sentence") or objs[0].get("word") or "no title"
+            
+            # 测试 billboard_to_topic_cards
+            cards = tikhub_client.billboard_to_topic_cards(unwrapped, limit=3)
+            result["cards_count"] = len(cards)
+            
+            return result
+                
+    except Exception as e:
+        import traceback
+        return {"error": f"{type(e).__name__}: {str(e)}", "traceback": traceback.format_exc()}

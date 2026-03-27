@@ -367,11 +367,34 @@ _RECOMMENDED_TOPICS = [
 ]
 
 # 按 IP 定义强约束白名单关键词（命中任一即可通过）
+# 小敏IP：花样馒头创业导师，目标受众是宝妈和女性创业者
 _IP_TOPIC_WHITELIST = {
-    "xiaomin1": ["创业", "翻身", "变现", "私域", "馒头", "花样馒头", "女性", "宝妈", "副业", "低成本", "赚钱", "独立"],
+    "xiaomin1": [
+        # 核心产品词（高优先级）
+        "馒头", "花样馒头", "面食", "美食", "早餐", "手工", "手艺", "制作", "烘焙",
+        # 创业相关
+        "创业", "副业", "低成本", "小成本", "轻创业", "轻装上阵", "摆摊", "私房",
+        # 变现相关
+        "赚钱", "变现", "收入", "月入", "盈利", "生意", "商机",
+        # 人群定位
+        "宝妈", "女性", "妈妈", "家庭主妇", "老板娘", "普通人",
+        # 成长相关
+        "翻身", "逆袭", "改变", "转型", "独立", "自强", "成长",
+        # 运营相关
+        "私域", "获客", "引流", "短视频", "直播", "营销",
+    ],
 }
 _IP_TOPIC_BLOCKLIST = {
-    "xiaomin1": ["医生", "医疗", "科普", "健康", "问诊", "医院", "药"],
+    "xiaomin1": [
+        # 医疗相关
+        "医生", "医疗", "医院", "药", "治病", "问诊", "手术", "疗法",
+        # 健康科普（小敏不是医生，避免医疗建议）
+        "科普", "健康", "养生", "保健", "营养", "功效", "治疗",
+        # 与美食无关的高风险词
+        "减肥", "瘦身", "美容", "整容", "医美", "化妆品",
+        # 不相关领域
+        "汽车", "房产", "股票", "基金", "投资", "理财", "保险",
+    ],
 }
 # 可选语义过滤数据缓存（若未加载则为空，不影响主流程）
 _IP_DATA_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -414,29 +437,68 @@ def _adapt_topics_to_ip_angle(
     ip_id: str,
     topics: List[Dict[str, Any]],
     keywords: List[str],
+    ip_profile: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     当热点未直接命中 IP 白名单关键词时，做"热点 x IP 视角"改写，
     保持大数据来源不丢失，同时让题目更贴近当前 IP 定位。
+    
+    改进：根据IP画像生成更有针对性的改写标题
     """
     if not topics or not keywords:
         return topics
-    k1 = keywords[0]
-    k2 = keywords[1] if len(keywords) > 1 else keywords[0]
+    
+    # 获取IP核心标签用于改写
+    expertise = ip_profile.get("expertise", "") if ip_profile else ""
+    content_dir = ip_profile.get("content_direction", "") if ip_profile else ""
+    
+    # 针对小敏IP的特殊处理
+    is_xiaomin = ip_id == "xiaomin1"
+    xiaomin_tags = ["花样馒头", "宝妈创业", "手艺变现"] if is_xiaomin else []
+    
+    # 选择最有代表性的关键词
+    priority_keywords = [kw for kw in keywords if kw in ["馒头", "花样馒头", "手艺", "美食", "创业", "宝妈"]]
+    if not priority_keywords:
+        priority_keywords = keywords
+    
+    k1 = priority_keywords[0]
+    k2 = priority_keywords[1] if len(priority_keywords) > 1 else priority_keywords[0]
+    
     out: List[Dict[str, Any]] = []
     for t in topics:
         title = str(t.get("title") or "").strip()
         if not title:
             continue
         tags = [str(x).strip() for x in (t.get("tags") or []) if str(x).strip()]
+        
+        # 添加IP相关标签
         merged_tags: List[str] = []
+        if is_xiaomin:
+            # 小敏IP添加核心标签
+            merged_tags = ["宝妈", "创业", "手艺"] + xiaomin_tags
         for x in tags + [k1, k2]:
             if x and x not in merged_tags:
                 merged_tags.append(x)
+        
         nt = dict(t)
-        nt["title"] = f"{title}：从{k1}到{k2}的可复制打法"
+        
+        # 智能改写标题
+        if is_xiaomin and any(word in title for word in ["生活", "故事", "经历", "转折", "改变"]):
+            # 生活/故事类热点 -> 强调创业故事
+            nt["title"] = f"从负债到月入3万：一个宝妈如何用{k1}实现{k2}"
+        elif is_xiaomin and any(word in title for word in ["工作", "职场", "上班", "赚钱", "收入"]):
+            # 职场/赚钱类热点 -> 强调副业转型
+            nt["title"] = f"不想上班了？看这个宝妈如何用{k1}开启{k2}之路"
+        elif is_xiaomin and any(word in title for word in ["美食", "吃", "味道", "好吃"]):
+            # 美食类热点 -> 强调手艺变现
+            nt["title"] = f"{title}：她用{k1}把{k2}做成月入3万的小生意"
+        else:
+            # 默认改写方式
+            nt["title"] = f"{title}：{k1}如何帮她实现{k2}"
+        
         nt["tags"] = merged_tags[:6]
-        nt["reason"] = f"热点迁移到IP定位（{ip_id}）+ {str(t.get('reason') or '大数据候选')}"
+        nt["reason"] = f"IP视角改写({ip_id}) + 原热点：{title[:20]}..."
+        nt["original_title"] = title  # 保留原标题供参考
         out.append(nt)
     return out
 
@@ -519,10 +581,13 @@ def _apply_topic_whitelist(db: Session, ip_id: str, topics: List[Dict[str, Any]]
     # 都没有匹配：执行「热点 x IP」角度改写，确保仍返回大数据热点
     logger.warning("No topics match IP directly, adapt to IP angle, ip_id=%s", ip_id)
     if topics:
+        # 获取IP画像用于智能改写
+        ip_profile = _IP_DATA_CACHE.get(ip_id) if isinstance(_IP_DATA_CACHE, dict) else None
         adapted = _adapt_topics_to_ip_angle(
             ip_id=ip_id,
             topics=topics,
             keywords=keywords or ["创业", "变现"],
+            ip_profile=ip_profile,
         )
         if adapted:
             for t in adapted:
@@ -1147,7 +1212,9 @@ async def _topics_from_algorithm_or_fallback(
     limit: int = 12,
 ) -> List[Dict[str, Any]]:
     """场景一第一步：大数据源拉池（TikHub -> douyin-hot-hub）+ 四维重排 + IP约束。"""
-    relevance_floor = 0.6
+    # 提高相关度阈值，只有与IP画像足够相关的热点才保留
+    # 低于此阈值的热点将进入IP角度改写或算法兜底
+    relevance_floor = 0.65  # 从0.6提高到0.65
     whitelist_keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
     ip_profile: Dict[str, Any] = {}
     try:

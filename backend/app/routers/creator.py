@@ -1913,14 +1913,25 @@ async def test_tikhub_nested():
                 result["inner_code"] = inner_data.get("code")
                 result["inner_message"] = inner_data.get("message")
                 
+                # 查看 inner.data 的类型
+                inner_inner = inner_data.get("data")
+                result["inner_data_type"] = type(inner_inner).__name__
+                
+                if isinstance(inner_inner, list):
+                    result["inner_data_length"] = len(inner_inner)
+                    if inner_inner:
+                        result["first_item_sample"] = str(inner_inner[0])[:200]
+                elif isinstance(inner_inner, dict):
+                    result["inner_data_keys"] = list(inner_inner.keys())
+                else:
+                    result["inner_data_value"] = str(inner_inner)[:100]
+                
                 # 查找列表
                 for k in ("list", "data", "items", "records", "aweme_list", "hot_list"):
                     v = inner_data.get(k)
                     if isinstance(v, list):
                         result["found_list_key"] = k
                         result["list_length"] = len(v)
-                        if v:
-                            result["first_item_keys"] = list(v[0].keys()) if isinstance(v[0], dict) else None
                         break
             
             return result

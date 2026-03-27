@@ -1712,3 +1712,63 @@ async def get_agent_status():
         "generation": {"status": "ready", "config": ["风格训练", "口头禅"]},
         "compliance": {"status": "ready", "config": ["敏感词库"]},
     }
+
+
+# === TikHub 测试端点 ===
+@router.get("/test/tikhub")
+async def test_tikhub_api():
+    """测试 TikHub API 直接调用（公开端点，用于诊断）"""
+    import os
+    
+    key = os.environ.get("TIKHUB_API_KEY", "").strip()
+    result = {
+        "env_key_configured": bool(key),
+        "key_length": len(key),
+        "key_preview": key[:10] + "..." if len(key) > 10 else "empty",
+        "tikhub_client_configured": tikhub_client.is_configured(),
+        "api_call": None,
+        "error": None,
+    }
+    
+    if not key:
+        result["error"] = "TIKHUB_API_KEY not set"
+        return result
+    
+    try:
+        # 直接调用 TikHub API
+        import httpx
+        
+        headers = {"Authorization": f"Bearer {key}"}
+        payload = {"page": 1, "page_size": 3, "date_window": 1, "tags": []}
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.tikhub.io/api/v1/douyin/billboard/fetch_hot_total_low_fan_list",
+                headers=headers,
+                json=payload
+            )
+            
+            result["api_call"] = {
+                "status_code": response.status_code,
+                "headers_sent": {"Authorization": f"Bearer {key[:5]}..."},
+                "response_preview": response.text[:500] if response.text else "empty",
+            }
+            
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    result["api_call"]["json_parsed"] = True
+                    result["api_call"]["has_data"] = bool(data)
+                    if isinstance(data, dict) and "data" in data:
+                        items = data["data"]
+                        if isinstance(items, list):
+                            result["api_call"]["items_count"] = len(items)
+                except:
+                    result["api_call"]["json_parsed"] = False
+            else:
+                result["error"] = f"HTTP {response.status_code}"
+                
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {str(e)}"
+    
+    return result

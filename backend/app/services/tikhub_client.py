@@ -550,6 +550,13 @@ async def get_recommended_topic_cards(limit: int = 12) -> List[Dict[str, Any]]:
         if low_cards:
             return low_cards
     except Exception as e:
-        logger.error(f"[TIKHUB] Error fetching from TikHub: {e}", exc_info=True)
+        logger.error(f"[TIKHUB] Error fetching from TikHub: {type(e).__name__}: {e}")
+        # 尝试获取更详细的错误信息
+        if hasattr(e, 'response'):
+            try:
+                error_body = e.response.json() if hasattr(e.response, 'json') else str(e.response.text)
+                logger.error(f"[TIKHUB] Error response: {error_body}")
+            except:
+                pass
     logger.warning("[TIKHUB] All TikHub sources failed, returning empty list")
     return []

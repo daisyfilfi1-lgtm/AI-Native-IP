@@ -39,10 +39,14 @@ export default function LoginPage() {
           <code className="text-primary-400">123456</code>），对应后端字段为 <code className="text-primary-400">code</code>
           ，不是密码体系。
         </p>
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <div>
-            <label className="block text-sm text-foreground-secondary mb-1.5">手机号</label>
+            <label htmlFor="login-phone" className="block text-sm text-foreground-secondary mb-1.5">
+              手机号
+            </label>
             <Input
+              id="login-phone"
+              name="phone"
               type="tel"
               inputMode="numeric"
               autoComplete="tel"
@@ -50,11 +54,16 @@ export default function LoginPage() {
               onChange={(e) => setPhone(e.target.value)}
               placeholder="11 位手机号"
               required
+              aria-describedby={error ? 'login-error' : undefined}
             />
           </div>
           <div>
-            <label className="block text-sm text-foreground-secondary mb-1.5">验证码</label>
+            <label htmlFor="login-code" className="block text-sm text-foreground-secondary mb-1.5">
+              验证码
+            </label>
             <Input
+              id="login-code"
+              name="code"
               type="text"
               inputMode="numeric"
               autoComplete="one-time-code"
@@ -62,10 +71,15 @@ export default function LoginPage() {
               onChange={(e) => setCode(e.target.value)}
               placeholder="测试环境填 123456"
               required
+              aria-describedby={error ? 'login-error' : undefined}
             />
           </div>
-          {error ? <p className="text-sm text-accent-red">{error}</p> : null}
-          <Button type="submit" className="w-full" disabled={loading}>
+          {error ? (
+            <p id="login-error" className="text-sm text-accent-red" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <Button type="submit" id="login-submit" name="login" className="w-full" disabled={loading}>
             {loading ? '登录中…' : '登录'}
           </Button>
         </form>

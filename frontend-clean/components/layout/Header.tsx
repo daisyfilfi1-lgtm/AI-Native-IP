@@ -34,8 +34,11 @@ export function Header({ className, title }: HeaderProps) {
         <div className="relative hidden sm:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-foreground-tertiary" />
           <input
-            type="text"
+            id="header-search"
+            name="q"
+            type="search"
             placeholder="搜索..."
+            autoComplete="off"
             className={cn(
               'w-64 h-9 pl-9 pr-4',
               'bg-background-tertiary',

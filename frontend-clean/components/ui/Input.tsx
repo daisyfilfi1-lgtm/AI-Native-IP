@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { forwardRef, InputHTMLAttributes, ReactNode } from 'react';
+import { forwardRef, InputHTMLAttributes, ReactNode, useId } from 'react';
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -13,10 +13,13 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 
 const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ className, label, error, helper, leftIcon, rightIcon, ...props }, ref) => {
+    const autoId = useId();
+    const inputId = props.id || autoId;
+    const inputName = props.name || inputId;
     return (
       <div className="w-full">
         {label && (
-          <label className="block text-sm font-medium text-foreground mb-2">
+          <label htmlFor={inputId} className="block text-sm font-medium text-foreground mb-2">
             {label}
           </label>
         )}
@@ -28,6 +31,8 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           )}
           <input
             ref={ref}
+            id={inputId}
+            name={inputName}
             className={cn(
               'w-full',
               'bg-background-tertiary',
@@ -72,15 +77,20 @@ interface TextareaProps extends InputHTMLAttributes<HTMLTextAreaElement> {
 
 const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ className, label, error, helper, ...props }, ref) => {
+    const autoId = useId();
+    const textareaId = props.id || autoId;
+    const textareaName = props.name || textareaId;
     return (
       <div className="w-full">
         {label && (
-          <label className="block text-sm font-medium text-foreground mb-2">
+          <label htmlFor={textareaId} className="block text-sm font-medium text-foreground mb-2">
             {label}
           </label>
         )}
         <textarea
           ref={ref}
+          id={textareaId}
+          name={textareaName}
           className={cn(
             'w-full min-h-[120px]',
             'bg-background-tertiary',

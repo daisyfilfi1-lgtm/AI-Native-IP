@@ -208,12 +208,14 @@ class AssetVector(Base):
 
 
 class User(Base):
-    """手机号 + 验证码登录用户"""
+    """手机号/邮箱 + 密码登录用户"""
 
     __tablename__ = "users"
 
     user_id = Column(String(64), primary_key=True)
-    phone = Column(String(20), nullable=False, unique=True)
+    phone = Column(String(20), nullable=True, unique=True)
+    email = Column(String(128), nullable=True, unique=True)
+    password_hash = Column(String(128), nullable=True)
     created_at = Column(DateTime, nullable=False, default=now_utc)
     updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
     last_login_at = Column(DateTime, nullable=True)

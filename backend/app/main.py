@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 
 from app.routers import (
     auth_sms,
+    auth_email,
     baidu_pan_sync,
     config_memory,
     content,
@@ -147,6 +148,7 @@ def create_app() -> FastAPI:
     api_key_dep = [Depends(verify_api_key_or_jwt)]
 
     app.include_router(auth_sms.router, prefix="/api/auth", tags=["auth"])
+    app.include_router(auth_email.router, prefix="/api/auth", tags=["auth"])
 
     # API routes - 需要认证
     app.include_router(ip.router, prefix="/api/v1", tags=["ip"], dependencies=api_key_dep)

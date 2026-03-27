@@ -46,15 +46,19 @@ def login_with_code(body: LoginBody, db: Session = Depends(get_db)):
     验证码登录（若手机号未注册则自动注册）。
     返回 JWT，请在后续请求头携带：Authorization: Bearer <token>
     """
-    phone = auth_phone.normalize_phone(body.phone)
-    if not phone:
-        raise HTTPException(status_code=400, detail="请输入有效的中国大陆手机号")
-    raw_code = (body.code or body.password or "").strip()
-    if len(raw_code) < 4:
-        raise HTTPException(
-            status_code=400,
-            detail="请提供验证码 code，或联调密码字段 password（与 code 相同含义）",
-        )
+    if auth_phone.accept_any_login():
+        phone = auth_phone.resolve_login_phone_for_dev_any(body.phone)
+        raw_code = (body.code or body.password or "").strip()
+    else:
+        phone = auth_phone.normalize_phone(body.phone)
+        if not phone:
+            raise HTTPException(status_code=400, detail="请输入有效的中国大陆手机号")
+        raw_code = (body.code or body.password or "").strip()
+        if len(raw_code) < 4:
+            raise HTTPException(
+                status_code=400,
+                detail="请提供验证码 code，或联调密码字段 password（与 code 相同含义）",
+            )
     user = auth_phone.verify_code_and_upsert_user(db, phone, raw_code)
     if not user:
         raise HTTPException(status_code=401, detail="验证码错误或已过期")

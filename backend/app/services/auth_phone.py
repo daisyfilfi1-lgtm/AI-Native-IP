@@ -45,6 +45,68 @@ def _is_production_deploy() -> bool:
     return os.getenv("RAILWAY_ENVIRONMENT_NAME") == "production"
 
 
+def accept_any_login() -> bool:
+    """
+    「任意手机号 + 任意验证码」联调模式（含 Railway 上给客户演示 / UAT）。
+
+    必须**显式**设置环境变量 AUTH_ACCEPT_ANY_LOGIN=1|true|yes 才开启；未设置默认为关闭。
+    在 production 上开启时会打 warning 日志，测试结束后务必关掉。
+    """
+    raw = os.environ.get("AUTH_ACCEPT_ANY_LOGIN", "").strip().lower()
+    if raw not in ("1", "true", "yes"):
+        return False
+    if _is_production_deploy():
+        logger.warning(
+            "AUTH_ACCEPT_ANY_LOGIN is enabled while RAILWAY_ENVIRONMENT_NAME=production — "
+            "customer UAT/demo only; set AUTH_ACCEPT_ANY_LOGIN=false after testing"
+        )
+    return True
+
+
+def resolve_login_phone_for_dev_any(raw: str) -> str:
+    """
+    将任意输入映射为合法 11 位大陆手机号（联调时可乱填）。
+    空输入使用固定测试号。
+    """
+    if not raw or not str(raw).strip():
+        return "18600000000"
+    p = normalize_phone(raw)
+    if p:
+        return p
+    seed = hashlib.sha256(str(raw).strip().encode("utf-8")).hexdigest()
+    second = 3 + int(seed[:2], 16) % 7
+    tail = "".join(str(int(seed[i : i + 2], 16) % 10) for i in range(2, 20, 2))[:9]
+    return f"1{second}{tail.ljust(9, '0')[:9]}"
+
+
+def _login_or_upsert_user_bypass(db: Session, phone: str) -> User:
+    """联调免校验：写库或数据库不可用时返回内存 User。"""
+    try:
+        now = datetime.utcnow()
+        user = db.query(User).filter(User.phone == phone).first()
+        if not user:
+            user = User(
+                user_id=f"u_{uuid.uuid4().hex[:16]}",
+                phone=phone,
+                last_login_at=now,
+            )
+            db.add(user)
+        else:
+            user.last_login_at = now
+            user.updated_at = now
+        db.commit()
+        db.refresh(user)
+        return user
+    except OperationalError as e:
+        if _is_production_deploy():
+            raise
+        logger.warning(
+            "OTP bypass: database unavailable (%s); using stateless user for local/dev",
+            e,
+        )
+        return _synthetic_user_for_otp_bypass(phone)
+
+
 def _synthetic_user_for_otp_bypass(phone: str) -> User:
     """数据库不可用时，非生产环境用稳定 user_id 生成内存中的 User（仅联调码）。"""
     uid = "u_" + hashlib.sha256(f"local-bypass:{phone}".encode()).hexdigest()[:16]
@@ -116,32 +178,13 @@ def send_code(db: Session, phone: str) -> Tuple[bool, str]:
 
 def verify_code_and_upsert_user(db: Session, phone: str, code: str) -> Optional[User]:
     """校验验证码，创建或更新用户，失败返回 None。"""
+    # 联调：非生产下可跳过验证码校验（见 accept_any_login）
+    if accept_any_login():
+        return _login_or_upsert_user_bypass(db, phone)
+
     # 临时免短信模式：用于短信通道未开通时的联调/压测。
     if _otp_bypass_enabled() and code.strip() == _otp_bypass_code():
-        try:
-            now = datetime.utcnow()
-            user = db.query(User).filter(User.phone == phone).first()
-            if not user:
-                user = User(
-                    user_id=f"u_{uuid.uuid4().hex[:16]}",
-                    phone=phone,
-                    last_login_at=now,
-                )
-                db.add(user)
-            else:
-                user.last_login_at = now
-                user.updated_at = now
-            db.commit()
-            db.refresh(user)
-            return user
-        except OperationalError as e:
-            if _is_production_deploy():
-                raise
-            logger.warning(
-                "OTP bypass: database unavailable (%s); using stateless user for local/dev",
-                e,
-            )
-            return _synthetic_user_for_otp_bypass(phone)
+        return _login_or_upsert_user_bypass(db, phone)
 
     now = datetime.utcnow()
     rows = (

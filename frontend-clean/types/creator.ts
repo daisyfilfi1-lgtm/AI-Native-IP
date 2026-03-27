@@ -16,13 +16,19 @@ export interface RemixRecommendationItem {
 // 对应Agent：Strategy Agent输出
 export interface TopicCard {
   id: string;
-  title: string;
+  title: string;                    // IP改写后的标题
   score: number;                    // Strategy Agent: 四维评分结果
   estimatedViews: string;           // Analytics Agent: 播放量预测
   estimatedCompletion: number;      // Analytics Agent: 完播率预测
   tags: string[];
   reason: string;                   // 匹配原因说明（来自Memory Agent素材匹配）
   agentChain?: string[];            // 涉及的Agent链
+  
+  // IP 2.0新增：原标题和原链接
+  originalTitle?: string;           // 原始热点标题（TIKHUB数据源）
+  sourceUrl?: string;               // 原链接（可点击跳转）
+  contentCategory?: string;         // 内容矩阵分类（money/emotion/skill/life）
+  filterMethod?: string;            // 匹配方式（keyword/semantic/ip_adapted）
   
   // Strategy Agent配置相关
   source?: string;                  // 来源竞品ID

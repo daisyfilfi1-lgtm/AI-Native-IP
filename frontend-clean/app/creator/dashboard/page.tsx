@@ -35,7 +35,8 @@ import {
   FileText as Keyboard,
   Wand2,
   Lightbulb,
-  Pencil
+  Pencil,
+  ExternalLink
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -127,10 +128,33 @@ function TopicCardComponent({
         </div>
 
         <div className="p-5 flex-1 flex flex-col">
-          {/* Title */}
-          <h3 className="text-lg font-semibold text-foreground mb-3 line-clamp-2 group-hover:text-primary-400 transition-colors">
+          {/* Title - IP改写后 */}
+          <h3 className="text-lg font-semibold text-foreground mb-2 line-clamp-2 group-hover:text-primary-400 transition-colors">
             {topic.title}
           </h3>
+          
+          {/* Original Title - 原标题 */}
+          {topic.originalTitle && topic.originalTitle !== topic.title && (
+            <div className="mb-3 p-2 bg-background-tertiary/50 rounded-lg">
+              <div className="text-xs text-foreground-tertiary mb-1">原热点</div>
+              <div className="text-sm text-foreground-secondary line-clamp-1">{topic.originalTitle}</div>
+            </div>
+          )}
+          
+          {/* Source Link - 原链接 */}
+          {topic.sourceUrl && (
+            <a 
+              href={topic.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 mb-3 text-xs text-primary-400 hover:text-primary-300 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <LinkIcon className="w-3 h-3" />
+              查看原链接
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
 
           {/* Match Reason */}
           <div className="flex items-center gap-2 mb-3 text-xs">

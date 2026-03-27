@@ -439,16 +439,15 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
     # 获取IP配置
     ip_config = _IP_DATA_CACHE.get(ip_id)
     if ip_config:
-        # 使用语义过滤，相似度阈值0.35
+        # 使用语义过滤，降低阈值到0.2以获取更多结果
         semantic_filtered = filter_topics_by_similarity(
             topics=topics,
             ip_data=ip_config,
-            threshold=0.35
+            threshold=0.2
         )
         
         if semantic_filtered:
             logger.info(f"Semantic filter matched {len(semantic_filtered)} topics")
-            # 标记数据来源
             for t in semantic_filtered:
                 t['filter_method'] = 'semantic'
             return semantic_filtered

@@ -2116,9 +2116,9 @@ async def test_tikhub_fetch():
         result["traceback"] = traceback.format_exc()
     
     
-    # 模拟 get_recommended_topic_cards 的内部逻辑
+    # 模拟 get_recommended_topic_cards 的内部逻辑（使用默认参数）
     try:
-        raw2 = await tikhub_client.fetch_douyin_high_play_hot_list(page=1, page_size=5)
+        raw2 = await tikhub_client.fetch_douyin_high_play_hot_list(page=1, page_size=5)  # 不传 date_window
         result["step1_fetch_ok"] = True
         result["step1_raw_type"] = type(raw2).__name__
         cards2 = tikhub_client.billboard_to_topic_cards(raw2, limit=5)
@@ -2127,6 +2127,6 @@ async def test_tikhub_fetch():
     except Exception as e:
         import traceback
         result["step_error"] = f"{type(e).__name__}: {str(e)}"
-        result["step_traceback"] = traceback.format_exc()
+        result["step_traceback"] = traceback.format_exc()[:500]
     
     return result

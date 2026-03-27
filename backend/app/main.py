@@ -130,6 +130,7 @@ def create_app() -> FastAPI:
         import inspect
         from app.services.ai_client import chat
         from app.config.ai_config import get_ai_config
+        from app.services import tikhub_client
 
         cfg = get_ai_config()
         sig = inspect.signature(chat)
@@ -143,6 +144,8 @@ def create_app() -> FastAPI:
             "has_api_key": bool(cfg.get("api_key")),
             "llm_model": cfg.get("llm_model") or "",
             "chat_supports_temperature": "temperature" in sig.parameters,
+            "tikhub_configured": tikhub_client.is_configured(),
+            "tikhub_api_key_preview": os.getenv("TIKHUB_API_KEY", "")[:10] + "..." if os.getenv("TIKHUB_API_KEY") else "NOT_SET",
         }
 
     # API Key 或用户 JWT（发码/登录见 auth 路由，无需此依赖）

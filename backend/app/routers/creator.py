@@ -377,6 +377,20 @@ _IP_TOPIC_BLOCKLIST = {
 _IP_DATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
+def _ensure_ip_data_cache(db: Session, ip_id: str) -> Dict[str, Any]:
+    """确保IP数据缓存已加载，如果未加载则从数据库读取并缓存"""
+    global _IP_DATA_CACHE
+    if ip_id in _IP_DATA_CACHE:
+        return _IP_DATA_CACHE[ip_id]
+    
+    # 从数据库加载IP配置
+    ip_profile = get_ip_profile(db, ip_id)
+    if ip_profile:
+        _IP_DATA_CACHE[ip_id] = ip_profile
+        logger.info(f"Loaded IP data cache for {ip_id}")
+    return ip_profile or {}
+
+
 def _topic_hit_whitelist(topic: Dict[str, Any], keywords: List[str]) -> bool:
     if not keywords:
         return True
@@ -427,7 +441,33 @@ def _adapt_topics_to_ip_angle(
     return out
 
 
-def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _extract_keywords_from_ip_profile(ip_profile: Dict[str, Any]) -> List[str]:
+    """从IP画像动态提取白名单关键词"""
+    keywords = []
+    fields = [
+        ip_profile.get("expertise", ""),
+        ip_profile.get("content_direction", ""),
+        ip_profile.get("target_audience", ""),
+        ip_profile.get("passion", ""),
+        ip_profile.get("market_demand", ""),
+        ip_profile.get("product_service", ""),
+    ]
+    for field in fields:
+        if field and isinstance(field, str):
+            # 提取2-8个字符的关键词
+            words = re.findall(r'[\u4e00-\u9fa5]{2,8}', field)
+            keywords.extend(words)
+    # 去重并限制数量
+    unique_keywords = list(dict.fromkeys(keywords))[:15]
+    return unique_keywords
+
+
+def _apply_topic_whitelist(db: Session, ip_id: str, topics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """白名单过滤 + 语义过滤 + IP角度改写（按优先级）"""
+    # 确保缓存已加载
+    if ip_id not in _IP_DATA_CACHE:
+        _ensure_ip_data_cache(db, ip_id)
+    
     blocklist = _IP_TOPIC_BLOCKLIST.get(ip_id) or []
     if blocklist:
         blocked_filtered = [t for t in topics if not _topic_hit_blocklist(t, blocklist)]
@@ -439,10 +479,16 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
                 ip_id,
                 blocklist,
             )
-            # 大数据优先：避免因为黑名单过严导致全部清空
-            # 这里保留原始热点，后续仍会走语义/角度改写
 
+    # 1. 优先使用硬编码白名单
     keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
+    
+    # 2. 如果没有硬编码白名单，从IP画像动态提取
+    if not keywords:
+        ip_profile = _IP_DATA_CACHE.get(ip_id) or {}
+        keywords = _extract_keywords_from_ip_profile(ip_profile)
+        if keywords:
+            logger.info(f"Dynamic keywords for {ip_id}: {keywords[:5]}...")
 
     # 先尝试关键词匹配
     if keywords:
@@ -1108,6 +1154,10 @@ async def _topics_from_algorithm_or_fallback(
         ip_profile = get_ip_profile(db, ip_id) or {}
     except Exception as e:
         logger.warning("读取IP画像失败，按默认画像继续: %s", e)
+    
+    # 确保IP数据缓存已加载（供白名单过滤使用）
+    _ensure_ip_data_cache(db, ip_id)
+    
     weights = _resolve_topic_weights(db, ip_id)
 
     cards: List[Dict[str, Any]] = []
@@ -1138,7 +1188,7 @@ async def _topics_from_algorithm_or_fallback(
                 # 大数据优先：相关度不足时也返回重排后的热点，后续交给 IP 过滤/改写
                 filtered = list(ranked_cards)
             if filtered:
-                whitelisted_cards = _apply_topic_whitelist(ip_id, filtered)
+                whitelisted_cards = _apply_topic_whitelist(db, ip_id, filtered)
                 if whitelisted_cards:
                     for c in whitelisted_cards:
                         c.pop("_relevance", None)
@@ -1273,7 +1323,7 @@ def _generate_hotlist_snapshot_topics(db: Session, ip_id: str, limit: int) -> Li
         ip_profile = get_ip_profile(db, ip_id) or {}
         weights = _resolve_topic_weights(db, ip_id)
         ranked = _rerank_tikhub_candidates(cards=cards, ip_profile=ip_profile, limit=limit, weights=weights)
-        out = _apply_topic_whitelist(ip_id, ranked)
+        out = _apply_topic_whitelist(db, ip_id, ranked)
         for t in out:
             t.pop("_relevance", None)
             t["reason"] = f"{str(t.get('reason') or '')} + 快照兜底"

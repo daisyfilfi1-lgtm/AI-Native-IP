@@ -1499,6 +1499,20 @@ async def _topics_from_algorithm_or_fallback(
             if not filtered:
                 # 大数据优先：相关度不足时也返回重排后的热点，后续交给 IP 过滤/改写
                 filtered = list(ranked_cards)
+            
+            # === 小敏IP：强制核心词过滤，宁可少而精 ===
+            if ip_id == "xiaomin1":
+                logger.info("xiaomin1: Applying strict core keyword filter before whitelist")
+                strict_filtered = [c for c in filtered if _topic_hit_core_keywords(c)]
+                if strict_filtered:
+                    logger.info(f"xiaomin1: Core keyword matched {len(strict_filtered)} topics")
+                    for c in strict_filtered:
+                        c.pop("_relevance", None)
+                        c['filter_method'] = 'core_matched'
+                    return strict_filtered
+                logger.warning("xiaomin1: No topics hit core keywords, returning empty")
+                return []
+            
             if filtered:
                 whitelisted_cards = _apply_topic_whitelist(db, ip_id, filtered)
                 if whitelisted_cards:

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from app.services import tikhub_client
+from app.services import tikhub_client, xhs_topic_client
 
 logger = logging.getLogger(__name__)
 
@@ -232,10 +232,10 @@ class MultiSourceClient:
             tasks.append(self.fetch_douyin_hot_list(limit))
             source_names.append("douyin")
         
-        # 并发执行
+        # 并发执行热榜数据源
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # 收集所有结果
+        # 收集热榜结果
         all_cards: List[Dict[str, Any]] = []
         for name, result in zip(source_names, results):
             if isinstance(result, Exception):
@@ -244,6 +244,19 @@ class MultiSourceClient:
             if result:
                 all_cards.extend(result)
                 logger.info(f"[MultiSource] {name}: added {len(result)} cards")
+        
+        # 额外获取小红书话题标签笔记（更精准）
+        try:
+            xhs_topic_notes = await xhs_topic_client.get_xhs_topic_notes(limit_per_topic=5)
+            if xhs_topic_notes:
+                # 给话题标签笔记更高权重
+                for note in xhs_topic_notes:
+                    note["weight"] = 2.0  # 话题标签笔记权重最高
+                    note["reason"] = "小红书话题标签（精准竞品）"
+                all_cards.extend(xhs_topic_notes)
+                logger.info(f"[MultiSource] XHS Topic: added {len(xhs_topic_notes)} notes")
+        except Exception as e:
+            logger.warning(f"[MultiSource] XHS Topic failed: {e}")
         
         logger.info(f"[MultiSource] Total cards from all sources: {len(all_cards)}")
         return all_cards

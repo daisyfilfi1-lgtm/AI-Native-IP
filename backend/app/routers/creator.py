@@ -2327,3 +2327,31 @@ async def test_card_structure():
             "platform": cards[0].get("platform") if cards else None,
         } if cards else None,
     }
+
+
+# === 检查推荐选题流程 ===
+@router.get("/test/recommend-flow")
+async def test_recommend_flow(ipId: str = Query("xiaomin1")):
+    """检查推荐选题完整流程"""
+    from app.services import multi_source_client
+    
+    # 1. 获取多数据源
+    cards = await multi_source_client.get_multi_source_topics(limit=6)
+    
+    # 2. 模拟 _topic_hit_core_keywords
+    matched = []
+    for card in cards:
+        if _topic_hit_core_keywords(card):
+            matched.append({
+                "id": card.get("id"),
+                "title": card.get("title")[:30],
+                "hit": True,
+            })
+    
+    return {
+        "ipId_received": ipId,
+        "is_xiaomin1": ipId == "xiaomin1",
+        "cards_count": len(cards),
+        "matched_count": len(matched),
+        "matched": matched,
+    }

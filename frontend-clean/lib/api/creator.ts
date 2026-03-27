@@ -292,17 +292,7 @@ async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> 
     ...options,
     headers,
   });
-  if (response.status === 404 && endpoint.startsWith('/api/creator/')) {
-    const altEndpoint = endpoint.replace('/api/creator/', '/api/v1/creator/');
-    const fallback = await fetch(`${apiOrigin}${altEndpoint}`, {
-      ...options,
-      headers,
-    });
-    if (!fallback.ok) {
-      throw new Error(`API error: ${fallback.status}`);
-    }
-    return fallback.json();
-  }
+  // 404 fallback removed - all creator APIs now use /api/v1/creator/ prefix
   
   if (!response.ok) {
     throw new Error(`API error: ${response.status}`);
@@ -317,7 +307,7 @@ export const creatorApi = {
     if (USE_MOCK) {
       return mockAgentStatus;
     }
-    return apiFetch('/api/creator/agent-status');
+    return apiFetch('/api/v1/creator/agent-status');
   },
 
   /** 仿写 Tab：抖音低粉爆款（关键词匹配）+ 可选小红书话题笔记 */
@@ -334,7 +324,7 @@ export const creatorApi = {
       ];
     }
     const resp = await apiFetch<{ items: RemixRecommendationItem[] }>(
-      `/api/creator/remix/recommendations?ipId=${encodeURIComponent(ipId)}`
+      `/api/v1/creator/remix/recommendations?ipId=${encodeURIComponent(ipId)}`
     );
     return resp.items || [];
   },
@@ -345,7 +335,7 @@ export const creatorApi = {
       return mockTopics;
     }
     const resp = await apiFetch<{ topics: TopicCard[] }>(
-      `/api/creator/topics/recommended?ipId=${encodeURIComponent(ipId)}`
+      `/api/v1/creator/topics/recommended?ipId=${encodeURIComponent(ipId)}`
     );
     return resp.topics || [];
   },
@@ -356,7 +346,7 @@ export const creatorApi = {
       return [...mockTopics].sort(() => Math.random() - 0.5);
     }
     const resp = await apiFetch<{ topics: TopicCard[] }>(
-      `/api/creator/topics/refresh?ipId=${encodeURIComponent(ipId)}`
+      `/api/v1/creator/topics/refresh?ipId=${encodeURIComponent(ipId)}`
     );
     return resp.topics || [];
   },
@@ -380,7 +370,7 @@ export const creatorApi = {
       };
     }
     
-    return apiFetch('/api/creator/generate/topic', {
+    return apiFetch('/api/v1/creator/generate/topic', {
       method: 'POST',
       body: JSON.stringify({ topicId, topicTitle, style, ipId })
     });
@@ -400,7 +390,7 @@ export const creatorApi = {
       };
     }
     
-    return apiFetch('/api/creator/generate/remix', {
+    return apiFetch('/api/v1/creator/generate/remix', {
       method: 'POST',
       body: JSON.stringify({ url, style, ipId })
     });
@@ -420,7 +410,7 @@ export const creatorApi = {
       };
     }
     
-    return apiFetch('/api/creator/generate/original', {
+    return apiFetch('/api/v1/creator/generate/original', {
       method: 'POST',
       body: JSON.stringify({ text, style })
     });
@@ -455,7 +445,7 @@ export const creatorApi = {
       };
     }
     
-    return apiFetch('/api/creator/generate/viral', {
+    return apiFetch('/api/v1/creator/generate/viral', {
       method: 'POST',
       body: JSON.stringify(params)
     });
@@ -471,7 +461,7 @@ export const creatorApi = {
         estimatedTime: 0
       };
     }
-    return apiFetch(`/api/creator/generate/${id}/progress`);
+    return apiFetch(`/api/v1/creator/generate/${id}/progress`);
   },
 
   // ===== 获取生成结果 =====
@@ -488,7 +478,7 @@ export const creatorApi = {
       // 如果找不到，返回默认内容
       return mockGeneratedContents['gen_topic_001'];
     }
-    return apiFetch(`/api/creator/generate/${id}/result`);
+    return apiFetch(`/api/v1/creator/generate/${id}/result`);
   },
 
   // ===== 内容库 =====
@@ -503,7 +493,7 @@ export const creatorApi = {
       return mockLibraryItems.filter(item => item.status === status);
     }
     
-    const url = status ? `/api/creator/library?status=${status}` : '/api/creator/library';
+    const url = status ? `/api/v1/creator/library?status=${status}` : '/api/v1/creator/library';
     return apiFetch(url);
   },
 
@@ -516,7 +506,7 @@ export const creatorApi = {
       }
       return;
     }
-    await apiFetch<{ ok: boolean }>(`/api/creator/library/${encodeURIComponent(id)}`, {
+    await apiFetch<{ ok: boolean }>(`/api/v1/creator/library/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   },
@@ -529,7 +519,7 @@ export const creatorApi = {
       return;
     }
     
-    return apiFetch('/api/creator/publish', {
+    return apiFetch('/api/v1/creator/publish', {
       method: 'POST',
       body: JSON.stringify({ id, platforms })
     });
@@ -571,7 +561,7 @@ export const creatorApi = {
         ]
       };
     }
-    return apiFetch('/api/creator/analytics');
+    return apiFetch('/api/v1/creator/analytics');
   },
 };
 

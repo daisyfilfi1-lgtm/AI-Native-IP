@@ -1510,7 +1510,13 @@ async def get_recommended_topics(
     """场景一第一步：推荐选题（四维评分；不生成正文）。"""
     topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
 
-    # 如果外部API都失败，使用算法兜底生成选题
+    # 小敏IP：严格模式，不相关热点直接丢弃，不兜底
+    if ipId == "xiaomin1":
+        if not topics:
+            logger.info("xiaomin1: No matching topics from TikHub, returning empty")
+        return {"topics": topics}
+
+    # 其他IP：如果外部API都失败，使用算法兜底生成选题
     if not topics:
         topics = _generate_hotlist_snapshot_topics(db, ipId, limit)
     if not topics:

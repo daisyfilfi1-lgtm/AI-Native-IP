@@ -519,6 +519,23 @@ def _topic_hit_whitelist(topic: Dict[str, Any], keywords: List[str]) -> bool:
     return any(kw and kw in text for kw in keywords)
 
 
+# 小敏IP核心词 - 必须至少命中1个，否则直接丢弃
+_XIAOMIN_CORE_KEYWORDS = [
+    "宝妈", "妈妈", "女性", "女人",
+    "创业", "副业", "赚钱", "变现", "搞钱",
+    "馒头", "花样馒头", "面食", "手艺", "手工",
+    "摆摊", "私房", "低成本", "轻创业",
+]
+
+
+def _topic_hit_core_keywords(topic: Dict[str, Any]) -> bool:
+    """检查话题是否命中核心词（小敏IP专用严格模式）"""
+    title = str(topic.get("title") or "")
+    original_title = str(topic.get("originalTitle") or topic.get("original_title") or "")
+    text = f"{title} {original_title}"
+    return any(kw in text for kw in _XIAOMIN_CORE_KEYWORDS)
+
+
 def _topic_hit_blocklist(topic: Dict[str, Any], keywords: List[str]) -> bool:
     if not keywords:
         return False
@@ -764,7 +781,20 @@ def _apply_topic_whitelist(db: Session, ip_id: str, topics: List[Dict[str, Any]]
         except Exception as e:
             logger.warning("Semantic filter failed, fallback to IP angle adaptation: %s", e)
 
-    # 都没有匹配：执行「热点 x IP」角度改写，确保仍返回大数据热点
+    # === 严格模式：小敏IP必须命中核心词，否则直接丢弃 ===
+    if ip_id == "xiaomin1":
+        logger.warning("xiaomin1: No whitelist match, applying strict core keyword filter")
+        strict_filtered = [t for t in topics if _topic_hit_core_keywords(t)]
+        if strict_filtered:
+            logger.info(f"xiaomin1: Core keyword matched {len(strict_filtered)} topics")
+            for t in strict_filtered:
+                t['filter_method'] = 'strict_core'
+            return strict_filtered
+        # 严格模式下，没有命中核心词的直接丢弃（宁可少而精）
+        logger.warning("xiaomin1: No topics hit core keywords, returning empty")
+        return []
+
+    # 其他IP：执行「热点 x IP」角度改写
     logger.warning("No topics match IP directly, adapt to IP angle, ip_id=%s", ip_id)
     if topics:
         # 获取IP画像用于智能改写

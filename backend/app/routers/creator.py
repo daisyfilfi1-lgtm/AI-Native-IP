@@ -2495,3 +2495,42 @@ async def test_algorithm(ipId: str = Query("xiaomin1"), limit: int = 12, db: Ses
             for t in topics[:5]
         ],
     }
+
+
+# === 竞品数据测试 ===
+@router.get("/test/competitor")
+async def test_competitor():
+    """测试竞品账号视频抓取"""
+    from app.services import competitor_client
+    
+    client = competitor_client.get_competitor_client()
+    
+    # 检查配置
+    config = {
+        "api_key_configured": bool(client.api_key),
+        "competitors_count": len(client.competitor_sec_uids),
+        "competitor_uids": [uid[:20] + "..." for uid in client.competitor_sec_uids],
+    }
+    
+    # 尝试抓取
+    try:
+        videos = await competitor_client.get_competitor_videos(count_per_user=3)
+        return {
+            **config,
+            "videos_count": len(videos),
+            "videos": [
+                {
+                    "title": v.get("title", "")[:40],
+                    "platform": v.get("platform"),
+                    "digg_count": v.get("digg_count"),
+                }
+                for v in videos[:5]
+            ],
+        }
+    except Exception as e:
+        import traceback
+        return {
+            **config,
+            "error": str(e),
+            "traceback": traceback.format_exc()[:500],
+        }

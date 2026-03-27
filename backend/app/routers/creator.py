@@ -2475,3 +2475,23 @@ async def test_full_recommend(ipId: str = Query("xiaomin1"), db: Session = Depen
     result["is_xiaomin1"] = ipId == "xiaomin1"
     
     return result
+
+
+# === 直接测试 _topics_from_algorithm_or_fallback ===
+@router.get("/test/algorithm")
+async def test_algorithm(ipId: str = Query("xiaomin1"), limit: int = 12, db: Session = Depends(get_db)):
+    """直接测试算法流程"""
+    topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
+    return {
+        "ip_id": ipId,
+        "limit": limit,
+        "topics_count": len(topics),
+        "topics": [
+            {
+                "id": t.get("id"),
+                "title": t.get("title", "")[:40],
+                "filter_method": t.get("filter_method"),
+            }
+            for t in topics[:5]
+        ],
+    }

@@ -2307,3 +2307,23 @@ async def test_core_match():
         "matched": sum(1 for r in results if r["hit"]),
         "results": results,
     }
+
+
+# === 检查多数据源卡片结构 ===
+@router.get("/test/card-structure")
+async def test_card_structure():
+    """检查多数据源返回的卡片结构"""
+    from app.services import multi_source_client
+    
+    cards = await multi_source_client.get_multi_source_topics(limit=3)
+    
+    return {
+        "count": len(cards),
+        "first_card_keys": list(cards[0].keys()) if cards else [],
+        "first_card": {
+            "id": cards[0].get("id") if cards else None,
+            "title": cards[0].get("title")[:30] if cards else None,
+            "originalTitle": cards[0].get("originalTitle")[:30] if cards else None,
+            "platform": cards[0].get("platform") if cards else None,
+        } if cards else None,
+    }

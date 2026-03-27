@@ -1823,3 +1823,58 @@ async def test_tikhub_with_key(api_key: str = Query(..., description="TikHub API
         result["error"] = f"{type(e).__name__}: {str(e)}"
     
     return result
+
+
+# === TikHub 数据详情测试 ===
+@router.get("/test/tikhub-data")
+async def test_tikhub_data_detail():
+    """查看 TikHub 返回的原始数据结构"""
+    from app.services import tikhub_client
+    import os
+    import httpx
+    
+    key = os.environ.get("TIKHUB_API_KEY", "").strip()
+    result = {
+        "key_configured": bool(key),
+        "key_preview": key[:10] + "..." if key else "none",
+    }
+    
+    try:
+        headers = {"Authorization": f"Bearer {key}"}
+        payload = {"page": 1, "page_size": 5, "date_window": 1, "tags": []}
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.tikhub.io/api/v1/douyin/billboard/fetch_hot_total_high_play_list",
+                headers=headers,
+                json=payload
+            )
+            
+            data = response.json()
+            result["status_code"] = response.status_code
+            result["response_code"] = data.get("code")
+            result["response_message"] = data.get("message")
+            
+            # 检查 data 字段
+            inner_data = data.get("data")
+            result["data_type"] = type(inner_data).__name__
+            
+            if isinstance(inner_data, list):
+                result["data_length"] = len(inner_data)
+                if inner_data:
+                    result["first_item"] = inner_data[0]
+            elif isinstance(inner_data, dict):
+                result["data_keys"] = list(inner_data.keys())
+            else:
+                result["data_value"] = str(inner_data)[:200]
+                
+            # 测试 billboard_to_topic_cards
+            cards = tikhub_client.billboard_to_topic_cards(inner_data, limit=5)
+            result["parsed_cards_count"] = len(cards)
+            if cards:
+                result["first_card"] = cards[0]
+                
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {str(e)}"
+    
+    return result

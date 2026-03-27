@@ -452,11 +452,18 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
                 t['filter_method'] = 'semantic'
             return semantic_filtered
     
-    # 都没有匹配，返回空
-    logger.warning(
-        "No topics match IP (keyword or semantic), ip_id=%s",
-        ip_id,
-    )
+    # 都没有匹配：执行「热点 x IP」角度改写，确保仍返回大数据热点
+    logger.warning("No topics match IP directly, adapt to IP angle, ip_id=%s", ip_id)
+    if topics:
+        adapted = _adapt_topics_to_ip_angle(
+            ip_id=ip_id,
+            topics=topics,
+            keywords=keywords or ["创业", "变现"],
+        )
+        if adapted:
+            for t in adapted:
+                t["filter_method"] = "ip_adapted"
+            return adapted
     return []
 
 
@@ -1091,9 +1098,10 @@ async def _topics_from_algorithm_or_fallback(
             ranked_cards = _rerank_tikhub_candidates(
                 cards=cards, ip_profile=ip_profile, limit=limit, weights=weights
             )
-            filtered = [
-                c for c in ranked_cards if float(c.get("_relevance") or 0.0) >= relevance_floor
-            ]
+            filtered = [c for c in ranked_cards if float(c.get("_relevance") or 0.0) >= relevance_floor]
+            if not filtered:
+                # 大数据优先：相关度不足时也返回重排后的热点，后续交给 IP 过滤/改写
+                filtered = list(ranked_cards)
             if filtered:
                 whitelisted_cards = _apply_topic_whitelist(ip_id, filtered)
                 if whitelisted_cards:

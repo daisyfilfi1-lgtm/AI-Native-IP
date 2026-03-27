@@ -652,6 +652,9 @@ export default function CreatorDashboardPage() {
                     说出你的想法，AI将使用<span className="text-orange-400">八大爆款元素</span>和<span className="text-orange-400">自动结构路由</span>，
                     通过7步精加工，为你生成原创爆款。专业级工业化内容生产系统。
                   </p>
+                  <p className="text-xs text-orange-300 mt-1">
+                    已上线：自由创作（AI自动结构）
+                  </p>
                 </div>
               </div>
             </div>

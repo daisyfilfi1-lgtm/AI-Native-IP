@@ -1207,7 +1207,7 @@ def _generate_fallback_topics(db: Session, ip_id: str, limit: int) -> List[Dict[
     # 优先选择与创业相关的核心关键词
     core_keywords = [k for k in keywords if any(x in k for x in ['创业', '馒头', '私域', '变现', '女性', '副业', '赚钱', '独立'])]
     if core_keywords:
-        keywords = core_keywords + keywords
+        
     
     if not keywords:
         keywords = ["创业", "赚钱", "副业", "女性", "独立"]
@@ -1227,7 +1227,7 @@ def _generate_fallback_topics(db: Session, ip_id: str, limit: int) -> List[Dict[
     ]
     
     topics = []
-    kw = keywords[0] if keywords else "创业"
+    kw = core_keywords[0] if keywords else "创业"
     
     for i, title in enumerate(templates[:limit]):
         title = title.replace("{kw}", kw)
@@ -1235,7 +1235,7 @@ def _generate_fallback_topics(db: Session, ip_id: str, limit: int) -> List[Dict[
             "id": f"fallback_{i+1:03d}",
             "title": title,
             "score": round(4.6 - i * 0.05, 2),
-            "tags": keywords[:4],
+            "tags": core_keywords[:4],
             "reason": "基于IP方向智能生成",
             "estimatedViews": f"{20 + i * 10}万",
             "estimatedCompletion": 38 + i,

@@ -206,11 +206,27 @@ async def _fetch_tikhub_topics(keywords: List[str], limit: int) -> List[Dict]:
                 date_window=3,
             )
             logger.info(f"DEBUG: raw type = {type(raw)}")
-            if raw is None:
+            
+            # Handle dict response with code/data structure
+            if isinstance(raw, dict):
+                logger.info(f"DEBUG: raw has keys = {list(raw.keys())}")
+                code = raw.get('code', 0)
+                logger.info(f"DEBUG: response code = {code}")
+                
+                # If code is not 0, check message
+                if code != 0:
+                    logger.info(f"DEBUG: API error message = {raw.get('message', 'unknown')}")
+                
+                # Get data from response
+                data = raw.get('data', raw)
+                if data:
+                    raw = data
+                    logger.info(f"DEBUG: extracted data, type = {type(raw)}")
+                    
+            elif raw is None:
                 logger.info("DEBUG: raw is None, using empty list")
                 raw = []
-            elif isinstance(raw, dict):
-                logger.info(f"DEBUG: raw keys = {list(raw.keys())}")
+                
         except Exception as e:
             logger.info(f"DEBUG: fetch exception = {e}")
             raw = []

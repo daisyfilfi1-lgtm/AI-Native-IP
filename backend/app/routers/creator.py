@@ -420,11 +420,12 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
             topics = blocked_filtered
         else:
             logger.warning(
-                "IP topics blocked by blocklist, ip_id=%s, blocklist=%s",
+                "IP topics all hit blocklist, keep original hotlist to avoid empty result, ip_id=%s, blocklist=%s",
                 ip_id,
                 blocklist,
             )
-            return []
+            # 大数据优先：避免因为黑名单过严导致全部清空
+            # 这里保留原始热点，后续仍会走语义/角度改写
 
     keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
     

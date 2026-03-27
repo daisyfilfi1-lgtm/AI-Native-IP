@@ -328,7 +328,7 @@ async def extract_competitor_text_for_remix(url: str) -> str:
 async def fetch_douyin_high_play_hot_list(
     page: int = 1,
     page_size: int = 12,
-    date_window: int = 2,
+    date_window: int = 1,  # 修改为 1，TikHub 高播榜只接受 date_window=1
 ) -> Any:
     """
     抖音热榜 · 高播榜（用于推荐选题）。

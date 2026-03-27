@@ -30,6 +30,7 @@ from app.routers import (
     style,
     vector,
     remix,
+    topic_recommendation,
 )
 from app.middleware.auth import verify_api_key_or_jwt
 
@@ -165,6 +166,7 @@ def create_app() -> FastAPI:
     app.include_router(strategy_agent.router, prefix="/api/v1", tags=["strategy"], dependencies=api_key_dep)
     app.include_router(style.router, prefix="/api/v1", tags=["style"], dependencies=api_key_dep)
     app.include_router(remix.router, prefix="/api/v1", tags=["remix"], dependencies=api_key_dep)
+    app.include_router(topic_recommendation.router, prefix="/api/v1", tags=["topic"], dependencies=api_key_dep)
     app.include_router(creator.router, prefix="/api", tags=["creator"], dependencies=api_key_dep)
 
     return app

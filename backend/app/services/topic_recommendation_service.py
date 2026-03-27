@@ -3,8 +3,13 @@
 """
 import os
 import re
+import logging
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+
+from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 
@@ -181,17 +186,17 @@ async def _fetch_tikhub_topics(keywords: List[str], limit: int) -> List[Dict]:
         from app.services import tikhub_client
         
         api_key = os.environ.get("TIKHUB_API_KEY", "")
-        print(f"DEBUG: TIKHUB_API_KEY length = {len(api_key)}")
+        logger.info(f"DEBUG: TIKHUB_API_KEY length = {len(api_key)}")
         
         if not api_key:
-            print("DEBUG: TIKHUB_API_KEY not found in env")
+            logger.info("DEBUG: TIKHUB_API_KEY not found in env")
             return []
         
         if not tikhub_client.is_configured():
-            print("DEBUG: tikhub_client.is_configured() = False")
+            logger.info("DEBUG: tikhub_client.is_configured() = False")
             return []
         
-        print("DEBUG: TIKHUB configured, fetching data...")
+        logger.info("DEBUG: TIKHUB configured, fetching data...")
         
         # 1. 获取抖音低粉爆款榜 (<10万粉, >1万赞)
         raw = await tikhub_client.fetch_douyin_low_fan_hot_list(

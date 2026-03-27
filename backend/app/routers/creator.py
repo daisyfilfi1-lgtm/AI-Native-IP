@@ -372,7 +372,16 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
     keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
     if not keywords:
         return topics
-    return [t for t in topics if _topic_hit_whitelist(t, keywords)]
+    filtered = [t for t in topics if _topic_hit_whitelist(t, keywords)]
+    if filtered:
+        return filtered
+    # 当白名单过严导致“全灭”时，退回原候选，避免把动态推荐完全降级为静态占位。
+    logger.warning(
+        "IP 白名单未命中任何候选，降级为不过滤返回，ip_id=%s, keywords=%s",
+        ip_id,
+        keywords,
+    )
+    return topics
 
 
 def _workflow_title(wf: Optional[dict]) -> str:

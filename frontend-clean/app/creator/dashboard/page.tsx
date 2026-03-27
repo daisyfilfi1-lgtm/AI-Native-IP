@@ -41,6 +41,7 @@ import Link from 'next/link';
 
 /** 接口仍要求 style 字段；生成侧以 IP 风格画像为准 */
 const DEFAULT_WORKFLOW_STYLE: StyleType = 'angry';
+const CREATOR_IP_ID = process.env.NEXT_PUBLIC_CREATOR_IP_ID || 'xiaomin1';
 
 // Agent配置状态组件
 function AgentStatusCard({ 
@@ -236,7 +237,7 @@ export default function CreatorDashboardPage() {
   const loadRemixRecommendations = useCallback(async () => {
     setRemixRecLoading(true);
     try {
-      const items = await creatorApi.getRemixRecommendations('1');
+      const items = await creatorApi.getRemixRecommendations(CREATOR_IP_ID);
       setRemixRecs(items);
     } catch (e) {
       console.error('Remix recommendations failed:', e);
@@ -270,7 +271,7 @@ export default function CreatorDashboardPage() {
   const loadData = async () => {
     try {
       const [topicsData, statusData] = await Promise.all([
-        creatorApi.getRecommendedTopics(),
+        creatorApi.getRecommendedTopics(CREATOR_IP_ID),
         creatorApi.getAgentConfigStatus()
       ]);
       setTopics(topicsData);
@@ -286,7 +287,12 @@ export default function CreatorDashboardPage() {
   const handleGenerateFromTopic = async (topic: TopicCard) => {
     setGeneratingTopicId(topic.id);
     try {
-      const result = await creatorApi.generateFromTopic(topic.id, topic.title, DEFAULT_WORKFLOW_STYLE);
+      const result = await creatorApi.generateFromTopic(
+        topic.id,
+        topic.title,
+        DEFAULT_WORKFLOW_STYLE,
+        CREATOR_IP_ID
+      );
       router.push(`/creator/generate?id=${result.id}&type=topic`);
     } catch (error) {
       console.error('Generate failed:', error);
@@ -299,7 +305,7 @@ export default function CreatorDashboardPage() {
     if (!remixUrl.trim()) return;
     setIsRemixing(true);
     try {
-      const result = await creatorApi.generateFromRemix(remixUrl, DEFAULT_WORKFLOW_STYLE);
+      const result = await creatorApi.generateFromRemix(remixUrl, DEFAULT_WORKFLOW_STYLE, CREATOR_IP_ID);
       router.push(`/creator/generate?id=${result.id}&type=remix`);
     } catch (error) {
       console.error('Remix failed:', error);
@@ -314,6 +320,7 @@ export default function CreatorDashboardPage() {
     try {
       // 调用工业化爆款生产流水线
       const result = await creatorApi.generateViralOriginal({
+        ipId: CREATOR_IP_ID,
         input: viralText,
         inputMode: viralInputMode,
         scriptTemplate: viralConfig.scriptTemplate,

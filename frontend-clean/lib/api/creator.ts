@@ -305,7 +305,7 @@ export const creatorApi = {
   },
 
   /** 仿写 Tab：抖音低粉爆款（关键词匹配）+ 可选小红书话题笔记 */
-  async getRemixRecommendations(ipId: string = '1'): Promise<RemixRecommendationItem[]> {
+  async getRemixRecommendations(ipId: string = 'xiaomin1'): Promise<RemixRecommendationItem[]> {
     if (USE_MOCK) {
       await new Promise((r) => setTimeout(r, 400));
       return [
@@ -324,26 +324,35 @@ export const creatorApi = {
   },
 
   // ===== 场景一：推荐选题 =====
-  async getRecommendedTopics(): Promise<TopicCard[]> {
+  async getRecommendedTopics(ipId: string = 'xiaomin1'): Promise<TopicCard[]> {
     if (USE_MOCK) {
       return mockTopics;
     }
-    const resp = await apiFetch<{ topics: TopicCard[] }>('/api/creator/topics/recommended');
+    const resp = await apiFetch<{ topics: TopicCard[] }>(
+      `/api/creator/topics/recommended?ipId=${encodeURIComponent(ipId)}`
+    );
     return resp.topics || [];
   },
 
-  async refreshTopics(): Promise<TopicCard[]> {
+  async refreshTopics(ipId: string = 'xiaomin1'): Promise<TopicCard[]> {
     if (USE_MOCK) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       return [...mockTopics].sort(() => Math.random() - 0.5);
     }
-    const resp = await apiFetch<{ topics: TopicCard[] }>('/api/creator/topics/refresh');
+    const resp = await apiFetch<{ topics: TopicCard[] }>(
+      `/api/creator/topics/refresh?ipId=${encodeURIComponent(ipId)}`
+    );
     return resp.topics || [];
   },
 
   // 场景一第二步：选中推荐选题后生成正文
-  async generateFromTopic(topicId: string, topicTitle: string, style: StyleType): Promise<GenerateResult> {
-    console.log('[API] Generate from topic:', { topicId, topicTitle, style });
+  async generateFromTopic(
+    topicId: string,
+    topicTitle: string,
+    style: StyleType,
+    ipId: string = 'xiaomin1'
+  ): Promise<GenerateResult> {
+    console.log('[API] Generate from topic:', { topicId, topicTitle, style, ipId });
     
     if (USE_MOCK) {
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -357,13 +366,13 @@ export const creatorApi = {
     
     return apiFetch('/api/creator/generate/topic', {
       method: 'POST',
-      body: JSON.stringify({ topicId, topicTitle, style })
+      body: JSON.stringify({ topicId, topicTitle, style, ipId })
     });
   },
 
   // ===== 场景二：仿写爆款 =====
-  async generateFromRemix(url: string, style: StyleType): Promise<GenerateResult> {
-    console.log('[API] Generate from remix:', { url, style });
+  async generateFromRemix(url: string, style: StyleType, ipId: string = 'xiaomin1'): Promise<GenerateResult> {
+    console.log('[API] Generate from remix:', { url, style, ipId });
     
     if (USE_MOCK) {
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -377,7 +386,7 @@ export const creatorApi = {
     
     return apiFetch('/api/creator/generate/remix', {
       method: 'POST',
-      body: JSON.stringify({ url, style })
+      body: JSON.stringify({ url, style, ipId })
     });
   },
 
@@ -414,6 +423,7 @@ export const creatorApi = {
     viralElements: string[];
     targetDuration: number;
     style: StyleType;
+    ipId?: string;
     customScriptHint?: string;
   }): Promise<GenerateResult> {
     console.log('[API] Generate viral original:', params);

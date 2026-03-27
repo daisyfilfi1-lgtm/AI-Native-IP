@@ -2399,3 +2399,32 @@ async def test_debug_core():
         "core_keywords": _XIAOMIN_CORE_KEYWORDS,
         "results": results,
     }
+
+
+# === 检查重排后的数据结构 ===
+@router.get("/test/rerank-structure")
+async def test_rerank_structure(ipId: str = Query("xiaomin1"), db: Session = Depends(get_db)):
+    """检查四维重排后的数据结构"""
+    from app.services import multi_source_client
+    
+    # 1. 获取多数据源
+    cards = await multi_source_client.get_multi_source_topics(limit=5)
+    
+    # 2. 获取IP画像
+    ip_profile = get_ip_profile(db, ipId) or {}
+    weights = _resolve_topic_weights(db, ipId)
+    
+    # 3. 四维重排
+    ranked_cards = _rerank_tikhub_candidates(
+        cards=cards, ip_profile=ip_profile, limit=12, weights=weights
+    )
+    
+    return {
+        "input_count": len(cards),
+        "output_count": len(ranked_cards),
+        "first_card_keys": list(ranked_cards[0].keys()) if ranked_cards else [],
+        "first_card": {
+            "title": ranked_cards[0].get("title")[:40] if ranked_cards else None,
+            "originalTitle": ranked_cards[0].get("originalTitle")[:40] if ranked_cards else None,
+        } if ranked_cards else None,
+    }

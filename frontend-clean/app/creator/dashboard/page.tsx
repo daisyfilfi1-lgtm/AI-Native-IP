@@ -255,7 +255,7 @@ export default function CreatorDashboardPage() {
   const [viralConfig, setViralConfig] = useState({
     scriptTemplate: 'opinion', // opinion | process | knowledge | story | custom
     customScriptHint: '',
-    viralElements: ['cost', 'crowd'], // 选中的爆款元素
+    viralElements: ['auto'], // 默认系统自动配置
     targetDuration: 60, // 目标时长（秒）
   });
 
@@ -318,13 +318,16 @@ export default function CreatorDashboardPage() {
     if (!viralText.trim()) return;
     setIsGeneratingViral(true);
     try {
+      const useAutoElements =
+        viralConfig.viralElements.includes('auto') ||
+        viralConfig.viralElements.includes('system_auto');
       // 调用工业化爆款生产流水线
       const result = await creatorApi.generateViralOriginal({
         ipId: CREATOR_IP_ID,
         input: viralText,
         inputMode: viralInputMode,
         scriptTemplate: viralConfig.scriptTemplate,
-        viralElements: viralConfig.viralElements,
+        viralElements: useAutoElements ? ['auto'] : viralConfig.viralElements,
         targetDuration: viralConfig.targetDuration,
         style: DEFAULT_WORKFLOW_STYLE,
         customScriptHint:
@@ -646,7 +649,7 @@ export default function CreatorDashboardPage() {
                     <Badge variant="success" size="sm">专业级</Badge>
                   </div>
                   <p className="text-sm text-foreground-secondary">
-                    说出你的想法，AI将使用<span className="text-orange-400">八大爆款元素</span>和<span className="text-orange-400">四大脚本模板</span>，
+                    说出你的想法，AI将使用<span className="text-orange-400">八大爆款元素</span>和<span className="text-orange-400">自动结构路由</span>，
                     通过7步精加工，为你生成原创爆款。专业级工业化内容生产系统。
                   </p>
                 </div>
@@ -735,14 +738,14 @@ export default function CreatorDashboardPage() {
 
                   {/* 脚本模板选择 */}
                   <div>
-                    <label className="block text-xs text-foreground-secondary mb-2">脚本模板（四大黄金 + 自定义）</label>
+                    <label className="block text-xs text-foreground-secondary mb-2">脚本模板（四大模板 + 自由创作）</label>
                     <div className="grid grid-cols-2 gap-2">
                       {[
                         { id: 'opinion', name: '说观点', desc: '吸真粉/高互动', icon: Lightbulb },
                         { id: 'process', name: '晒过程', desc: '强转化/近变现', icon: RefreshCw },
                         { id: 'knowledge', name: '教知识', desc: '精准粉/高客单', icon: Brain },
                         { id: 'story', name: '讲故事', desc: '立人设/高信任', icon: FileText },
-                        { id: 'custom', name: '自定义', desc: '按你的结构/节奏', icon: Pencil },
+                        { id: 'custom', name: '自由创作', desc: '按话题自动策划结构', icon: Pencil },
                       ].map((template) => (
                         <button
                           key={template.id}
@@ -775,7 +778,7 @@ export default function CreatorDashboardPage() {
                           htmlFor="creator-clean-custom-script-hint"
                           className="block text-xs text-foreground-secondary mb-1"
                         >
-                          自定义结构说明（可选，越具体越好）
+                          高级可选：补充结构偏好（可不填，系统会自动策划）
                         </label>
                         <textarea
                           id="creator-clean-custom-script-hint"
@@ -787,7 +790,7 @@ export default function CreatorDashboardPage() {
                               customScriptHint: e.target.value,
                             }))
                           }
-                          placeholder="例如：0-5s 反问钩子 → 5-25s 讲失败经历 → 25-45s 三条可抄作业 → 45-60s 引导评论"
+                          placeholder="可选，例如：先讲失败经历，再给三条步骤，结尾引导评论"
                           rows={3}
                           className="w-full p-3 bg-background-elevated border border-border rounded-lg text-sm text-foreground placeholder:text-foreground-muted resize-none focus:outline-none focus:border-primary-500/50"
                         />
@@ -797,7 +800,31 @@ export default function CreatorDashboardPage() {
 
                   {/* 爆款元素选择 */}
                   <div>
-                    <label className="block text-xs text-foreground-secondary mb-2">八大爆款元素（至少选2个）</label>
+                    <label className="block text-xs text-foreground-secondary mb-2">八大爆款元素（默认系统自动，可手动改）</label>
+                    <div className="mb-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViralConfig((prev) => ({
+                            ...prev,
+                            viralElements:
+                              prev.viralElements.includes('auto') || prev.viralElements.includes('system_auto')
+                                ? []
+                                : ['auto'],
+                          }))
+                        }
+                        className={cn(
+                          'px-2 py-1 rounded-md text-xs border transition-all',
+                          viralConfig.viralElements.includes('auto') || viralConfig.viralElements.includes('system_auto')
+                            ? 'border-orange-500 bg-orange-500/10 text-orange-300'
+                            : 'border-border text-foreground-secondary hover:border-border-hover'
+                        )}
+                      >
+                        {viralConfig.viralElements.includes('auto') || viralConfig.viralElements.includes('system_auto')
+                          ? '系统自动配置：开启'
+                          : '系统自动配置：关闭'}
+                      </button>
+                    </div>
                     <div className="flex flex-wrap gap-2">
                       {[
                         { id: 'cost', name: '成本', emoji: '💰' },
@@ -815,8 +842,8 @@ export default function CreatorDashboardPage() {
                             setViralConfig(prev => ({
                               ...prev,
                               viralElements: prev.viralElements.includes(element.id)
-                                ? prev.viralElements.filter(e => e !== element.id)
-                                : [...prev.viralElements, element.id]
+                                ? prev.viralElements.filter(e => e !== element.id && e !== 'auto' && e !== 'system_auto')
+                                : [...prev.viralElements.filter(e => e !== 'auto' && e !== 'system_auto'), element.id]
                             }));
                           }}
                           className={cn(
@@ -875,12 +902,19 @@ export default function CreatorDashboardPage() {
                   leftIcon={isGeneratingViral ? <Loader2 className="w-5 h-5 animate-spin" /> : <Flame className="w-5 h-5" />}
                   onClick={handleViralGenerate}
                   isLoading={isGeneratingViral}
-                  disabled={!viralText.trim() || isGeneratingViral || viralConfig.viralElements.length < 2}
+                  disabled={
+                    !viralText.trim() ||
+                    isGeneratingViral ||
+                    (
+                      !(viralConfig.viralElements.includes('auto') || viralConfig.viralElements.includes('system_auto')) &&
+                      viralConfig.viralElements.length < 2
+                    )
+                  }
                 >
                   {isGeneratingViral ? '工业化流水线加工中...' : '生成爆款原创'}
                 </Button>
 
-                {viralConfig.viralElements.length < 2 && (
+                {!(viralConfig.viralElements.includes('auto') || viralConfig.viralElements.includes('system_auto')) && viralConfig.viralElements.length < 2 && (
                   <p className="text-xs text-accent-yellow text-center">
                     请至少选择2个爆款元素，以确保内容的爆款潜力
                   </p>

@@ -836,15 +836,41 @@ def _build_scenario_three_request(
     )
 
 
+def _auto_pick_script_template(topic_text: str) -> str:
+    """
+    当用户选择“自由创作(custom)”且未给结构提示时，
+    按话题语义自动路由到最合适的模板。
+    """
+    text = (topic_text or "").strip()
+    if not text:
+        return "opinion"
+    t = text.lower()
+    if any(k in t for k in ["故事", "经历", "从", "逆袭", "翻身", "踩坑", "低谷"]):
+        return "story"
+    if any(k in t for k in ["如何", "怎么", "方法", "步骤", "教程", "避坑", "清单"]):
+        return "knowledge"
+    if any(k in t for k in ["过程", "一天", "记录", "实操", "复盘", "开店", "上手"]):
+        return "process"
+    return "opinion"
+
+
 @router.post("/generate/viral")
 async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depends(get_db)):
     """场景三：爆款原创"""
     try:
+        requested_template = req.scriptTemplate or "opinion"
+        custom_hint = (req.customScriptHint or "").strip()
+        resolved_template = requested_template
+        auto_template_routing = ""
+        if requested_template == "custom" and not custom_hint:
+            resolved_template = _auto_pick_script_template(req.input or "")
+            auto_template_routing = f"custom->auto:{resolved_template}"
+
         request = _build_scenario_three_request(
             db,
             ip_id=req.ipId or "1",
             input_text=req.input,
-            script_template=req.scriptTemplate or "opinion",
+            script_template=resolved_template,
             viral_elements=req.viralElements or [],
             target_duration=int(req.targetDuration or 60),
             custom_script_hint=req.customScriptHint,
@@ -855,9 +881,10 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
         draft_id = f"gen_viral_{uuid.uuid4().hex[:10]}"
         viral_wf: Dict[str, Any] = {
             "viralElements": resolve_viral_elements(
-                req.scriptTemplate or "opinion", req.viralElements or []
+                resolved_template, req.viralElements or []
             ),
-            "scriptTemplate": req.scriptTemplate or "",
+            "scriptTemplate": requested_template,
+            "resolvedScriptTemplate": resolved_template,
             "inputMode": req.inputMode or "text",
             "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
             "elementConfigMode": (
@@ -870,6 +897,8 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
         _h = (req.customScriptHint or "").strip()
         if _h:
             viral_wf["customScriptHint"] = _h[:2000]
+        if auto_template_routing:
+            viral_wf["autoTemplateRouting"] = auto_template_routing
         _save_generated_draft(
             db,
             draft_id=draft_id,
@@ -915,11 +944,19 @@ class OriginalGenerateRequest(BaseModel):
 async def generate_from_original(req: OriginalGenerateRequest, db: Session = Depends(get_db)):
     """场景三：爆款原创（支持文本/语音输入；voice 路由兼容保留）"""
     try:
+        requested_template = req.scriptTemplate or "opinion"
+        custom_hint = (req.customScriptHint or "").strip()
+        resolved_template = requested_template
+        auto_template_routing = ""
+        if requested_template == "custom" and not custom_hint:
+            resolved_template = _auto_pick_script_template(req.text or "")
+            auto_template_routing = f"custom->auto:{resolved_template}"
+
         request = _build_scenario_three_request(
             db,
             ip_id=req.ipId or "1",
             input_text=req.text.strip(),
-            script_template=req.scriptTemplate or "opinion",
+            script_template=resolved_template,
             viral_elements=req.viralElements or [],
             target_duration=int(req.targetDuration or 60),
             custom_script_hint=req.customScriptHint,
@@ -928,9 +965,10 @@ async def generate_from_original(req: OriginalGenerateRequest, db: Session = Dep
         draft_id = f"gen_original_{uuid.uuid4().hex[:10]}"
         original_wf: Dict[str, Any] = {
             "viralElements": resolve_viral_elements(
-                req.scriptTemplate or "opinion", req.viralElements or []
+                resolved_template, req.viralElements or []
             ),
-            "scriptTemplate": req.scriptTemplate or "opinion",
+            "scriptTemplate": requested_template,
+            "resolvedScriptTemplate": resolved_template,
             "inputMode": "voice",
             "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
             "elementConfigMode": (
@@ -943,6 +981,8 @@ async def generate_from_original(req: OriginalGenerateRequest, db: Session = Dep
         _oh = (req.customScriptHint or "").strip()
         if _oh:
             original_wf["customScriptHint"] = _oh[:2000]
+        if auto_template_routing:
+            original_wf["autoTemplateRouting"] = auto_template_routing
         _save_generated_draft(
             db,
             draft_id=draft_id,

@@ -25,6 +25,7 @@ from app.services.content_scenario import (
     ScenarioThreeRequest,
 )
 from app.services import remix_recommendation_service, tikhub_client, douyin_hot_hub_client
+from app.services.semantic_topic_filter import filter_topics_by_similarity
 from app.services.style_corpus_service import StyleCorpusService
 from app.services.strategy_config_service import get_merged_config
 
@@ -419,25 +420,43 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
             topics = blocked_filtered
         else:
             logger.warning(
-                "IP 话题候选全部命中屏蔽词，返回空并继续降级，ip_id=%s, blocklist=%s",
+                "IP topics blocked by blocklist, ip_id=%s, blocklist=%s",
                 ip_id,
                 blocklist,
             )
             return []
 
     keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
-    if not keywords:
-        return topics
-    filtered = [t for t in topics if _topic_hit_whitelist(t, keywords)]
-    if filtered:
-        return filtered
-
-    # No match - don't do fake adaptation, just return empty
+    
+    # 先尝试关键词匹配
+    if keywords:
+        filtered = [t for t in topics if _topic_hit_whitelist(t, keywords)]
+        if filtered:
+            logger.info(f"Keyword matched {len(filtered)} topics")
+            return filtered
+    
+    # 关键词没匹配时，使用语义相似度过滤
+    # 获取IP配置
+    ip_config = _IP_DATA_CACHE.get(ip_id)
+    if ip_config:
+        # 使用语义过滤，相似度阈值0.35
+        semantic_filtered = filter_topics_by_similarity(
+            topics=topics,
+            ip_data=ip_config,
+            threshold=0.35
+        )
+        
+        if semantic_filtered:
+            logger.info(f"Semantic filter matched {len(semantic_filtered)} topics")
+            # 标记数据来源
+            for t in semantic_filtered:
+                t['filter_method'] = 'semantic'
+            return semantic_filtered
+    
+    # 都没有匹配，返回空
     logger.warning(
-        "No topics match IP whitelist, ip_id=%s, keywords=%s, topics_count=%s",
+        "No topics match IP (keyword or semantic), ip_id=%s",
         ip_id,
-        keywords,
-        len(topics),
     )
     return []
 

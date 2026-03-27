@@ -179,8 +179,15 @@ async def _fetch_tikhub_topics(keywords: List[str], limit: int) -> List[Dict]:
     try:
         from app.services import tikhub_client
         
-        if not tikhub_client.is_configured():
+        # Debug: Check if configured
+        is_cfg = tikhub_client.is_configured()
+        print(f"TIKHUB is_configured: {is_cfg}")
+        
+        if not is_cfg:
+            print("TIKHUB not configured, returning empty")
             return []
+        
+        print("Fetching from TIKHUB...")
         
         # 1. 获取抖音低粉爆款榜 (<10万粉, >1万赞)
         raw = await tikhub_client.fetch_douyin_low_fan_hot_list(

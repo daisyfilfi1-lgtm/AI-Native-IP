@@ -397,6 +397,23 @@ def extract_video_text_for_remix(data: Any) -> str:
     return text[:12000]
 
 
+def _get_nested_str(item: Any, key: str) -> Optional[str]:
+    """从嵌套字典中获取字符串值"""
+    if not isinstance(item, dict):
+        return None
+    val = item.get(key)
+    if isinstance(val, str) and val.strip():
+        return val.strip()
+    # 尝试从嵌套结构获取
+    for nested_key in ("aweme_detail", "video", "item", "data"):
+        nested = item.get(nested_key)
+        if isinstance(nested, dict):
+            nested_val = nested.get(key)
+            if isinstance(nested_val, str) and nested_val.strip():
+                return nested_val.strip()
+    return None
+
+
 def _score_from_item(item: Any, idx: int) -> float:
     if not isinstance(item, dict):
         return round(4.5 + min(0.45, idx * 0.02), 2)
@@ -480,15 +497,30 @@ def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]
         if key in seen:
             continue
         seen.add(key)
+        
+        # 构建抖音搜索链接作为sourceUrl
+        aweme_id = _get_nested_str(item, "aweme_id") or ""
+        share_url = _get_nested_str(item, "share_url") or ""
+        if aweme_id:
+            source_url = f"https://www.douyin.com/video/{aweme_id}"
+        elif share_url:
+            source_url = share_url
+        else:
+            # 使用标题构建搜索链接
+            search_query = title[:20].replace(" ", "").replace("?", "").replace("？", "")
+            source_url = f"https://www.douyin.com/search/{search_query}"
+        
         out.append(
             {
                 "id": str(len(out) + 1),
                 "title": title,
+                "originalTitle": title,  # 保留原标题
                 "score": _score_from_item(item, len(out)),
                 "tags": _tags_from_item(item) or ["抖音", "热榜"],
                 "reason": "抖音高播放量热榜（TikHub）",
                 "estimatedViews": "—",
                 "estimatedCompletion": 0,
+                "sourceUrl": source_url,  # 添加原链接
             }
         )
     return out

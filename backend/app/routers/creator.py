@@ -236,10 +236,14 @@ def _rerank_tikhub_candidates(
         competition = max(0.0, min(1.0, 1.0 - hotness * 0.5))
         conversion = _calc_conversion_for_candidate(title, tags)
         total = relevance * wr + hotness * wh + competition * wc + conversion * wv
+        # 保留原标题（用于前端展示）
+        original_title = str(card.get("originalTitle") or card.get("original_title") or title)
+        
         ranked.append(
             {
                 "id": str(card.get("id") or f"topic_{idx:03d}"),
                 "title": title,
+                "originalTitle": original_title,  # 添加原标题
                 "score": round(total * 5.0, 2),
                 "tags": tags,
                 "estimatedViews": str(card.get("estimatedViews") or "-"),

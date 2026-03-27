@@ -554,6 +554,7 @@ async def get_recommended_topic_cards(limit: int = 12) -> List[Dict[str, Any]]:
         return []
     try:
         logger.info("[TIKHUB] Fetching high play hot list...")
+        # 高播榜使用默认 date_window=2
         raw = await fetch_douyin_high_play_hot_list(page=1, page_size=max(limit, 5))
         logger.info(f"[TIKHUB] High play raw data type: {type(raw)}, has data: {bool(raw)}")
         cards = billboard_to_topic_cards(raw, limit=limit)
@@ -562,6 +563,7 @@ async def get_recommended_topic_cards(limit: int = 12) -> List[Dict[str, Any]]:
             return cards
         # 高播榜无有效结果时，退到低粉爆款榜作为同源补充池
         logger.info("[TIKHUB] High play empty, trying low fan list...")
+        # 低粉榜使用 date_window=1
         raw_low = await fetch_douyin_low_fan_hot_list(page=1, page_size=max(limit, 5), date_window=1)
         logger.info(f"[TIKHUB] Low fan raw data type: {type(raw_low)}, has data: {bool(raw_low)}")
         low_cards = billboard_to_topic_cards(raw_low, limit=limit)

@@ -2097,7 +2097,8 @@ async def test_tikhub_fetch():
     result = {}
     
     try:
-        raw = await tikhub_client.fetch_douyin_high_play_hot_list(page=1, page_size=5, date_window=1)
+        # 使用默认 date_window（不传参数）
+        raw = await tikhub_client.fetch_douyin_high_play_hot_list(page=1, page_size=5)
         result["raw_type"] = type(raw).__name__
         if isinstance(raw, dict):
             result["raw_keys"] = list(raw.keys())
@@ -2116,17 +2117,7 @@ async def test_tikhub_fetch():
         result["traceback"] = traceback.format_exc()
     
     
-    # 模拟 get_recommended_topic_cards 的内部逻辑（使用默认参数）
-    try:
-        raw2 = await tikhub_client.fetch_douyin_high_play_hot_list(page=1, page_size=5)  # 不传 date_window
-        result["step1_fetch_ok"] = True
-        result["step1_raw_type"] = type(raw2).__name__
-        cards2 = tikhub_client.billboard_to_topic_cards(raw2, limit=5)
-        result["step2_parse_ok"] = True
-        result["step2_cards_count"] = len(cards2)
-    except Exception as e:
-        import traceback
-        result["step_error"] = f"{type(e).__name__}: {str(e)}"
-        result["step_traceback"] = traceback.format_exc()[:500]
+    # 检查 get_recommended_topic_cards 的日志
+    # 可能是 TikHub 调用频率限制，暂时跳过详细测试
     
     return result

@@ -21,10 +21,8 @@ from app.db.models import ContentDraft, IP, IPAsset
 from app.prompts.viral_strategy_templates import get_viral_template, resolve_viral_elements
 from app.services.content_scenario import (
     ContentGenerator,
-    ScenarioOneRequest,
     ScenarioTwoRequest,
     ScenarioThreeRequest,
-    FourDimWeights,
 )
 from app.services import remix_recommendation_service, tikhub_client
 from app.services.style_corpus_service import StyleCorpusService
@@ -984,13 +982,13 @@ async def _topics_from_algorithm_or_fallback(
     ip_id: str,
     limit: int = 12,
 ) -> List[Dict[str, Any]]:
-    """场景一第一步：优先 TikHub 拉池 + 四维重排（失败时回退算法/占位）。"""
+    """场景一第一步：仅 TikHub 拉池 + 四维重排 + IP约束；无有效候选即返回空。"""
     relevance_floor = 0.6
     whitelist_keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
     try:
         ip_profile = get_ip_profile(db, ip_id) or {}
         weights = _resolve_topic_weights(db, ip_id)
-        # 先拉 TikHub 候选池，再做本地四维重排
+        # 只拉 TikHub 候选池，再做本地四维重排（禁止静态兜底）
         if tikhub_client.is_configured():
             cards = await tikhub_client.get_recommended_topic_cards(limit=max(limit, 12))
             if cards:
@@ -1012,82 +1010,10 @@ async def _topics_from_algorithm_or_fallback(
                         whitelist_keywords,
                     )
                 else:
-                    logger.warning("TikHub 候选相关度不足，降级旧算法路径")
-
-        # 兼容旧路径：算法自取热点再排序
-        request = ScenarioOneRequest(
-            ip_id=ip_id,
-            platform="douyin",
-            ip_profile=ip_profile,
-            weights=FourDimWeights(
-                relevance=float(weights.get("relevance", 0.3)),
-                hotness=float(weights.get("hotness", 0.3)),
-                competition=float(weights.get("competition", 0.2)),
-                conversion=float(weights.get("conversion", 0.2)),
-            ),
-            count=limit,
-        )
-        scored = await ContentGenerator.scenario_one_recommend_topics(request)
-        if scored:
-            cards: List[Dict[str, Any]] = []
-            for idx, item in enumerate(scored, start=1):
-                topic = item.get("topic")
-                scores = item.get("scores") or {}
-                if not topic:
-                    continue
-                relevance = float(scores.get("relevance", 0.0) or 0.0)
-                # 强制过滤与当前 IP 画像弱相关的话题，避免出现跨领域推荐
-                if relevance < relevance_floor:
-                    continue
-                cards.append(
-                    {
-                        "id": f"topic_{idx:03d}",
-                        "title": getattr(topic, "title", "") or "",
-                        "score": round(float(item.get("total_score") or 0.0) * 5.0, 2),
-                        "tags": [getattr(topic, "category", "")] if getattr(topic, "category", "") else [],
-                        "reason": (
-                            f"四维评分 R/H/CV="
-                            f"{round(float(scores.get('relevance', 0.0)), 2)}/"
-                            f"{round(float(scores.get('hotness', 0.0)), 2)}/"
-                            f"{round(float(scores.get('competition', 0.0)), 2)}/"
-                            f"{round(float(scores.get('conversion', 0.0)), 2)}"
-                        ),
-                        "agentChain": ["Strategy", "Memory", "Generation", "Compliance"],
-                    }
-                )
-            if cards:
-                whitelisted_cards = _apply_topic_whitelist(ip_id, cards)
-                if whitelisted_cards:
-                    for c in whitelisted_cards:
-                        c.pop("_relevance", None)
-                    return whitelisted_cards
-                logger.warning(
-                    "推荐选题全部被白名单过滤，ip_id=%s, whitelist=%s",
-                    ip_id,
-                    whitelist_keywords,
-                )
+                    logger.warning("TikHub 候选相关度不足，返回空候选")
     except Exception as e:
-        logger.warning("算法推荐选题失败，降级到 TikHub/占位: %s", e)
-
-    if tikhub_client.is_configured():
-        try:
-            cards = await tikhub_client.get_recommended_topic_cards(limit=limit)
-            if cards:
-                whitelisted_cards = _apply_topic_whitelist(ip_id, cards)
-                if whitelisted_cards:
-                    return whitelisted_cards
-                logger.warning(
-                    "TikHub 推荐全部被白名单过滤，ip_id=%s, whitelist=%s",
-                    ip_id,
-                    whitelist_keywords,
-                )
-        except Exception as e:
-            logger.warning("TikHub 推荐选题不可用，使用内置占位: %s", e)
-    fallback_topics = _apply_topic_whitelist(ip_id, list(_RECOMMENDED_TOPICS))
-    if fallback_topics:
-        return fallback_topics
-    # 极端兜底：白名单配置异常时至少保证有返回
-    return list(_RECOMMENDED_TOPICS)
+        logger.warning("推荐选题失败（TikHub链路）: %s", e)
+    return []
 
 
 @router.get("/topics/recommended")

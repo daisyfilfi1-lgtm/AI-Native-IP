@@ -60,6 +60,15 @@ def unwrap_response(resp: Dict[str, Any]) -> Any:
             return json.loads(s)
         except json.JSONDecodeError:
             return data
+    # 部分 TikHub 接口会在 data 内再包一层 code/message
+    if isinstance(data, dict) and "code" in data:
+        try:
+            inner_code = int(data.get("code"))
+        except (TypeError, ValueError):
+            inner_code = -1
+        if inner_code not in (0, 200):
+            msg = data.get("message_zh") or data.get("message") or str(data)
+            raise TikHubError(msg)
     return data
 
 
@@ -486,7 +495,7 @@ def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]
 
 
 async def get_recommended_topic_cards(limit: int = 12) -> List[Dict[str, Any]]:
-    """供创作端推荐选题：失败时返回空列表（由调用方回退静态数据）"""
+    """供创作端推荐选题：仅返回 TikHub 有效候选（失败时返回空）。"""
     if not is_configured():
         return []
     try:
@@ -494,6 +503,11 @@ async def get_recommended_topic_cards(limit: int = 12) -> List[Dict[str, Any]]:
         cards = billboard_to_topic_cards(raw, limit=limit)
         if cards:
             return cards
+        # 高播榜无有效结果时，退到低粉爆款榜作为同源补充池
+        raw_low = await fetch_douyin_low_fan_hot_list(page=1, page_size=max(limit, 5), date_window=1)
+        low_cards = billboard_to_topic_cards(raw_low, limit=limit)
+        if low_cards:
+            return low_cards
     except Exception as e:
         logger.warning("TikHub 推荐选题拉取失败: %s", e)
     return []

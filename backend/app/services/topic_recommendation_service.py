@@ -203,12 +203,17 @@ async def _fetch_tikhub_topics(keywords: List[str], limit: int) -> List[Dict]:
             raw = await tikhub_client.fetch_douyin_low_fan_hot_list(
                 page=1,
                 page_size=min(limit * 2, 30),
-                date_window=3,  # 近3天
+                date_window=3,
             )
-            logger.info(f"DEBUG: fetch_douyin_low_fan_hot_list returned type: {type(raw)}")
-            logger.info(f"DEBUG: fetch result keys: {raw.keys() if isinstance(raw, dict) else 'not dict'}")
+            logger.info(f"DEBUG: raw type = {type(raw)}")
+            if raw is None:
+                logger.info("DEBUG: raw is None, using empty list")
+                raw = []
+            elif isinstance(raw, dict):
+                logger.info(f"DEBUG: raw keys = {list(raw.keys())}")
         except Exception as e:
-            logger.info(f"DEBUG: fetch error: {e}")
+            logger.info(f"DEBUG: fetch exception = {e}")
+            raw = []
         
         items = tikhub_client.parse_low_fan_explosion_items(raw)
         

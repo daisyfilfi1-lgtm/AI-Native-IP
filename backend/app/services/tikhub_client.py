@@ -528,18 +528,28 @@ def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]
 
 async def get_recommended_topic_cards(limit: int = 12) -> List[Dict[str, Any]]:
     """供创作端推荐选题：仅返回 TikHub 有效候选（失败时返回空）。"""
-    if not is_configured():
+    configured = is_configured()
+    logger.info(f"[TIKHUB] is_configured: {configured}")
+    if not configured:
+        logger.warning("[TIKHUB] TIKHUB_API_KEY not configured, returning empty list")
         return []
     try:
+        logger.info("[TIKHUB] Fetching high play hot list...")
         raw = await fetch_douyin_high_play_hot_list(page=1, page_size=max(limit, 5))
+        logger.info(f"[TIKHUB] High play raw data type: {type(raw)}, has data: {bool(raw)}")
         cards = billboard_to_topic_cards(raw, limit=limit)
+        logger.info(f"[TIKHUB] High play cards count: {len(cards)}")
         if cards:
             return cards
         # 高播榜无有效结果时，退到低粉爆款榜作为同源补充池
+        logger.info("[TIKHUB] High play empty, trying low fan list...")
         raw_low = await fetch_douyin_low_fan_hot_list(page=1, page_size=max(limit, 5), date_window=1)
+        logger.info(f"[TIKHUB] Low fan raw data type: {type(raw_low)}, has data: {bool(raw_low)}")
         low_cards = billboard_to_topic_cards(raw_low, limit=limit)
+        logger.info(f"[TIKHUB] Low fan cards count: {len(low_cards)}")
         if low_cards:
             return low_cards
     except Exception as e:
-        logger.warning("TikHub 推荐选题拉取失败: %s", e)
+        logger.error(f"[TIKHUB] Error fetching from TikHub: {e}", exc_info=True)
+    logger.warning("[TIKHUB] All TikHub sources failed, returning empty list")
     return []

@@ -2030,3 +2030,59 @@ async def test_tikhub_flow(ipId: str = Query("xiaomin1")):
         result["error"] = f"{type(e).__name__}: {str(e)}"
     
     return result
+
+
+# === TikHub _request 级别测试 ===
+@router.get("/test/tikhub-request")
+async def test_tikhub_request():
+    """测试 TikHub _request 和 unwrap_response"""
+    from app.services import tikhub_client
+    import os
+    import httpx
+    
+    key = os.environ.get("TIKHUB_API_KEY", "").strip()
+    
+    result = {
+        "key_configured": bool(key),
+    }
+    
+    try:
+        headers = {"Authorization": f"Bearer {key}"}
+        payload = {"page": 1, "page_size": 5, "date_window": 1, "tags": []}
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # 直接调用 API
+            response = await client.post(
+                "https://api.tikhub.io/api/v1/douyin/billboard/fetch_hot_total_high_play_list",
+                headers=headers,
+                json=payload
+            )
+            
+            result["status_code"] = response.status_code
+            raw_json = response.json()
+            result["raw_code"] = raw_json.get("code")
+            
+            # 测试 unwrap_response
+            unwrapped = tikhub_client.unwrap_response(raw_json)
+            result["unwrapped_type"] = type(unwrapped).__name__
+            
+            if isinstance(unwrapped, dict):
+                result["unwrapped_keys"] = list(unwrapped.keys())
+                inner_data = unwrapped.get("data")
+                result["inner_data_type"] = type(inner_data).__name__
+                if isinstance(inner_data, dict):
+                    result["inner_data_keys"] = list(inner_data.keys())
+                    objs = inner_data.get("objs")
+                    result["objs_type"] = type(objs).__name__
+                    result["objs_length"] = len(objs) if isinstance(objs, list) else 0
+            
+            # 测试 billboard_to_topic_cards
+            cards = tikhub_client.billboard_to_topic_cards(unwrapped, limit=3)
+            result["cards_count"] = len(cards)
+            
+    except Exception as e:
+        import traceback
+        result["error"] = f"{type(e).__name__}: {str(e)}"
+        result["traceback"] = traceback.format_exc()
+    
+    return result

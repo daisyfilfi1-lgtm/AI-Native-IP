@@ -26,7 +26,7 @@ from app.services.content_scenario import (
     ScenarioTwoRequest,
     ScenarioThreeRequest,
 )
-from app.services import remix_recommendation_service, tikhub_client, douyin_hot_hub_client
+from app.services import remix_recommendation_service, tikhub_client, douyin_hot_hub_client, multi_source_client
 from app.services.semantic_topic_filter import filter_topics_by_similarity
 from app.services.style_corpus_service import StyleCorpusService
 from app.services.strategy_config_service import get_merged_config
@@ -1457,14 +1457,30 @@ async def _topics_from_algorithm_or_fallback(
     weights = _resolve_topic_weights(db, ip_id)
 
     cards: List[Dict[str, Any]] = []
+    
+    # 1. 优先使用多数据源聚合（小红书+快手+抖音）
     try:
-        if tikhub_client.is_configured():
-            cards = await tikhub_client.get_recommended_topic_cards(limit=max(limit, 12))
+        if multi_source_client.get_multi_source_client().is_configured():
+            logger.info("Using multi-source aggregation (Xiaohongshu + Kuaishou + Douyin)")
+            cards = await multi_source_client.get_multi_source_topics(limit=max(limit, 12))
+            if cards:
+                logger.info(f"Multi-source returned {len(cards)} cards")
     except Exception as e:
-        logger.warning("TikHub 拉取失败，切换到 douyin-hot-hub: %s", e)
-
+        logger.warning("Multi-source failed: %s", e)
+    
+    # 2. 多数据源失败时，回退到 TikHub 单一数据源
     if not cards:
         try:
+            if tikhub_client.is_configured():
+                logger.info("Falling back to TikHub single source")
+                cards = await tikhub_client.get_recommended_topic_cards(limit=max(limit, 12))
+        except Exception as e:
+            logger.warning("TikHub 拉取失败: %s", e)
+
+    # 3. 最后回退到 douyin-hot-hub
+    if not cards:
+        try:
+            logger.info("Falling back to douyin-hot-hub")
             cards = await douyin_hot_hub_client.get_recommended_topic_cards(limit=max(limit, 12))
         except Exception as e:
             logger.warning("douyin-hot-hub 拉取失败: %s", e)
@@ -2235,3 +2251,28 @@ async def test_whitelist(ipId: str = Query("xiaomin1"), db: Session = Depends(ge
         "output_count": len(filtered),
         "filter_methods": [t.get("filter_method") for t in filtered],
     }
+
+
+# === 多数据源测试 ===
+@router.get("/test/multi-source")
+async def test_multi_source(limit: int = Query(6, ge=1, le=20)):
+    """测试多数据源聚合"""
+    try:
+        cards = await multi_source_client.get_multi_source_topics(limit=limit)
+        return {
+            "total": len(cards),
+            "sources": list(set(c.get("platform") for c in cards)),
+            "topics": [
+                {
+                    "id": c.get("id"),
+                    "title": c.get("title"),
+                    "platform": c.get("platform"),
+                    "weight": c.get("weight"),
+                    "source": c.get("reason"),
+                }
+                for c in cards[:6]
+            ],
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}

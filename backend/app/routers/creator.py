@@ -4,11 +4,13 @@ Creator API Router
 """
 
 from datetime import datetime, timezone
+import json
 import logging
 import math
 import random
 import re
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -31,6 +33,7 @@ from app.services.strategy_config_service import get_merged_config
 
 router = APIRouter(prefix="/creator", tags=["creator"])
 logger = logging.getLogger(__name__)
+_DOUYIN_SNAPSHOT_FILE = Path(__file__).resolve().parents[1] / "services" / "data" / "douyin_hot_hub_snapshot.json"
 
 
 def get_ip_profile(db: Session, ip_id: str) -> Optional[Dict[str, Any]]:
@@ -1149,6 +1152,8 @@ async def get_recommended_topics(
     
     # 如果外部API都失败，使用算法兜底生成选题
     if not topics:
+        topics = _generate_hotlist_snapshot_topics(db, ipId, limit)
+    if not topics:
         topics = _generate_fallback_topics(db, ipId, limit)
     
     return {"topics": topics}
@@ -1164,6 +1169,8 @@ async def refresh_topics(
     topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
     
     # 如果外部API都失败，使用算法兜底
+    if not topics:
+        topics = _generate_hotlist_snapshot_topics(db, ipId, limit)
     if not topics:
         topics = _generate_fallback_topics(db, ipId, limit)
     else:
@@ -1223,6 +1230,30 @@ def _generate_fallback_topics(db: Session, ip_id: str, limit: int) -> List[Dict[
         })
     
     return topics
+
+
+def _generate_hotlist_snapshot_topics(db: Session, ip_id: str, limit: int) -> List[Dict[str, Any]]:
+    """
+    大数据兜底：在线热榜不可用时，使用内置 douyin 快照，避免退化为模板选题。
+    """
+    try:
+        if not _DOUYIN_SNAPSHOT_FILE.exists():
+            return []
+        obj = json.loads(_DOUYIN_SNAPSHOT_FILE.read_text(encoding="utf-8"))
+        cards = [c for c in (obj.get("cards") or []) if isinstance(c, dict)]
+        if not cards:
+            return []
+        ip_profile = get_ip_profile(db, ip_id) or {}
+        weights = _resolve_topic_weights(db, ip_id)
+        ranked = _rerank_tikhub_candidates(cards=cards, ip_profile=ip_profile, limit=limit, weights=weights)
+        out = _apply_topic_whitelist(ip_id, ranked)
+        for t in out:
+            t.pop("_relevance", None)
+            t["reason"] = f"{str(t.get('reason') or '')} + 快照兜底"
+        return out[:limit]
+    except Exception as e:
+        logger.warning("snapshot hotlist fallback failed: %s", e)
+        return []
 
 
 # === 内容库 ===

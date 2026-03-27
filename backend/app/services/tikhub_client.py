@@ -479,11 +479,20 @@ def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]
     if isinstance(data, list):
         items = data
     elif isinstance(data, dict):
+        # 首先尝试直接的列表键
         for k in ("list", "data", "items", "records", "aweme_list", "hot_list", "objs"):
             v = data.get(k)
             if isinstance(v, list):
                 items = v
                 break
+        # 如果还没找到，尝试嵌套的 data.data（TikHub 响应格式）
+        if not items and "data" in data and isinstance(data["data"], dict):
+            nested = data["data"]
+            for k in ("list", "data", "items", "records", "aweme_list", "hot_list", "objs"):
+                v = nested.get(k)
+                if isinstance(v, list):
+                    items = v
+                    break
 
     out: List[Dict[str, Any]] = []
     seen: set = set()

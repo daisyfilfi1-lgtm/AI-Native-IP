@@ -24,7 +24,7 @@ from app.services.content_scenario import (
     ScenarioTwoRequest,
     ScenarioThreeRequest,
 )
-from app.services import remix_recommendation_service, tikhub_client
+from app.services import remix_recommendation_service, tikhub_client, douyin_hot_hub_client
 from app.services.style_corpus_service import StyleCorpusService
 from app.services.strategy_config_service import get_merged_config
 
@@ -218,6 +218,7 @@ def _rerank_tikhub_candidates(
         if not title:
             continue
         tags = [str(x) for x in (card.get("tags") or []) if str(x).strip()]
+        source_reason = str(card.get("reason") or "").strip()
         base_score = float(card.get("score") or 0.0)
         hotness = max(0.0, min(1.0, base_score / 5.0))
         relevance = _calc_relevance_for_candidate(title=title, tags=tags, ip_profile=ip_profile)
@@ -231,7 +232,7 @@ def _rerank_tikhub_candidates(
                 "score": round(total * 5.0, 2),
                 "tags": tags,
                 "reason": (
-                    f"TikHub候选 + 四维重排 R/H/CV="
+                    f"{(source_reason or '大数据候选')} + 四维重排 R/H/CV="
                     f"{round(relevance, 2)}/{round(hotness, 2)}/"
                     f"{round(competition, 2)}/{round(conversion, 2)}"
                 ),
@@ -378,6 +379,38 @@ def _topic_hit_blocklist(topic: Dict[str, Any], keywords: List[str]) -> bool:
     return any(kw and kw in text for kw in keywords)
 
 
+def _adapt_topics_to_ip_angle(
+    *,
+    ip_id: str,
+    topics: List[Dict[str, Any]],
+    keywords: List[str],
+) -> List[Dict[str, Any]]:
+    """
+    当热点未直接命中 IP 白名单关键词时，做“热点 x IP 视角”改写，
+    保持大数据来源不丢失，同时让题目更贴近当前 IP 定位。
+    """
+    if not topics or not keywords:
+        return topics
+    k1 = keywords[0]
+    k2 = keywords[1] if len(keywords) > 1 else keywords[0]
+    out: List[Dict[str, Any]] = []
+    for t in topics:
+        title = str(t.get("title") or "").strip()
+        if not title:
+            continue
+        tags = [str(x).strip() for x in (t.get("tags") or []) if str(x).strip()]
+        merged_tags: List[str] = []
+        for x in tags + [k1, k2]:
+            if x and x not in merged_tags:
+                merged_tags.append(x)
+        nt = dict(t)
+        nt["title"] = f"{title}：从{k1}到{k2}的可复制打法"
+        nt["tags"] = merged_tags[:6]
+        nt["reason"] = f"热点迁移到IP定位（{ip_id}）+ {str(t.get('reason') or '大数据候选')}"
+        out.append(nt)
+    return out
+
+
 def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     blocklist = _IP_TOPIC_BLOCKLIST.get(ip_id) or []
     if blocklist:
@@ -399,12 +432,17 @@ def _apply_topic_whitelist(ip_id: str, topics: List[Dict[str, Any]]) -> List[Dic
     if filtered:
         return filtered
 
+    # 白名单未命中：执行“热点 x IP 视角”改写，确保结果符合该 IP 内容方向。
+    adapted = _adapt_topics_to_ip_angle(ip_id=ip_id, topics=topics, keywords=keywords)
+    if adapted:
+        return adapted
+
     logger.warning(
-        "IP 白名单未命中任何候选，返回空并继续降级，ip_id=%s, keywords=%s",
+        "IP 白名单未命中且无可改写候选，返回原候选，ip_id=%s, keywords=%s",
         ip_id,
         keywords,
     )
-    return []
+    return topics
 
 
 def _workflow_title(wf: Optional[dict]) -> str:
@@ -982,35 +1020,38 @@ async def _topics_from_algorithm_or_fallback(
     ip_id: str,
     limit: int = 12,
 ) -> List[Dict[str, Any]]:
-    """场景一第一步：仅 TikHub 拉池 + 四维重排 + IP约束；无有效候选即返回空。"""
+    """场景一第一步：大数据源拉池（TikHub -> douyin-hot-hub）+ 四维重排 + IP约束。"""
     relevance_floor = 0.6
     whitelist_keywords = _IP_TOPIC_WHITELIST.get(ip_id) or []
     try:
         ip_profile = get_ip_profile(db, ip_id) or {}
         weights = _resolve_topic_weights(db, ip_id)
-        # 只拉 TikHub 候选池，再做本地四维重排（禁止静态兜底）
+        cards: List[Dict[str, Any]] = []
         if tikhub_client.is_configured():
             cards = await tikhub_client.get_recommended_topic_cards(limit=max(limit, 12))
-            if cards:
-                ranked_cards = _rerank_tikhub_candidates(
-                    cards=cards, ip_profile=ip_profile, limit=limit, weights=weights
+        if not cards:
+            cards = await douyin_hot_hub_client.get_recommended_topic_cards(limit=max(limit, 12))
+
+        if cards:
+            ranked_cards = _rerank_tikhub_candidates(
+                cards=cards, ip_profile=ip_profile, limit=limit, weights=weights
+            )
+            filtered = [
+                c for c in ranked_cards if float(c.get("_relevance") or 0.0) >= relevance_floor
+            ]
+            if filtered:
+                whitelisted_cards = _apply_topic_whitelist(ip_id, filtered)
+                if whitelisted_cards:
+                    for c in whitelisted_cards:
+                        c.pop("_relevance", None)
+                    return whitelisted_cards
+                logger.warning(
+                    "大数据候选重排后全部被白名单过滤，ip_id=%s, whitelist=%s",
+                    ip_id,
+                    whitelist_keywords,
                 )
-                filtered = [
-                    c for c in ranked_cards if float(c.get("_relevance") or 0.0) >= relevance_floor
-                ]
-                if filtered:
-                    whitelisted_cards = _apply_topic_whitelist(ip_id, filtered)
-                    if whitelisted_cards:
-                        for c in whitelisted_cards:
-                            c.pop("_relevance", None)
-                        return whitelisted_cards
-                    logger.warning(
-                        "TikHub+重排推荐全部被白名单过滤，ip_id=%s, whitelist=%s",
-                        ip_id,
-                        whitelist_keywords,
-                    )
-                else:
-                    logger.warning("TikHub 候选相关度不足，返回空候选")
+            else:
+                logger.warning("大数据候选相关度不足，返回空候选")
     except Exception as e:
         logger.warning("推荐选题失败（TikHub链路）: %s", e)
     return []

@@ -1,5 +1,7 @@
 /** 手机号 + 验证码登录（JWT），与 backend /api/auth/sms/login 一致 */
 
+import { getAuthSmsLoginUrl } from '@/lib/apiBaseUrl';
+
 const TOKEN_KEY = 'ip_factory_auth_token';
 
 export function getStoredToken(): string | null {
@@ -25,7 +27,8 @@ export interface LoginResult {
  * 验证码填环境变量 OTP_BYPASS_CODE，默认 123456（不是「密码」字段，请求体字段名仍为 code）。
  */
 export async function loginWithSms(phone: string, code: string): Promise<LoginResult> {
-  const res = await fetch('/api/auth/sms/login', {
+  const url = getAuthSmsLoginUrl();
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone, code }),

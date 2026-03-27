@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import random
 import re
@@ -10,9 +11,12 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.db.models import AuthOtp, User
+
+logger = logging.getLogger(__name__)
 from app.services.jwt_tokens import mint_access_token
 from app.services.sms_provider import send_login_verification_code
 
@@ -35,6 +39,23 @@ def _otp_bypass_enabled() -> bool:
 
 def _otp_bypass_code() -> str:
     return os.environ.get("OTP_BYPASS_CODE", "123456").strip() or "123456"
+
+
+def _is_production_deploy() -> bool:
+    return os.getenv("RAILWAY_ENVIRONMENT_NAME") == "production"
+
+
+def _synthetic_user_for_otp_bypass(phone: str) -> User:
+    """数据库不可用时，非生产环境用稳定 user_id 生成内存中的 User（仅联调码）。"""
+    uid = "u_" + hashlib.sha256(f"local-bypass:{phone}".encode()).hexdigest()[:16]
+    now = datetime.utcnow()
+    return User(
+        user_id=uid,
+        phone=phone,
+        created_at=now,
+        updated_at=now,
+        last_login_at=now,
+    )
 
 
 def _pepper() -> bytes:
@@ -97,21 +118,30 @@ def verify_code_and_upsert_user(db: Session, phone: str, code: str) -> Optional[
     """校验验证码，创建或更新用户，失败返回 None。"""
     # 临时免短信模式：用于短信通道未开通时的联调/压测。
     if _otp_bypass_enabled() and code.strip() == _otp_bypass_code():
-        now = datetime.utcnow()
-        user = db.query(User).filter(User.phone == phone).first()
-        if not user:
-            user = User(
-                user_id=f"u_{uuid.uuid4().hex[:16]}",
-                phone=phone,
-                last_login_at=now,
+        try:
+            now = datetime.utcnow()
+            user = db.query(User).filter(User.phone == phone).first()
+            if not user:
+                user = User(
+                    user_id=f"u_{uuid.uuid4().hex[:16]}",
+                    phone=phone,
+                    last_login_at=now,
+                )
+                db.add(user)
+            else:
+                user.last_login_at = now
+                user.updated_at = now
+            db.commit()
+            db.refresh(user)
+            return user
+        except OperationalError as e:
+            if _is_production_deploy():
+                raise
+            logger.warning(
+                "OTP bypass: database unavailable (%s); using stateless user for local/dev",
+                e,
             )
-            db.add(user)
-        else:
-            user.last_login_at = now
-            user.updated_at = now
-        db.commit()
-        db.refresh(user)
-        return user
+            return _synthetic_user_for_otp_bypass(phone)
 
     now = datetime.utcnow()
     rows = (

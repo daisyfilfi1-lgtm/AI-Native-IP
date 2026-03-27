@@ -120,3 +120,32 @@ export function getFullApiUrl(path: string): string {
   
   return `/${cleanPath}`;
 }
+
+/**
+ * 手机号验证码登录接口（与 axios /api/v1 的 base 解析规则一致）。
+ * 直连 Railway 时必须走绝对 URL，否则 fetch('/api/auth/...') 会打到 Netlify/Next 而非后端。
+ */
+export function getAuthSmsLoginUrl(): string {
+  if (typeof window === 'undefined') {
+    return '/api/auth/sms/login';
+  }
+  const base = getBrowserApiBaseUrl();
+  if (base.startsWith('http')) {
+    const origin = base.replace(/\/api\/v1\/?$/i, '').replace(/\/$/, '');
+    return `${origin}/api/auth/sms/login`;
+  }
+  return '/api/auth/sms/login';
+}
+
+/** 发送登录验证码（与登录 URL 同源策略一致） */
+export function getAuthSmsSendCodeUrl(): string {
+  if (typeof window === 'undefined') {
+    return '/api/auth/sms/send-code';
+  }
+  const base = getBrowserApiBaseUrl();
+  if (base.startsWith('http')) {
+    const origin = base.replace(/\/api\/v1\/?$/i, '').replace(/\/$/, '');
+    return `${origin}/api/auth/sms/send-code`;
+  }
+  return '/api/auth/sms/send-code';
+}

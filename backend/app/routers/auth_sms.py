@@ -20,7 +20,12 @@ class SendCodeBody(BaseModel):
 
 class LoginBody(BaseModel):
     phone: str = Field(..., min_length=11, max_length=20)
-    code: str = Field(..., min_length=4, max_length=10)
+    code: str | None = Field(default=None, max_length=10)
+    password: str | None = Field(
+        default=None,
+        max_length=10,
+        description="与 code 二选一；联调时填 OTP_BYPASS_CODE（默认 123456）",
+    )
 
 
 @router.post("/sms/send-code")
@@ -44,7 +49,13 @@ def login_with_code(body: LoginBody, db: Session = Depends(get_db)):
     phone = auth_phone.normalize_phone(body.phone)
     if not phone:
         raise HTTPException(status_code=400, detail="请输入有效的中国大陆手机号")
-    user = auth_phone.verify_code_and_upsert_user(db, phone, body.code)
+    raw_code = (body.code or body.password or "").strip()
+    if len(raw_code) < 4:
+        raise HTTPException(
+            status_code=400,
+            detail="请提供验证码 code，或联调密码字段 password（与 code 相同含义）",
+        )
+    user = auth_phone.verify_code_and_upsert_user(db, phone, raw_code)
     if not user:
         raise HTTPException(status_code=401, detail="验证码错误或已过期")
     token = auth_phone.issue_token_for_user(user)

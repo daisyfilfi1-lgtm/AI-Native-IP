@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
 from typing import Optional
 
 from fastapi import Depends, HTTPException
@@ -26,6 +28,19 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="无效或已过期的令牌")
     uid = str(payload["sub"])
     user = db.query(User).filter(User.user_id == uid).first()
-    if not user:
+    if user:
+        return user
+    # 非生产：联调时可能使用无库 OTP bypass，JWT 内已有 phone，用内存 User 放行
+    if os.getenv("RAILWAY_ENVIRONMENT_NAME") == "production":
         raise HTTPException(status_code=401, detail="用户不存在")
-    return user
+    phone = payload.get("phone")
+    if isinstance(phone, str) and phone.strip():
+        now = datetime.utcnow()
+        return User(
+            user_id=uid,
+            phone=phone.strip(),
+            created_at=now,
+            updated_at=now,
+            last_login_at=now,
+        )
+    raise HTTPException(status_code=401, detail="用户不存在")

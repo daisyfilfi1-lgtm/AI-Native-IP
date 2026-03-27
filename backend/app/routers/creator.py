@@ -755,12 +755,22 @@ def _apply_topic_whitelist(db: Session, ip_id: str, topics: List[Dict[str, Any]]
         if keywords:
             logger.info(f"Dynamic keywords for {ip_id}: {keywords[:5]}...")
 
-    # 先尝试关键词匹配
+    # 先尝试关键词匹配（小敏IP使用严格模式：必须命中核心词）
     if keywords:
-        filtered = [t for t in topics if _topic_hit_whitelist(t, keywords)]
-        if filtered:
-            logger.info(f"Keyword matched {len(filtered)} topics")
-            return filtered
+        if ip_id == "xiaomin1":
+            # 严格模式：必须命中核心词
+            filtered = [t for t in topics if _topic_hit_core_keywords(t)]
+            if filtered:
+                logger.info(f"xiaomin1: Core keyword matched {len(filtered)} topics")
+                for t in filtered:
+                    t['filter_method'] = 'core_matched'
+                return filtered
+            # 未命中核心词，继续后续处理（返回空）
+        else:
+            filtered = [t for t in topics if _topic_hit_whitelist(t, keywords)]
+            if filtered:
+                logger.info(f"Keyword matched {len(filtered)} topics")
+                return filtered
 
     # 关键词没匹配时，使用语义相似度过滤
     # 获取IP配置

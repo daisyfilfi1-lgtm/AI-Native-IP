@@ -1123,7 +1123,7 @@ async def get_recommended_topics(
     
     # 如果外部API都失败，使用算法兜底生成选题
     if not topics:
-        topics = _generate_fallback_topics(db, ip_id, limit)
+        topics = _generate_fallback_topics(db, ipId, limit)
     
     return {"topics": topics}
 
@@ -1139,7 +1139,7 @@ async def refresh_topics(
     
     # 如果外部API都失败，使用算法兜底
     if not topics:
-        topics = _generate_fallback_topics(db, ip_id, limit)
+        topics = _generate_fallback_topics(db, ipId, limit)
     else:
         shuffled = list(topics)
         random.shuffle(shuffled)

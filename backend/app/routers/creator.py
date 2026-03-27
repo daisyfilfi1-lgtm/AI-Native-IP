@@ -34,6 +34,13 @@ from app.services.strategy_config_service import get_merged_config
 router = APIRouter(prefix="/creator", tags=["creator"])
 logger = logging.getLogger(__name__)
 _DOUYIN_SNAPSHOT_FILE = Path(__file__).resolve().parents[1] / "services" / "data" / "douyin_hot_hub_snapshot.json"
+_BUILTIN_DOUYIN_HOTLIST: List[Dict[str, Any]] = [
+    {"id": "dyhub_builtin_1", "title": "国足2:0库拉索", "score": 4.95, "tags": ["抖音", "热榜"], "reason": "抖音热榜（builtin）", "sourceUrl": "https://www.douyin.com/search/%E5%9B%BD%E8%B6%B32%3A0%E5%BA%93%E6%8B%89%E7%B4%A2"},
+    {"id": "dyhub_builtin_2", "title": "一天连轴转的留学生活", "score": 4.92, "tags": ["抖音", "热榜"], "reason": "抖音热榜（builtin）", "sourceUrl": "https://www.douyin.com/search/%E4%B8%80%E5%A4%A9%E8%BF%9E%E8%BD%B4%E8%BD%AC%E7%9A%84%E7%95%99%E5%AD%A6%E7%94%9F%E6%B4%BB"},
+    {"id": "dyhub_builtin_3", "title": "社保第六险已覆盖超3亿人", "score": 4.89, "tags": ["抖音", "热榜"], "reason": "抖音热榜（builtin）", "sourceUrl": "https://www.douyin.com/search/%E7%A4%BE%E4%BF%9D%E7%AC%AC%E5%85%AD%E9%99%A9%E5%B7%B2%E8%A6%86%E7%9B%96%E8%B6%853%E4%BA%BF%E4%BA%BA"},
+    {"id": "dyhub_builtin_4", "title": "前国脚怒赞国足表现", "score": 4.86, "tags": ["抖音", "热榜"], "reason": "抖音热榜（builtin）", "sourceUrl": "https://www.douyin.com/search/%E5%89%8D%E5%9B%BD%E8%84%9A%E6%80%92%E8%B5%9E%E5%9B%BD%E8%B6%B3%E8%A1%A8%E7%8E%B0"},
+    {"id": "dyhub_builtin_5", "title": "王钰栋回应球迷和队友期待", "score": 4.83, "tags": ["抖音", "热榜"], "reason": "抖音热榜（builtin）", "sourceUrl": "https://www.douyin.com/search/%E7%8E%8B%E9%92%B0%E6%A0%8B%E5%9B%9E%E5%BA%94%E7%90%83%E8%BF%B7%E5%92%8C%E9%98%9F%E5%8F%8B%E6%9C%9F%E5%BE%85"},
+]
 
 
 def get_ip_profile(db: Session, ip_id: str) -> Optional[Dict[str, Any]]:
@@ -1241,6 +1248,12 @@ def _generate_hotlist_snapshot_topics(db: Session, ip_id: str, limit: int) -> Li
             return []
         obj = json.loads(_DOUYIN_SNAPSHOT_FILE.read_text(encoding="utf-8"))
         cards = [c for c in (obj.get("cards") or []) if isinstance(c, dict)]
+        if not cards:
+            cards = list(_BUILTIN_DOUYIN_HOTLIST)
+    except Exception:
+        cards = list(_BUILTIN_DOUYIN_HOTLIST)
+
+    try:
         if not cards:
             return []
         ip_profile = get_ip_profile(db, ip_id) or {}

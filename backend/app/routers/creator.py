@@ -1194,30 +1194,36 @@ def _generate_fallback_topics(db: Session, ip_id: str, limit: int) -> List[Dict[
     if not ip:
         return []
     
-    # 从IP配置中提取关键词生成选题
+    # 从IP配置中提取关键词生成选题（支持多种分隔符）
     keywords = []
     for field in (ip.expertise, ip.content_direction, ip.target_audience, ip.passion, ip.market_demand):
         if field and isinstance(field, str):
-            keywords.extend([w.strip() for w in re.split(r'[,，、/\s]+', field) if len(w.strip()) >= 2])
+            # 支持 / 、 、 和 等分隔符
+            keywords.extend([w.strip() for w in re.split(r'[,，、/和\s]+', field) if len(w.strip()) >= 2])
     
     # 去重
-    keywords = list(set(keywords))[:15]
+    keywords = list(set(keywords))[:20]
+    
+    # 优先选择与创业相关的核心关键词
+    core_keywords = [k for k in keywords if any(x in k for x in ['创业', '馒头', '私域', '变现', '女性', '副业', '赚钱', '独立'])]
+    if core_keywords:
+        keywords = core_keywords + keywords
     
     if not keywords:
         keywords = ["创业", "赚钱", "副业", "女性", "独立"]
     
-    # 生成选题模板
+    # 选题模板（多样化）
     templates = [
-        "{kw}行业趋势分析",
-        "如何{kw}效果更好",
-        "{kw}的创业机会",
-        "90%的人{kw}都错了",
-        "原来{kw}这么简单",
-        "{kw}的常见误区",
-        "你必须知道的{kw}知识",
-        "{kw}如何帮你赚钱",
-        "从0开始{kw}",
-        "{kw}避坑指南",
+        "{kw}到底能不能赚钱",
+        "为什么她们{kw}都成功了",
+        "从0开始{kw}，我的一年",
+        "教你{kw}的正确姿势",
+        "{kw}的3个避坑指南",
+        "宝妈{kw}月入3万真实分享",
+        "{kw}红利期还能入局吗",
+        "不会做{kw}？从这3步开始",
+        "{kw}变现新模式",
+        "90%的人不知道的{kw}技巧",
     ]
     
     topics = []
@@ -1228,11 +1234,11 @@ def _generate_fallback_topics(db: Session, ip_id: str, limit: int) -> List[Dict[
         topics.append({
             "id": f"fallback_{i+1:03d}",
             "title": title,
-            "score": round(4.5 - i * 0.05, 2),
-            "tags": keywords[:3],
+            "score": round(4.6 - i * 0.05, 2),
+            "tags": keywords[:4],
             "reason": "基于IP方向智能生成",
-            "estimatedViews": f"{10 + i * 5}万",
-            "estimatedCompletion": 35 + i,
+            "estimatedViews": f"{20 + i * 10}万",
+            "estimatedCompletion": 38 + i,
             "sourceUrl": "",
         })
     

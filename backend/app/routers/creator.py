@@ -1772,3 +1772,54 @@ async def test_tikhub_api():
         result["error"] = f"{type(e).__name__}: {str(e)}"
     
     return result
+
+
+# === TikHub 测试端点（带 Key 参数）===
+@router.get("/test/tikhub-with-key")
+async def test_tikhub_with_key(api_key: str = Query(..., description="TikHub API Key to test")):
+    """测试指定的 TikHub API Key（公开端点，用于诊断）"""
+    import httpx
+    
+    result = {
+        "key_length": len(api_key),
+        "key_preview": api_key[:10] + "..." if len(api_key) > 10 else api_key,
+        "api_call": None,
+        "error": None,
+    }
+    
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"}
+        payload = {"page": 1, "page_size": 3, "date_window": 1, "tags": []}
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.tikhub.io/api/v1/douyin/billboard/fetch_hot_total_low_fan_list",
+                headers=headers,
+                json=payload
+            )
+            
+            result["api_call"] = {
+                "status_code": response.status_code,
+                "response_preview": response.text[:800] if response.text else "empty",
+            }
+            
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    result["api_call"]["json_parsed"] = True
+                    if isinstance(data, dict):
+                        result["api_call"]["code"] = data.get("code")
+                        result["api_call"]["message"] = data.get("message")
+                        if "data" in data and isinstance(data["data"], list):
+                            result["api_call"]["items_count"] = len(data["data"])
+                            if data["data"]:
+                                result["api_call"]["first_item_preview"] = str(data["data"][0])[:200]
+                except Exception as e:
+                    result["api_call"]["json_parse_error"] = str(e)
+            else:
+                result["error"] = f"HTTP {response.status_code}"
+                
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {str(e)}"
+    
+    return result

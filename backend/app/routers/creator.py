@@ -1984,12 +1984,19 @@ async def test_tikhub_parse():
                     result["objs_length"] = len(objs) if isinstance(objs, list) else 0
                     
                     if isinstance(objs, list) and objs:
-                        result["first_item_keys"] = list(objs[0].keys()) if isinstance(objs[0], dict) else None
-                        result["first_item_title"] = objs[0].get("title") or objs[0].get("sentence") or objs[0].get("word") or "no title"
+                        first_item = objs[0]
+                        result["first_item_keys"] = list(first_item.keys()) if isinstance(first_item, dict) else None
+                        # 检查 item_title 的原始值和类型
+                        item_title = first_item.get("item_title")
+                        result["item_title_raw"] = str(item_title)
+                        result["item_title_type"] = type(item_title).__name__
+                        result["item_title_repr"] = repr(item_title)[:100]
             
             # 测试 billboard_to_topic_cards
             cards = tikhub_client.billboard_to_topic_cards(unwrapped, limit=3)
             result["cards_count"] = len(cards)
+            if cards:
+                result["first_card_title"] = cards[0].get("title")
             
             return result
                 

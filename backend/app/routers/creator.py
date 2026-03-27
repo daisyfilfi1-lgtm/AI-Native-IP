@@ -11,7 +11,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -694,6 +694,7 @@ class ViralGenerateRequest(BaseModel):
     targetDuration: int
     style: str
     ipId: Optional[str] = "1"
+    customScriptHint: Optional[str] = None
 
 
 def _build_scenario_three_request(
@@ -704,6 +705,7 @@ def _build_scenario_three_request(
     script_template: str,
     viral_elements: Optional[List[str]],
     target_duration: int,
+    custom_script_hint: Optional[str] = None,
 ) -> ScenarioThreeRequest:
     """
     统一构建场景三（爆款原创）请求，供文字与语音入口复用。
@@ -716,6 +718,10 @@ def _build_scenario_three_request(
     guardrails = _extract_style_guardrails_from_assets(db, ip_id)
     normalized_template = script_template or "opinion"
     template = get_viral_template(normalized_template)
+    instruction = template.get("instruction") or ""
+    hint = (custom_script_hint or "").strip()
+    if normalized_template == "custom" and hint:
+        instruction = f"{instruction}\n\n【用户自定义结构】\n{hint[:2000]}"
     resolved_elements = resolve_viral_elements(normalized_template, viral_elements or [])
     few_shot_examples = _build_dynamic_few_shots(db, ip_id, input_text or "", k=3)
     ip_profile["self_intro"] = guardrails.get("self_intro") or ""
@@ -723,7 +729,7 @@ def _build_scenario_three_request(
     ip_profile["style_evidence"] = guardrails.get("style_evidence") or []
     ip_profile["few_shot_examples"] = few_shot_examples
     ip_profile["strategy_template_name"] = template.get("name") or ""
-    ip_profile["strategy_template_instruction"] = template.get("instruction") or ""
+    ip_profile["strategy_template_instruction"] = instruction
     ip_profile.update(
         _build_style_context_from_vector(
             db,
@@ -756,11 +762,29 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
             script_template=req.scriptTemplate or "opinion",
             viral_elements=req.viralElements or [],
             target_duration=int(req.targetDuration or 60),
+            custom_script_hint=req.customScriptHint,
         )
 
         result = await ContentGenerator.scenario_three(request)
 
         draft_id = f"gen_viral_{uuid.uuid4().hex[:10]}"
+        viral_wf: Dict[str, Any] = {
+            "viralElements": resolve_viral_elements(
+                req.scriptTemplate or "opinion", req.viralElements or []
+            ),
+            "scriptTemplate": req.scriptTemplate or "",
+            "inputMode": req.inputMode or "text",
+            "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
+            "elementConfigMode": (
+                "auto"
+                if not (req.viralElements or [])
+                or any(x in {"auto", "system_auto"} for x in (req.viralElements or []))
+                else "manual"
+            ),
+        }
+        _h = (req.customScriptHint or "").strip()
+        if _h:
+            viral_wf["customScriptHint"] = _h[:2000]
         _save_generated_draft(
             db,
             draft_id=draft_id,
@@ -771,20 +795,7 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
             style=req.style,
             generation_source="viral",
             score=float(result.score or 0.0),
-            extra_workflow={
-                "viralElements": resolve_viral_elements(
-                    req.scriptTemplate or "opinion", req.viralElements or []
-                ),
-                "scriptTemplate": req.scriptTemplate or "",
-                "inputMode": req.inputMode or "text",
-                "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
-                "elementConfigMode": (
-                    "auto"
-                    if not (req.viralElements or [])
-                    or any(x in {"auto", "system_auto"} for x in (req.viralElements or []))
-                    else "manual"
-                ),
-            },
+            extra_workflow=viral_wf,
         )
 
         return {
@@ -811,6 +822,7 @@ class OriginalGenerateRequest(BaseModel):
     viralElements: Optional[List[str]] = None
     targetDuration: Optional[int] = 60
     ipId: Optional[str] = "1"
+    customScriptHint: Optional[str] = None
 
 
 @router.post("/generate/original")
@@ -825,9 +837,27 @@ async def generate_from_original(req: OriginalGenerateRequest, db: Session = Dep
             script_template=req.scriptTemplate or "opinion",
             viral_elements=req.viralElements or [],
             target_duration=int(req.targetDuration or 60),
+            custom_script_hint=req.customScriptHint,
         )
         result = await ContentGenerator.scenario_three(request)
         draft_id = f"gen_original_{uuid.uuid4().hex[:10]}"
+        original_wf: Dict[str, Any] = {
+            "viralElements": resolve_viral_elements(
+                req.scriptTemplate or "opinion", req.viralElements or []
+            ),
+            "scriptTemplate": req.scriptTemplate or "opinion",
+            "inputMode": "voice",
+            "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
+            "elementConfigMode": (
+                "auto"
+                if not (req.viralElements or [])
+                or any(x in {"auto", "system_auto"} for x in (req.viralElements or []))
+                else "manual"
+            ),
+        }
+        _oh = (req.customScriptHint or "").strip()
+        if _oh:
+            original_wf["customScriptHint"] = _oh[:2000]
         _save_generated_draft(
             db,
             draft_id=draft_id,
@@ -838,20 +868,7 @@ async def generate_from_original(req: OriginalGenerateRequest, db: Session = Dep
             style=req.style,
             generation_source="original",
             score=float(result.score or 0.0),
-            extra_workflow={
-                "viralElements": resolve_viral_elements(
-                    req.scriptTemplate or "opinion", req.viralElements or []
-                ),
-                "scriptTemplate": req.scriptTemplate or "opinion",
-                "inputMode": "voice",
-                "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
-                "elementConfigMode": (
-                    "auto"
-                    if not (req.viralElements or [])
-                    or any(x in {"auto", "system_auto"} for x in (req.viralElements or []))
-                    else "manual"
-                ),
-            },
+            extra_workflow=original_wf,
         )
         return {
             "id": draft_id,
@@ -886,6 +903,7 @@ async def get_generate_result(id: str, db: Session = Depends(get_db)):
             "style": wf.get("style") or "angry",
             "viralElements": wf.get("viralElements") or [],
             "scriptTemplate": wf.get("scriptTemplate") or "",
+            "customScriptHint": wf.get("customScriptHint") or "",
             "agentChain": wf.get("agent_chain") or ["Strategy", "Memory", "Generation", "Compliance"],
             "structureSnapshot": wf.get("structureSnapshot") or None,
             "retrievalTrace": wf.get("retrievalTrace") or None,
@@ -1079,6 +1097,17 @@ async def list_creator_library(
     if status and status != "all":
         items = [x for x in items if x.get("status") == status]
     return items
+
+
+@router.delete("/library/{draft_id}")
+async def delete_creator_library_item(draft_id: str, db: Session = Depends(get_db)):
+    """从内容库删除一条草稿（硬删除 content_drafts 行）。"""
+    draft = db.query(ContentDraft).filter(ContentDraft.draft_id == draft_id).first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="内容不存在或已删除")
+    db.delete(draft)
+    db.commit()
+    return {"ok": True}
 
 
 # === 发布 ===

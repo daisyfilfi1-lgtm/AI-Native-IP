@@ -414,6 +414,7 @@ export const creatorApi = {
     viralElements: string[];
     targetDuration: number;
     style: StyleType;
+    customScriptHint?: string;
   }): Promise<GenerateResult> {
     console.log('[API] Generate viral original:', params);
     
@@ -478,6 +479,20 @@ export const creatorApi = {
     
     const url = status ? `/api/creator/library?status=${status}` : '/api/creator/library';
     return apiFetch(url);
+  },
+
+  async deleteLibraryItem(id: string): Promise<void> {
+    if (USE_MOCK) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const idx = mockLibraryItems.findIndex((x) => x.id === id);
+      if (idx >= 0) {
+        mockLibraryItems.splice(idx, 1);
+      }
+      return;
+    }
+    await apiFetch<{ ok: boolean }>(`/api/creator/library/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
   },
 
   async publishContent(id: string, platforms: string[]): Promise<void> {

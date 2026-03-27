@@ -177,17 +177,21 @@ async def _fetch_tikhub_topics(keywords: List[str], limit: int) -> List[Dict]:
     seen_titles = set()
     
     try:
+        import os
         from app.services import tikhub_client
         
-        # Debug: Check if configured
-        is_cfg = tikhub_client.is_configured()
-        print(f"TIKHUB is_configured: {is_cfg}")
+        api_key = os.environ.get("TIKHUB_API_KEY", "")
+        print(f"DEBUG: TIKHUB_API_KEY length = {len(api_key)}")
         
-        if not is_cfg:
-            print("TIKHUB not configured, returning empty")
+        if not api_key:
+            print("DEBUG: TIKHUB_API_KEY not found in env")
             return []
         
-        print("Fetching from TIKHUB...")
+        if not tikhub_client.is_configured():
+            print("DEBUG: tikhub_client.is_configured() = False")
+            return []
+        
+        print("DEBUG: TIKHUB configured, fetching data...")
         
         # 1. 获取抖音低粉爆款榜 (<10万粉, >1万赞)
         raw = await tikhub_client.fetch_douyin_low_fan_hot_list(

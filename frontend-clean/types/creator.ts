@@ -57,7 +57,8 @@ export interface GeneratedContent {
   // 爆款原创相关 (Viral Original)
   viralElements?: string[];         // 选中的爆款元素
   scriptTemplate?: string;          // 脚本模板ID
-  
+  customScriptHint?: string;        // 自定义模板时的结构说明（可选）
+
   // 元数据
   createdAt?: string;
   updatedAt?: string;
@@ -253,7 +254,7 @@ export const VIRAL_ELEMENTS = [
 
 export type ViralElementId = typeof VIRAL_ELEMENTS[number]['id'];
 
-// 四大黄金脚本模板
+// 黄金脚本模板（四大固定结构 + 自定义）
 export const SCRIPT_TEMPLATES = [
   {
     id: 'opinion',
@@ -287,6 +288,13 @@ export const SCRIPT_TEMPLATES = [
     structure: ['困境(共情)', '转折(希望)', '方法(价值)', '结果(证明)'],
     prototypes: ['小有成就型', '平凡英雄型', '重新成功型'],
     bestFor: '高客单产品成交前，建立深度情感连接'
+  },
+  {
+    id: 'custom',
+    name: '自定义',
+    desc: '按你的结构/节奏',
+    structure: ['自选分段与时长'],
+    bestFor: '有明确镜头表或口播提纲时使用'
   }
 ] as const;
 
@@ -340,6 +348,7 @@ export interface ViralOriginalRequest {
   viralElements: ViralElementId[];  // 选中的爆款元素
   targetDuration: number;           // 目标时长（秒）
   style: StyleType;                 // 风格
+  customScriptHint?: string;        // 选「自定义」时的结构说明（可选）
 }
 
 // 工业化流水线进度

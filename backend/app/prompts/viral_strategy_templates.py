@@ -6,7 +6,7 @@ from typing import Dict, Iterable, List
 
 
 VIRAL_SCRIPT_TEMPLATE_MAP: Dict[str, Dict[str, str]] = {
-    # 前端 scriptTemplate: process | knowledge | story | opinion
+    # 前端 scriptTemplate: process | knowledge | story | opinion | custom
     "process": {
         "name": "晒过程",
         "instruction": (
@@ -39,6 +39,14 @@ VIRAL_SCRIPT_TEMPLATE_MAP: Dict[str, Dict[str, str]] = {
             "优先使用：认知反转、冲突反差；可结合权威背书。"
         ),
     },
+    "custom": {
+        "name": "自定义",
+        "instruction": (
+            "无固定四大模板约束：在符合口播节奏与平台规范的前提下，"
+            "严格按用户在「自定义结构说明」中给出的分段/镜头/时长意图组织全文；"
+            "若用户未写结构说明，则结合选题与 IP 人设自行设计清晰起承转合，并保证有钩子与 CTA。"
+        ),
+    },
 }
 
 # 四大脚本 × 八大爆款（映射到前端元素ID：cost/crowd/weird/worst/contrast/nostalgia/hormone/top）
@@ -51,6 +59,8 @@ AUTO_VIRAL_ELEMENT_MAP: Dict[str, List[str]] = {
     "story": ["nostalgia", "contrast"],
     # 认知反转 + 冲突 + 热点感（观点型更重冲突与传播）
     "opinion": ["contrast", "top", "weird"],
+    # 自定义：均衡组合，便于系统自动配元素时仍有多样爆款抓手
+    "custom": ["contrast", "nostalgia", "top"],
 }
 
 VALID_VIRAL_ELEMENTS = {
@@ -67,6 +77,8 @@ VALID_VIRAL_ELEMENTS = {
 
 def get_viral_template(script_template: str) -> Dict[str, str]:
     key = (script_template or "opinion").strip().lower()
+    if key == "custom":
+        return VIRAL_SCRIPT_TEMPLATE_MAP["custom"]
     return VIRAL_SCRIPT_TEMPLATE_MAP.get(key, VIRAL_SCRIPT_TEMPLATE_MAP["opinion"])
 
 

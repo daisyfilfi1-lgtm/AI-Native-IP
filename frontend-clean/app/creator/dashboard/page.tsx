@@ -34,7 +34,8 @@ import {
   Upload,
   FileText as Keyboard,
   Wand2,
-  Lightbulb
+  Lightbulb,
+  Pencil
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -251,7 +252,8 @@ export default function CreatorDashboardPage() {
   const [viralText, setViralText] = useState('');
   const [isGeneratingViral, setIsGeneratingViral] = useState(false);
   const [viralConfig, setViralConfig] = useState({
-    scriptTemplate: 'opinion', // opinion | process | knowledge | story
+    scriptTemplate: 'opinion', // opinion | process | knowledge | story | custom
+    customScriptHint: '',
     viralElements: ['cost', 'crowd'], // 选中的爆款元素
     targetDuration: 60, // 目标时长（秒）
   });
@@ -317,7 +319,11 @@ export default function CreatorDashboardPage() {
         scriptTemplate: viralConfig.scriptTemplate,
         viralElements: viralConfig.viralElements,
         targetDuration: viralConfig.targetDuration,
-        style: DEFAULT_WORKFLOW_STYLE
+        style: DEFAULT_WORKFLOW_STYLE,
+        customScriptHint:
+          viralConfig.scriptTemplate === 'custom'
+            ? viralConfig.customScriptHint.trim() || undefined
+            : undefined,
       });
       router.push(`/creator/generate?id=${result.id}&type=original`);
     } catch (error) {
@@ -722,32 +728,64 @@ export default function CreatorDashboardPage() {
 
                   {/* 脚本模板选择 */}
                   <div>
-                    <label className="block text-xs text-foreground-secondary mb-2">脚本模板（四大黄金模板）</label>
+                    <label className="block text-xs text-foreground-secondary mb-2">脚本模板（四大黄金 + 自定义）</label>
                     <div className="grid grid-cols-2 gap-2">
                       {[
                         { id: 'opinion', name: '说观点', desc: '吸真粉/高互动', icon: Lightbulb },
                         { id: 'process', name: '晒过程', desc: '强转化/近变现', icon: RefreshCw },
                         { id: 'knowledge', name: '教知识', desc: '精准粉/高客单', icon: Brain },
                         { id: 'story', name: '讲故事', desc: '立人设/高信任', icon: FileText },
+                        { id: 'custom', name: '自定义', desc: '按你的结构/节奏', icon: Pencil },
                       ].map((template) => (
                         <button
                           key={template.id}
-                          onClick={() => setViralConfig(prev => ({ ...prev, scriptTemplate: template.id }))}
+                          type="button"
+                          onClick={() =>
+                            setViralConfig((prev) => ({
+                              ...prev,
+                              scriptTemplate: template.id,
+                            }))
+                          }
                           className={cn(
-                            "flex items-center gap-2 p-2 rounded-lg border text-left transition-all",
+                            'flex items-center gap-2 p-2 rounded-lg border text-left transition-all',
+                            template.id === 'custom' && 'col-span-2',
                             viralConfig.scriptTemplate === template.id
-                              ? "border-orange-500 bg-orange-500/10"
-                              : "border-border hover:border-border-hover"
+                              ? 'border-orange-500 bg-orange-500/10'
+                              : 'border-border hover:border-border-hover'
                           )}
                         >
-                          <template.icon className="w-4 h-4 text-foreground-secondary" />
-                          <div>
+                          <template.icon className="w-4 h-4 text-foreground-secondary shrink-0" />
+                          <div className="min-w-0">
                             <div className="text-sm font-medium text-foreground">{template.name}</div>
                             <div className="text-xs text-foreground-tertiary">{template.desc}</div>
                           </div>
                         </button>
                       ))}
                     </div>
+                    {viralConfig.scriptTemplate === 'custom' && (
+                      <div className="mt-2">
+                        <label
+                          htmlFor="creator-clean-custom-script-hint"
+                          className="block text-xs text-foreground-secondary mb-1"
+                        >
+                          自定义结构说明（可选，越具体越好）
+                        </label>
+                        <textarea
+                          id="creator-clean-custom-script-hint"
+                          name="customScriptHint"
+                          value={viralConfig.customScriptHint}
+                          onChange={(e) =>
+                            setViralConfig((prev) => ({
+                              ...prev,
+                              customScriptHint: e.target.value,
+                            }))
+                          }
+                          placeholder="例如：0-5s 反问钩子 → 5-25s 讲失败经历 → 25-45s 三条可抄作业 → 45-60s 引导评论"
+                          rows={3}
+                          className="w-full p-3 bg-background-elevated border border-border rounded-lg text-sm text-foreground placeholder:text-foreground-muted resize-none focus:outline-none focus:border-primary-500/50"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* 爆款元素选择 */}

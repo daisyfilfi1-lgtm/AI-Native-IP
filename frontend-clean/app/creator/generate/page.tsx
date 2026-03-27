@@ -66,6 +66,7 @@ function GeneratePageContent() {
   const id = searchParams.get('id');
   const type = searchParams.get('type') as 'topic' | 'remix' | 'original' | 'viral' | null;
   const normalizedType = type === 'viral' ? 'original' : type;
+  const fromLibrary = searchParams.get('from') === 'library';
   
   const [isGenerating, setIsGenerating] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -112,14 +113,20 @@ function GeneratePageContent() {
       
       // 调用API获取生成内容
       const data = await creatorApi.getGeneratedContent(id!);
-      
-      // 延迟显示结果，让用户看到动画
-      setTimeout(() => {
+      const quickView = searchParams.get('from') === 'library';
+
+      if (quickView) {
         setProgress(100);
         setContent(data);
         setIsGenerating(false);
-      }, 1500);
-      
+      } else {
+        setTimeout(() => {
+          setProgress(100);
+          setContent(data);
+          setIsGenerating(false);
+        }, 1500);
+      }
+
     } catch (err) {
       console.error('Failed to load content:', err);
       setError('生成内容加载失败，请重试');
@@ -224,8 +231,9 @@ function GeneratePageContent() {
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
         <Link 
-          href="/creator/dashboard"
+          href={fromLibrary ? '/creator/library' : '/creator/dashboard'}
           className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+          aria-label={fromLibrary ? '返回内容库' : '返回创作台'}
         >
           <ArrowLeft className="w-5 h-5 text-foreground-secondary" />
         </Link>
@@ -236,7 +244,13 @@ function GeneratePageContent() {
           <p className="text-sm text-foreground-secondary">
             {isGenerating 
               ? '正在调用Agent链为你生成内容...' 
-              : type === 'topic' ? '基于推荐选题生成' : type === 'remix' ? '基于竞品仿写' : '基于语音扩写'}
+              : type === 'topic'
+                ? '基于推荐选题生成'
+                : type === 'remix'
+                  ? '基于竞品仿写'
+                  : type === 'viral'
+                    ? '爆款原创'
+                    : '基于语音扩写'}
           </p>
         </div>
       </div>
@@ -302,9 +316,14 @@ function GeneratePageContent() {
                  '即将完成...'}
               </p>
               <p className="text-sm text-foreground-secondary">
-                已调用: {type === 'topic' ? 'Strategy → Memory → Generation → Compliance' : 
-                         type === 'remix' ? 'Remix → Memory → Generation → Compliance' :
-                         'ASR → Memory → Generation → Compliance'}
+                已调用:{' '}
+                {type === 'topic'
+                  ? 'Strategy → Memory → Generation → Compliance'
+                  : type === 'remix'
+                    ? 'Remix → Memory → Generation → Compliance'
+                    : type === 'viral'
+                      ? 'Strategy → Memory → Generation → Compliance'
+                      : 'ASR → Memory → Generation → Compliance'}
               </p>
             </div>
 
@@ -442,11 +461,17 @@ function GeneratePageContent() {
                 <Card>
                   <div className="p-4">
                     <h3 className="font-semibold text-foreground mb-3">📝 脚本模板</h3>
-                    <div className="text-sm text-foreground-secondary">
+                    <div className="text-sm text-foreground-secondary space-y-2">
                       {content.scriptTemplate === 'opinion' && '说观点：钩子→论据→升华'}
                       {content.scriptTemplate === 'process' && '晒过程：展示→情绪→结果'}
                       {content.scriptTemplate === 'knowledge' && '教知识：问题→原因→解决'}
                       {content.scriptTemplate === 'story' && '讲故事：困境→转折→方法→结果'}
+                      {content.scriptTemplate === 'custom' && '自定义：按你的结构说明与时间轴组织全文'}
+                      {content.scriptTemplate === 'custom' && content.customScriptHint?.trim() && (
+                        <p className="text-xs text-foreground-tertiary whitespace-pre-wrap border-t border-border pt-2">
+                          {content.customScriptHint.trim()}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </Card>

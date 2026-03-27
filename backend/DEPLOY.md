@@ -83,9 +83,10 @@
 **RQ Worker（Railway）**：配置 `REDIS_URL` 后，需单独部署 Worker 服务：
 1. 在 Railway 项目内 **New → GitHub Repo**，选中同一仓库。
 2. 新服务 **Settings → Root Directory** 填 `backend`。
-3. **Settings → Deploy** 中设置 **Start Command** 为：`python scripts/worker.py`（覆盖默认 web 启动）。
-4. 在 **Variables** 中添加 `REDIS_URL`（见下）、`DATABASE_URL`（与 Web 服务一致，引用同一 Postgres），以及 Web 服务已有的 AI/存储等变量（Worker 执行 ingest 时需要）。
-5. 可选：**Settings** 中取消勾选 **Generate Domain**（Worker 不需要公网访问）。
+3. **必须**：在 **Settings** 里将 **Config as code**（或「配置文件」）路径设为仓库内的 **`backend/railway.worker.toml`**（或文档所示的绝对路径形式，如 `/backend/railway.worker.toml`）。Worker 只跑 RQ、不监听 HTTP；若仍使用默认的 `railway.toml`，Railway 会对 **`/health`** 做检查，日志里会出现 **service unavailable**，约 5 分钟后 **Healthcheck failed**。
+4. `railway.worker.toml` 已含 **Start Command** `python scripts/worker.py`；若你在面板里也写了启动命令，以 Config as code 为准。
+5. 在 **Variables** 中添加 `REDIS_URL`（见下）、`DATABASE_URL`（与 Web 服务一致，引用同一 Postgres），以及 Web 服务已有的 AI/存储等变量（Worker 执行 ingest 时需要）。
+6. 可选：**Settings** 中取消勾选 **Generate Domain**（Worker 不需要公网访问）。
 
 **卡死任务清理（可选）**：建议配置 Cron 每 5 分钟执行 `python scripts/run_stale_task_cleanup.py`，将长期 PROCESSING 且无心跳的任务标记为 TIMEOUT。可通过 `STALE_TASK_THRESHOLD_SECONDS=300` 调整阈值。
 
@@ -165,7 +166,8 @@
   1. 打开 **Deploy Logs**，找到 **`Uvicorn running on http://0.0.0.0:XXXX`**，记下 **XXXX**。
   2. 打开 **Settings → Networking**，公网域名转发到容器的端口 **必须与 XXXX 完全一致**。若日志是 **8000**，Networking 也必须填 **8000**（填 8080 而进程在 8000 会稳定 502）。
   3. **不要**在 Variables 里手动写一个与 Networking 冲突的 `PORT`（除非你有意固定端口）；Railway 通常会注入 `PORT`；若手动设置，须与 Networking、日志中的监听端口三者一致。
-  4. 启动命令已使用 `$PORT`（Dockerfile / `Procfile`）；健康检查路径为 **`/health`**（与 `railway.toml` 一致）。
+  4. 启动命令已使用 `$PORT`（Dockerfile / `Procfile`）；健康检查路径为 **`/health`**（与 `railway.toml` 一致；**仅适用于 Web 服务**）。
+- **Worker 部署：Healthcheck failed / `Attempt #N failed with service unavailable`**：Worker 不暴露 HTTP，却沿用了带 **`healthcheckPath = "/health"`** 的 `railway.toml`。请为该服务单独指定 **`backend/railway.worker.toml`**（见上文「RQ Worker」步骤 3），然后重新部署。
 - **方式 A 迁移未执行**：镜像启动命令已含迁移；若仍缺表，可在 **Pre-deploy Command** 增加 `python scripts/run_migrations.py`，或在本地 `railway run python scripts/run_migrations.py`。
 - **数据库连接失败**：确认 Web 服务环境变量中有 `DATABASE_URL`（来自 Postgres 插件或 `${{Postgres.DATABASE_URL}}` 引用），且迁移已成功。
 - **迁移报错**：在 `backend` 目录下执行 `railway run python scripts/run_migrations.py`，且 `db/migrations/` 下存在 `001`～`008` 等 SQL 文件。若报 `extension "vector" does not exist`，说明数据库非 pgvector 版，需改用 **Postgres with pgVector Engine** 模板。

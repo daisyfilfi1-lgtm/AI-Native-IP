@@ -2215,3 +2215,23 @@ async def test_check_core(ipId: str = Query("xiaomin1", description="IP 画像 i
         "core_keywords": _XIAOMIN_CORE_KEYWORDS,
         "results": results,
     }
+
+
+# === 测试白名单过滤 ===
+@router.get("/test/whitelist")
+async def test_whitelist(ipId: str = Query("xiaomin1"), db: Session = Depends(get_db)):
+    """测试白名单过滤"""
+    from app.services import tikhub_client
+    
+    # 获取 TikHub 数据
+    cards = await tikhub_client.get_recommended_topic_cards(limit=5)
+    
+    # 调用白名单过滤
+    filtered = _apply_topic_whitelist(db, ipId, cards)
+    
+    return {
+        "ipId": ipId,
+        "input_count": len(cards),
+        "output_count": len(filtered),
+        "filter_methods": [t.get("filter_method") for t in filtered],
+    }

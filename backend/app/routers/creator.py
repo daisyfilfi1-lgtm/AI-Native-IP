@@ -2432,3 +2432,46 @@ async def test_rerank_structure(ipId: str = Query("xiaomin1"), db: Session = Dep
             "originalTitle": ranked_cards[0].get("originalTitle")[:40] if ranked_cards else None,
         } if ranked_cards else None,
     }
+
+
+# === 完整推荐流程测试 ===
+@router.get("/test/full-recommend")
+async def test_full_recommend(ipId: str = Query("xiaomin1"), db: Session = Depends(get_db)):
+    """测试完整推荐流程"""
+    from app.services import multi_source_client
+    
+    result = {"steps": []}
+    
+    # 1. 获取多数据源
+    cards = await multi_source_client.get_multi_source_topics(limit=10)
+    result["steps"].append(f"1. Got {len(cards)} cards from multi-source")
+    
+    # 2. 检查核心词匹配（原始卡片）
+    core_matched_original = [c for c in cards if _topic_hit_core_keywords(c)]
+    result["steps"].append(f"2. Core matched in original: {len(core_matched_original)}")
+    
+    # 3. 四维重排
+    ip_profile = get_ip_profile(db, ipId) or {}
+    weights = _resolve_topic_weights(db, ipId)
+    ranked_cards = _rerank_tikhub_candidates(
+        cards=cards, ip_profile=ip_profile, limit=12, weights=weights
+    )
+    result["steps"].append(f"3. After rerank: {len(ranked_cards)} cards")
+    
+    # 4. 检查核心词匹配（重排后）
+    core_matched_reranked = [c for c in ranked_cards if _topic_hit_core_keywords(c)]
+    result["steps"].append(f"4. Core matched in reranked: {len(core_matched_reranked)}")
+    
+    # 5. 检查第一条数据的标题
+    if ranked_cards:
+        first = ranked_cards[0]
+        result["first_card"] = {
+            "title": first.get("title", "N/A")[:40],
+            "originalTitle": first.get("originalTitle", "N/A")[:40],
+        }
+    
+    # 6. 检查 ip_id
+    result["ip_id"] = ipId
+    result["is_xiaomin1"] = ipId == "xiaomin1"
+    
+    return result

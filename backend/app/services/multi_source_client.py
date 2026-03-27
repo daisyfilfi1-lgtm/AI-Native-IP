@@ -92,8 +92,14 @@ class MultiSourceClient:
                 logger.warning("[MultiSource] Xiaohongshu: empty response")
                 return []
             
-            # 小红书数据通常是列表
-            items = data if isinstance(data, list) else data.get("list", [])
+            # 小红书数据结构：data.data.items
+            items = []
+            if isinstance(data, dict):
+                inner_data = data.get("data", {})
+                if isinstance(inner_data, dict):
+                    items = inner_data.get("items", [])
+            elif isinstance(data, list):
+                items = data
             
             cards = []
             for item in items[:limit]:

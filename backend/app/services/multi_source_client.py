@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from app.services import tikhub_client, xhs_topic_client
+from app.services import tikhub_client, xhs_topic_client, competitor_client
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +257,15 @@ class MultiSourceClient:
                 logger.info(f"[MultiSource] XHS Topic: added {len(xhs_topic_notes)} notes")
         except Exception as e:
             logger.warning(f"[MultiSource] XHS Topic failed: {e}")
+        
+        # 额外获取竞品抖音账号视频（最精准）
+        try:
+            competitor_videos = await competitor_client.get_competitor_videos(count_per_user=5)
+            if competitor_videos:
+                all_cards.extend(competitor_videos)
+                logger.info(f"[MultiSource] Competitor: added {len(competitor_videos)} videos")
+        except Exception as e:
+            logger.warning(f"[MultiSource] Competitor failed: {e}")
         
         logger.info(f"[MultiSource] Total cards from all sources: {len(all_cards)}")
         return all_cards

@@ -1,11 +1,9 @@
 """
-智能选题推荐服务 - 简化版
-基于IP画像 + 四维评分 = 数据驱动选题决策
+智能选题推荐服务 - TIKHUB优先 + 算法兜底
 """
 import os
 import re
 from typing import Any, Dict, List, Optional
-from datetime import datetime
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -40,6 +38,9 @@ class TopicScore:
     shares: int = 0
     author_followers: int = 0
     viral_elements: List[str] = None
+    
+    # 数据来源
+    source: str = "tikhub"  # tikhub or algorithm
     
     def __post_init__(self):
         if self.viral_elements is None:
@@ -163,10 +164,142 @@ def calculate_overall_score(topic_score: TopicScore, weights: Dict[str, int]) ->
     return round(total, 1)
 
 
+# ==================== TIKHUB数据获取 ====================
+
+def _check_tikhub_available() -> bool:
+    """检查TIKHUB是否可用"""
+    return os.environ.get("TIKHUB_API_KEY") and len(os.environ.get("TIKHUB_API_KEY", "")) > 0
+
+
+async def _fetch_tikhub_topics(keywords: List[str], limit: int) -> List[Dict]:
+    """从TIKHUB获取真实低粉爆款数据"""
+    topics = []
+    seen_titles = set()
+    
+    try:
+        from app.services import tikhub_client
+        
+        if not tikhub_client.is_configured():
+            return []
+        
+        # 1. 获取抖音低粉爆款榜 (<10万粉, >1万赞)
+        raw = await tikhub_client.fetch_douyin_low_fan_hot_list(
+            page=1,
+            page_size=min(limit * 2, 30),
+            date_window=3,  # 近3天
+        )
+        items = tikhub_client.parse_low_fan_explosion_items(raw)
+        
+        for item in items:
+            title = item.get("title", "")
+            if not title or title in seen_titles:
+                continue
+            seen_titles.add(title)
+            
+            # 关键词过滤
+            if keywords and not any(kw.lower() in title.lower() for kw in keywords):
+                continue
+            
+            topics.append({
+                "title": title,
+                "url": item.get("url", ""),
+                "platform": "douyin",
+                "likes": item.get("likes", 10000),
+                "comments": item.get("comments", 500),
+                "shares": item.get("shares", 100),
+                "author_followers": item.get("author_followers", 5000),
+                "source": "tikhub"
+            })
+            
+            if len(topics) >= limit:
+                break
+        
+        # 2. 如果不够，获取小红书话题
+        if len(topics) < limit:
+            topic_page_ids = os.environ.get("TIKHUB_XHS_TOPIC_PAGE_IDS", "").split(",")
+            for page_id in topic_page_ids[:2]:
+                if len(topics) >= limit:
+                    break
+                try:
+                    feed = await tikhub_client.fetch_xhs_topic_feed(page_id.strip(), sort="hot")
+                    notes = tikhub_client.parse_xhs_topic_feed_notes(feed)
+                    
+                    for note in notes[:5]:
+                        title = note.get("title", "")
+                        if not title or title in seen_titles:
+                            continue
+                        seen_titles.add(title)
+                        
+                        topics.append({
+                            "title": title,
+                            "url": note.get("url", ""),
+                            "platform": "xiaohongshu",
+                            "likes": note.get("likes", 8000),
+                            "comments": note.get("comments", 300),
+                            "shares": note.get("shares", 50),
+                            "author_followers": note.get("author_followers", 3000),
+                            "source": "tikhub"
+                        })
+                except:
+                    pass
+        
+    except Exception as e:
+        print(f"TIKHUB fetch error: {e}")
+    
+    return topics[:limit]
+
+
+# ==================== 算法生成选题 ====================
+
+def _generate_algorithm_topics(keywords: List[str], limit: int, ip_profile: Dict) -> List[Dict]:
+    """用算法生成选题（TIKHUB失败时的兜底）"""
+    kw = keywords[0] if keywords else "健康"
+    
+    # 基于IP专业领域生成相关话题
+    expertise = ip_profile.get("expertise", "")
+    content_dir = ip_profile.get("content_direction", "")
+    
+    # 构造相关话题模板
+    templates = [
+        f"{kw}行业趋势分析",
+        f"如何{kw}效果更好",
+        f"{kw}赛道的创业机会",
+        f"90%的人都{kw}错了",
+        f"原来{kw}这么简单",
+        f"{kw}的常见误区",
+        f"你必须知道的{kw}知识",
+        f"{kw}如何帮你赚钱",
+    ]
+    
+    # 如果有专业领域，添加更多相关话题
+    if expertise:
+        templates.extend([
+            f"{expertise}从业者必看",
+            f"{expertise}避坑指南",
+        ])
+    
+    topics = []
+    for i, title in enumerate(templates[:limit]):
+        topics.append({
+            "title": title,
+            "url": "",
+            "platform": "algorithm",
+            "likes": 10000 - i * 1000,  # 模拟数据
+            "comments": 500 - i * 50,
+            "shares": 100 - i * 10,
+            "author_followers": 5000,
+            "source": "algorithm"
+        })
+    
+    return topics
+
+
 # ==================== 主推荐逻辑 ====================
 
 async def recommend_topics(db: Session, ip_id: str, limit: int = 12) -> List[TopicScore]:
-    """智能选题推荐"""
+    """智能选题推荐 - TIKHUB优先 + 算法兜底"""
+    
+    # 1. 获取IP信息
     ip = db.query(IP).filter(IP.ip_id == ip_id).first()
     if not ip:
         return []
@@ -179,14 +312,23 @@ async def recommend_topics(db: Session, ip_id: str, limit: int = 12) -> List[Top
         "product_service": ip.product_service or "",
     }
     
+    # 策略配置
     strategy = get_merged_config(db, ip_id)
     weights = strategy.get("four_dim_weights", {
         "traffic": 30, "monetization": 30, "fit": 25, "cost": 15,
     })
     
+    # 2. 提取IP关键词
     keywords = _extract_ip_keywords(ip)
-    raw_topics = _get_mock_topics(keywords, limit)
     
+    # 3. TIKHUB优先获取真实数据
+    raw_topics = await _fetch_tikhub_topics(keywords, limit)
+    
+    # 4. 如果TIKHUB没数据，用算法生成
+    if not raw_topics:
+        raw_topics = _generate_algorithm_topics(keywords, limit, ip_profile)
+    
+    # 5. 评分
     scored_topics = []
     for topic_data in raw_topics:
         topic = topic_data.get("title", "")
@@ -196,6 +338,7 @@ async def recommend_topics(db: Session, ip_id: str, limit: int = 12) -> List[Top
         comments = topic_data.get("comments", 0)
         shares = topic_data.get("shares", 0)
         author_followers = topic_data.get("author_followers", 0)
+        source = topic_data.get("source", "algorithm")
         
         viral_elements = detect_viral_elements(topic)
         
@@ -212,6 +355,7 @@ async def recommend_topics(db: Session, ip_id: str, limit: int = 12) -> List[Top
             fit_score=fit, cost_score=cost,
             likes=likes, comments=comments, shares=shares,
             author_followers=author_followers, viral_elements=viral_elements,
+            source=source,
             overall_score=0, total_score=0,
         )
         
@@ -219,6 +363,7 @@ async def recommend_topics(db: Session, ip_id: str, limit: int = 12) -> List[Top
         topic_score.total_score = traffic + monetization + fit + cost
         scored_topics.append(topic_score)
     
+    # 6. 排序返回
     scored_topics.sort(key=lambda x: x.overall_score, reverse=True)
     return scored_topics[:limit]
 
@@ -229,19 +374,6 @@ def _extract_ip_keywords(ip: IP) -> List[str]:
         if field and isinstance(field, str):
             words.extend([w.strip() for w in re.split(r'[,，、\s]+', field) if len(w.strip()) >= 2])
     return list(set(words))[:20]
-
-
-def _get_mock_topics(keywords: List[str], limit: int) -> List[Dict]:
-    """获取模拟选题数据"""
-    kw = keywords[0] if keywords else "健康"
-    
-    return [
-        {"title": f"{kw}行业趋势分析", "url": "", "platform": "douyin", "likes": 15000, "comments": 800, "shares": 200, "author_followers": 8000},
-        {"title": f"如何{kw}效果更好", "url": "", "platform": "douyin", "likes": 12000, "comments": 600, "shares": 150, "author_followers": 5000},
-        {"title": f"{kw}赛道的创业机会", "url": "", "platform": "xiaohongshu", "likes": 18000, "comments": 1200, "shares": 300, "author_followers": 10000},
-        {"title": f"90%的人都{kw}错了", "url": "", "platform": "douyin", "likes": 25000, "comments": 2000, "shares": 500, "author_followers": 6000},
-        {"title": f"原来{kw}这么简单", "url": "", "platform": "xiaohongshu", "likes": 10000, "comments": 500, "shares": 100, "author_followers": 3000},
-    ][:limit]
 
 
 # ==================== API路由 ====================
@@ -263,6 +395,7 @@ class TopicScoreResponse(BaseModel):
     overall_score: float
     total_score: int
     viral_elements: List[str]
+    source: str
 
 
 @router.get("/strategy/topics/recommend", response_model=List[TopicScoreResponse])
@@ -271,7 +404,7 @@ async def recommend_topics_api(
     limit: int = Query(12, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
-    """智能选题推荐接口"""
+    """智能选题推荐接口 - TIKHUB优先 + 算法兜底"""
     results = await recommend_topics(db, ip_id, limit)
     
     return [
@@ -280,7 +413,7 @@ async def recommend_topics_api(
             traffic_score=r.traffic_score, monetization_score=r.monetization_score,
             fit_score=r.fit_score, cost_score=r.cost_score,
             overall_score=r.overall_score, total_score=r.total_score,
-            viral_elements=r.viral_elements,
+            viral_elements=r.viral_elements, source=r.source,
         )
         for r in results
     ]

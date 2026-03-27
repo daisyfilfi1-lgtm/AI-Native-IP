@@ -2369,3 +2369,33 @@ async def test_recommend_flow(ipId: str = Query("xiaomin1")):
         "matched_count": len(matched),
         "matched": matched,
     }
+
+
+# === 调试核心词匹配 ===
+@router.get("/test/debug-core")
+async def test_debug_core():
+    """调试核心词匹配"""
+    from app.services import multi_source_client
+    
+    cards = await multi_source_client.get_multi_source_topics(limit=5)
+    
+    results = []
+    for card in cards:
+        title = str(card.get("title") or "")
+        original = str(card.get("originalTitle") or "")
+        text = f"{title} {original}"
+        
+        # 检查每个核心词
+        hits = [kw for kw in _XIAOMIN_CORE_KEYWORDS if kw in text]
+        
+        results.append({
+            "title": title[:40],
+            "original": original[:40],
+            "text_sample": text[:80],
+            "hits": hits,
+        })
+    
+    return {
+        "core_keywords": _XIAOMIN_CORE_KEYWORDS,
+        "results": results,
+    }

@@ -30,6 +30,7 @@ from app.services import remix_recommendation_service, tikhub_client, douyin_hot
 from app.services.semantic_topic_filter import filter_topics_by_similarity
 from app.services.style_corpus_service import StyleCorpusService
 from app.services.strategy_config_service import get_merged_config
+from app.services.topic_recommendation_v4 import get_recommendation_service_v4
 
 router = APIRouter(prefix="/creator", tags=["creator"])
 logger = logging.getLogger(__name__)
@@ -1541,7 +1542,45 @@ async def get_recommended_topics(
     limit: int = Query(12, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
-    """场景一第一步：推荐选题（四维评分；不生成正文）。"""
+    """场景一第一步：推荐选题（V4竞品驱动算法）。"""
+    
+    # V4 竞品驱动推荐（xiaomin1 使用竞品爆款数据源）
+    try:
+        v4_service = get_recommendation_service_v4()
+        v4_topics = await v4_service.recommend_topics(
+            db=db,
+            ip_id=ipId,
+            limit=limit,
+            strategy="competitor_first"
+        )
+        
+        if v4_topics:
+            # 转换为前端期望的格式
+            topics = []
+            for topic in v4_topics:
+                topics.append({
+                    "id": topic.topic_id,
+                    "title": topic.title,
+                    "originalTitle": topic.original_title,
+                    "score": round(topic.total_score, 2) if topic.total_score else 3.5,
+                    "estimatedViews": topic.original_plays or "-",
+                    "estimatedCompletion": topic.viral_score or 35,
+                    "tags": topic.tags[:3] if topic.tags else ["创业"],
+                    "reason": f"竞品@{topic.competitor_name}" if topic.competitor_name else "智能推荐",
+                    "sourceUrl": topic.url or "",
+                    # V4 竞品字段
+                    "competitorName": topic.competitor_name,
+                    "competitorPlatform": topic.competitor_platform,
+                    "remixPotential": topic.remix_potential,
+                    "viralScore": topic.viral_score,
+                    "originalPlays": topic.original_plays,
+                })
+            logger.info(f"[V4] Returned {len(topics)} competitor-based topics for {ipId}")
+            return {"topics": topics}
+    except Exception as e:
+        logger.warning(f"[V4] Failed to get recommendations: {e}, falling back to legacy algorithm")
+    
+    # 回退到旧算法
     topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
 
     # 小敏IP：严格模式，不相关热点直接丢弃，不兜底

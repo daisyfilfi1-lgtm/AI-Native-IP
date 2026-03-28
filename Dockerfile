@@ -1,13 +1,18 @@
 # 从 backend 目录构建并运行，便于在仓库根目录被平台识别
 FROM python:3.11-slim
 
+# 与 backend/Dockerfile 一致：Playwright --with-deps 需要 apt 与证书
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 安装 Playwright 浏览器（小红书/抖音需要无头浏览器）
-RUN pip install playwright && playwright install chromium --with-deps
+# 必须用 python -m playwright；仅 pip install playwright 不会带浏览器
+RUN python -m playwright install chromium --with-deps
 
 COPY backend/ .
 RUN chmod +x worker_entrypoint.sh

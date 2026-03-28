@@ -33,9 +33,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 安装 Playwright 浏览器
-RUN python -m playwright install chromium
-RUN python -m playwright install-deps chromium
+# 安装 Chromium 及系统依赖（--with-deps 会 apt 装库并下载浏览器；勿只装 pip 包）
+RUN python -m playwright install chromium --with-deps
 
 COPY . .
 RUN chmod +x worker_entrypoint.sh

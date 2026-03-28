@@ -1,5 +1,6 @@
 # Railway Config as Code（服务 Root Directory 设为 backend 时生效）
 # 显式使用 Docker 构建：上下文为 backend/，使用本目录下 Dockerfile。
+# 若面板里 Builder 选的是 Nixpacks 而非 Dockerfile，需依赖同目录 nixpacks.toml 在 build 阶段执行 playwright install。
 # RQ Worker 服务勿用本文件：见 railway.worker.toml（Worker 无 HTTP，/health 会导致部署失败）。
 [build]
 builder = "DOCKERFILE"

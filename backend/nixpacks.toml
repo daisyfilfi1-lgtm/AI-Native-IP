@@ -1,0 +1,6 @@
+# Railway 使用 Nixpacks 构建时（面板里未选 Dockerfile / Builder 为 Nixpacks），
+# 仅 pip install 不会下载 Chromium。本阶段在依赖装完后安装浏览器与系统库。
+# 若已在 Railway → Build → Builder 选择 Dockerfile，可忽略本文件。
+[phases.build]
+dependsOn = ["install"]
+cmds = ["python -m playwright install chromium --with-deps"]

@@ -292,9 +292,19 @@ def _rerank_tikhub_candidates(
                 "originalTitle": original_title,  # 添加原标题
                 "score": round(total * 5.0, 2),
                 "tags": tags,
-                "estimatedViews": str(card.get("estimatedViews") or "-"),
-                "estimatedCompletion": int(card.get("estimatedCompletion") or 0),
-                "sourceUrl": str(card.get("sourceUrl") or ""),
+                "estimatedViews": str(
+                    card.get("estimatedViews")
+                    or card.get("estimated_views")
+                    or "—"
+                ),
+                "estimatedCompletion": int(
+                    card.get("estimatedCompletion")
+                    or card.get("estimated_completion")
+                    or 0
+                ),
+                "sourceUrl": str(
+                    card.get("sourceUrl") or card.get("source_url") or ""
+                ),
                 "reason": (
                     f"{(source_reason or '大数据候选')} + 四维重排 R/H/CV="
                     f"{round(relevance, 2)}/{round(hotness, 2)}/"

@@ -92,6 +92,15 @@ function AgentStatusCard({
   );
 }
 
+/** 无有效 URL 时用标题生成抖音搜索页，保证始终可点「看原文/溯源」 */
+function buildTopicSourceUrl(topic: TopicCard): string | null {
+  const direct = (topic.sourceUrl || '').trim();
+  if (direct.startsWith('http')) return direct;
+  const q = (topic.originalTitle || topic.title || '').trim();
+  if (q.length < 2) return null;
+  return `https://www.douyin.com/search/${encodeURIComponent(q.slice(0, 80))}`;
+}
+
 // 选题卡片组件
 function TopicCardComponent({ 
   topic, 
@@ -105,6 +114,9 @@ function TopicCardComponent({
   isGenerating: boolean;
 }) {
   const scoreColor = topic.score >= 4.8 ? 'text-accent-green' : topic.score >= 4.5 ? 'text-accent-yellow' : 'text-foreground';
+  const sourceHref = buildTopicSourceUrl(topic);
+  const originalText = (topic.originalTitle || '').trim();
+  const showOriginalBlock = Boolean(originalText);
 
   return (
     <motion.div
@@ -136,25 +148,28 @@ function TopicCardComponent({
             {topic.title}
           </h3>
           
-          {/* Original Title - 原标题 */}
-          {topic.originalTitle && topic.originalTitle !== topic.title && (
+          {/* Original Title - 原标题（与推荐标题相同也展示，避免「无原文」） */}
+          {showOriginalBlock && (
             <div className="mb-3 p-2 bg-background-tertiary/50 rounded-lg">
-              <div className="text-xs text-foreground-tertiary mb-1">原热点</div>
-              <div className="text-sm text-foreground-secondary line-clamp-1">{topic.originalTitle}</div>
+              <div className="text-xs text-foreground-tertiary mb-1">原热点 / 原文参考</div>
+              <div className="text-sm text-foreground-secondary line-clamp-2">{originalText}</div>
+              {originalText === (topic.title || '').trim() && (
+                <div className="text-xs text-foreground-muted mt-1">与当前推荐标题一致（数据源未单独给原文）</div>
+              )}
             </div>
           )}
           
-          {/* Source Link - 原链接 */}
-          {topic.sourceUrl && (
+          {/* Source Link - 原链接（接口无 URL 时用标题兜底抖音搜索） */}
+          {sourceHref && (
             <a 
-              href={topic.sourceUrl}
+              href={sourceHref}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 mb-3 text-xs text-primary-400 hover:text-primary-300 transition-colors"
               onClick={(e) => e.stopPropagation()}
             >
               <LinkIcon className="w-3 h-3" />
-              查看原链接
+              {(topic.sourceUrl || '').trim() ? '查看原链接' : '抖音搜索原文'}
               <ExternalLink className="w-3 h-3" />
             </a>
           )}
@@ -206,7 +221,7 @@ function TopicCardComponent({
           <div className="space-y-2 mb-4 p-3 bg-background-tertiary/50 rounded-xl">
             <div className="flex items-center justify-between text-sm">
               <span className="text-foreground-secondary">预估播放</span>
-              <span className="font-semibold text-foreground">{topic.estimatedViews}</span>
+              <span className="font-semibold text-foreground">{topic.estimatedViews || '—'}</span>
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs">

@@ -266,6 +266,41 @@ const USE_MOCK = false; // 设置为false时连接真实后端
 /** 与 lib/api.ts 一致：Railway 生产环境依赖 X-API-Key（须与后端 API_KEY 相同） */
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
 
+/** 后端部分路径返回 snake_case；统一为前端 TopicCard camelCase，避免原链接/原热点为空 */
+export function normalizeTopicCard(raw: Record<string, unknown>): TopicCard {
+  const base = raw as unknown as TopicCard;
+  const str = (a: string, b: string) => {
+    const v = raw[a] ?? raw[b];
+    if (typeof v === 'string') return v.trim();
+    if (v != null && typeof v !== 'object') return String(v).trim();
+    return '';
+  };
+  const sourceUrl = str('sourceUrl', 'source_url');
+  const originalTitle = str('originalTitle', 'original_title');
+  const evRaw = raw.estimatedViews ?? raw.estimated_views;
+  let estimatedViews = '';
+  if (typeof evRaw === 'number' && Number.isFinite(evRaw)) estimatedViews = String(evRaw);
+  else estimatedViews = str('estimatedViews', 'estimated_views');
+  if (!estimatedViews) estimatedViews = '—';
+  const comp = raw.estimatedCompletion ?? raw.estimated_completion;
+  let estimatedCompletion = 0;
+  if (typeof comp === 'number' && Number.isFinite(comp)) estimatedCompletion = Math.round(comp);
+  else if (typeof comp === 'string' && comp.trim()) {
+    const n = parseInt(comp, 10);
+    if (!Number.isNaN(n)) estimatedCompletion = n;
+  }
+  const originalPlays = str('originalPlays', 'original_plays');
+
+  return {
+    ...base,
+    sourceUrl: sourceUrl || undefined,
+    originalTitle: originalTitle || undefined,
+    estimatedViews,
+    estimatedCompletion,
+    originalPlays: originalPlays || undefined,
+  };
+}
+
 async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
   if (USE_MOCK) {
     throw new Error('Mock mode: API not implemented');
@@ -334,10 +369,11 @@ export const creatorApi = {
     if (USE_MOCK) {
       return mockTopics;
     }
-    const resp = await apiFetch<{ topics: TopicCard[] }>(
+    const resp = await apiFetch<{ topics: Record<string, unknown>[] }>(
       `/api/v1/creator/topics/recommended?ipId=${encodeURIComponent(ipId)}`
     );
-    return resp.topics || [];
+    const list = resp.topics || [];
+    return list.map((t) => normalizeTopicCard(t));
   },
 
   async refreshTopics(ipId: string = 'xiaomin1'): Promise<TopicCard[]> {
@@ -345,10 +381,11 @@ export const creatorApi = {
       await new Promise(resolve => setTimeout(resolve, 1000));
       return [...mockTopics].sort(() => Math.random() - 0.5);
     }
-    const resp = await apiFetch<{ topics: TopicCard[] }>(
+    const resp = await apiFetch<{ topics: Record<string, unknown>[] }>(
       `/api/v1/creator/topics/refresh?ipId=${encodeURIComponent(ipId)}`
     );
-    return resp.topics || [];
+    const list = resp.topics || [];
+    return list.map((t) => normalizeTopicCard(t));
   },
 
   // 场景一第二步：选中推荐选题后生成正文

@@ -369,8 +369,12 @@ export const creatorApi = {
     if (USE_MOCK) {
       return mockTopics;
     }
+    const safeIp =
+      (ipId || '').trim() ||
+      (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_CREATOR_IP_ID : '') ||
+      'xiaomin1';
     const resp = await apiFetch<{ topics: Record<string, unknown>[] }>(
-      `/api/v1/creator/topics/recommended?ipId=${encodeURIComponent(ipId)}`
+      `/api/v1/creator/topics/recommended?ipId=${encodeURIComponent(safeIp)}`
     );
     const list = resp.topics || [];
     return list.map((t) => normalizeTopicCard(t));
@@ -381,8 +385,12 @@ export const creatorApi = {
       await new Promise(resolve => setTimeout(resolve, 1000));
       return [...mockTopics].sort(() => Math.random() - 0.5);
     }
+    const safeIp =
+      (ipId || '').trim() ||
+      (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_CREATOR_IP_ID : '') ||
+      'xiaomin1';
     const resp = await apiFetch<{ topics: Record<string, unknown>[] }>(
-      `/api/v1/creator/topics/refresh?ipId=${encodeURIComponent(ipId)}`
+      `/api/v1/creator/topics/refresh?ipId=${encodeURIComponent(safeIp)}`
     );
     const list = resp.topics || [];
     return list.map((t) => normalizeTopicCard(t));

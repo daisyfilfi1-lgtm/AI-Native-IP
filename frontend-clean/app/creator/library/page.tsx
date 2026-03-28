@@ -12,6 +12,7 @@ import {
   FileText,
   Eye,
   Heart,
+  MoreHorizontal,
   Play,
   Trash2,
   RefreshCw,
@@ -24,7 +25,6 @@ import {
   X
 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 
 interface TabConfig {
   value: string;
@@ -53,26 +53,6 @@ const statusConfig: Record<LibraryItem['status'], StatusConfig> = {
   published: { label: '已发布', variant: 'primary' },
   viral: { label: '爆款', variant: 'success' },
 };
-
-const styleEmojis: Record<string, string> = {
-  angry: '🔥',
-  calm: '😌',
-  humor: '😄',
-};
-
-/** 与生成页一致：打开已保存草稿全文（hook/story/opinion/cta） */
-function libraryItemDetailHref(item: LibraryItem): string {
-  const src = item.generationSource || 'topic';
-  const type =
-    src === 'remix'
-      ? 'remix'
-      : src === 'original' || src === 'voice'
-        ? 'original'
-        : src === 'viral'
-          ? 'viral'
-          : 'topic';
-  return `/creator/generate?id=${encodeURIComponent(item.id)}&type=${type}&from=library`;
-}
 
 // 4维数据诊断配置
 const METRICS_CONFIG = [
@@ -123,7 +103,6 @@ const METRICS_CONFIG = [
 ];
 
 export default function CreatorLibraryPage() {
-  const router = useRouter();
   const [activeTab, setActiveTab] = useState('all');
   const [contents, setContents] = useState<LibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,26 +127,6 @@ export default function CreatorLibraryPage() {
     }
   };
 
-  const handleDelete = async (content: LibraryItem) => {
-    if (
-      !confirm(
-        `确定删除「${content.title.slice(0, 40)}${content.title.length > 40 ? '…' : ''}」？删除后不可恢复。`
-      )
-    ) {
-      return;
-    }
-    setDeletingId(content.id);
-    try {
-      await creatorApi.deleteLibraryItem(content.id);
-      await loadContents();
-    } catch (e) {
-      console.error('Delete failed:', e);
-      alert('删除失败，请稍后重试或检查网络。');
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
   const formatNumber = (num: number): string => {
     if (num >= 10000) return (num / 10000).toFixed(1) + 'w';
     if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
@@ -176,7 +135,38 @@ export default function CreatorLibraryPage() {
 
   const getViews = (content: LibraryItem): number => content.metrics?.views ?? 0;
   const getLikes = (content: LibraryItem): number => content.metrics?.likes ?? 0;
-  const getStyle = (content: LibraryItem): string => content.generationSource || 'angry';
+
+  const handleDelete = async (content: LibraryItem, e: React.MouseEvent) => {
+    e.stopPropagation(); // 防止触发卡片点击
+    if (deletingId) return;
+    const ok = window.confirm(`确认删除「${content.title}」吗？删除后不可恢复。`);
+    if (!ok) return;
+    setDeletingId(content.id);
+    try {
+      await creatorApi.deleteLibraryItem(content.id);
+      // 从列表中移除已删除的项
+      setContents(prev => prev.filter(item => item.id !== content.id));
+    } catch (error) {
+      console.error('Delete failed:', error);
+      window.alert(error instanceof Error ? error.message : '删除失败，请稍后重试');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleCardClick = (content: LibraryItem) => {
+    // 点击卡片查看内容详情
+    if (content.status === 'published' || content.status === 'viral') {
+      setSelectedContent(content);
+      setShowAnalytics(true);
+    } else if (content.status === 'draft') {
+      // 草稿跳转到编辑页面
+      window.alert('草稿编辑功能即将开放');
+    } else if (content.status === 'pending') {
+      // 待审核查看详情
+      window.alert('审核详情功能即将开放');
+    }
+  };
 
   return (
     <CreatorLayout>
@@ -222,26 +212,16 @@ export default function CreatorLibraryPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {contents.map((content) => {
-            const detailHref = libraryItemDetailHref(content);
-            return (
+          {contents.map((content) => (
             <Card 
               key={content.id}
-              className="group overflow-hidden hover:border-primary-500/50 transition-colors"
+              className="group overflow-hidden hover:border-primary-500/50 transition-colors cursor-pointer"
+              onClick={() => handleCardClick(content)}
             >
-              <Link
-                href={detailHref}
-                className="block text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 rounded-t-xl"
-              >
               {/* Thumbnail Placeholder */}
               <div className="aspect-video bg-gradient-to-br from-background-tertiary to-background-elevated flex items-center justify-center relative">
                 <FileText className="w-12 h-12 text-foreground-tertiary" />
                 
-                {/* Style Emoji */}
-                <div className="absolute top-3 left-3 w-8 h-8 rounded-full bg-background/80 flex items-center justify-center text-lg">
-                  {styleEmojis[getStyle(content)]}
-                </div>
-
                 {/* Status Badge */}
                 <div className="absolute top-3 right-3">
                   <Badge variant={statusConfig[content.status].variant} size="sm">
@@ -249,20 +229,22 @@ export default function CreatorLibraryPage() {
                   </Badge>
                 </div>
 
-                {/* Hover: 进入全文 */}
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                  <span className="w-10 h-10 rounded-full bg-white flex items-center justify-center">
+                {/* Hover Actions */}
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button className="w-10 h-10 rounded-full bg-white flex items-center justify-center hover:scale-110 transition-transform">
                     <Play className="w-5 h-5 text-foreground" />
-                  </span>
+                  </button>
                 </div>
               </div>
 
-              <div className="px-4 pt-4">
+              {/* Content Info */}
+              <div className="p-4">
                 <h3 className="font-semibold text-foreground mb-2 line-clamp-2 group-hover:text-primary-400 transition-colors">
                   {content.title}
                 </h3>
 
-                <div className="flex items-center gap-4 text-sm text-foreground-secondary mb-1">
+                {/* Stats */}
+                <div className="flex items-center gap-4 text-sm text-foreground-secondary mb-3">
                   {getViews(content) > 0 && (
                     <div className="flex items-center gap-1">
                       <Eye className="w-4 h-4" />
@@ -279,18 +261,11 @@ export default function CreatorLibraryPage() {
                     {new Date(content.createdAt).toLocaleDateString('zh-CN')}
                   </span>
                 </div>
-                <p className="text-xs text-primary-400/90 mb-3">点击查看全文 →</p>
-              </div>
-              </Link>
 
-                {/* Actions（不进入详情链接，避免误触） */}
-                <div className="flex items-center gap-2 p-4 pt-0">
+                {/* Actions */}
+                <div className="flex items-center gap-2">
                   {content.status === 'draft' && (
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => router.push(detailHref)}
-                    >
+                    <Button size="sm" className="flex-1" onClick={(e) => { e.stopPropagation(); window.alert('草稿编辑入口即将开放'); }}>
                       继续编辑
                     </Button>
                   )}
@@ -299,62 +274,51 @@ export default function CreatorLibraryPage() {
                       size="sm"
                       variant="secondary"
                       className="flex-1"
-                      onClick={() => router.push(detailHref)}
+                      onClick={(e) => { e.stopPropagation(); window.alert('审核详情入口即将开放'); }}
                     >
                       查看详情
                     </Button>
                   )}
                   {content.status === 'published' && (
-                    <>
                     <Button 
                       size="sm" 
                       variant="secondary" 
                       className="flex-1"
-                      onClick={() => {
+                      onClick={(e) => { 
+                        e.stopPropagation();
                         setSelectedContent(content);
                         setShowAnalytics(true);
                       }}
                     >
                       查看数据
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="shrink-0"
-                      onClick={() => router.push(detailHref)}
-                    >
-                      全文
-                    </Button>
-                    </>
                   )}
                   {content.status === 'viral' && (
-                    <>
-                    <Button size="sm" className="flex-1" leftIcon={<RefreshCw className="w-3 h-3" />}>
-                      复用爆款
-                    </Button>
                     <Button
                       size="sm"
-                      variant="ghost"
-                      className="shrink-0"
-                      onClick={() => router.push(detailHref)}
+                      className="flex-1"
+                      leftIcon={<RefreshCw className="w-3 h-3" />}
+                      onClick={(e) => { e.stopPropagation(); window.alert('复用爆款入口即将开放'); }}
                     >
-                      全文
+                      复用爆款
                     </Button>
-                    </>
                   )}
                   <button
-                    type="button"
-                    title="删除"
+                    className="p-2 rounded-lg hover:bg-accent-red/10 hover:text-accent-red transition-colors disabled:opacity-50"
+                    onClick={(e) => void handleDelete(content, e)}
                     disabled={deletingId === content.id}
-                    onClick={() => handleDelete(content)}
-                    className="p-2 rounded-lg hover:bg-red-500/10 text-foreground-secondary hover:text-red-400 transition-colors disabled:opacity-40"
+                    title="删除内容"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    {deletingId === content.id ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
                   </button>
                 </div>
+              </div>
             </Card>
-            );
-          })}
+          ))}
         </div>
       )}
 

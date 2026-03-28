@@ -1,0 +1,31 @@
+# Netlify 根配置 - 指向 frontend 目录
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Edge Functions 配置
+[[edge_functions]]
+  function = "api-proxy"
+  path = "/api/*"
+
+# API 代理到 Railway
+[[redirects]]
+  from = "/api/*"
+  to = "https://ai-native-ip-production.up.railway.app/api/:splat"
+  status = 200
+  force = true
+
+# 健康检查
+[[redirects]]
+  from = "/health"
+  to = "https://ai-native-ip-production.up.railway.app/health"
+  status = 200
+  force = true
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

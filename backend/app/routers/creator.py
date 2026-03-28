@@ -935,6 +935,17 @@ def _target_duration_to_length(seconds: int) -> str:
     return "medium"
 
 
+def _sanitize_for_json(obj: Any) -> Any:
+    """PostgreSQL JSONB / json.dumps 不接受 NaN/Inf，嵌套 dict 中也可能出现。"""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else 0.0
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
 def _split_content_sections(text: str) -> Dict[str, str]:
     """将纯文本草稿粗分为 hook/story/opinion/cta，避免前端展示占位。"""
     content = (text or "").strip()
@@ -979,12 +990,20 @@ def _save_generated_draft(
     }
     if isinstance(extra_workflow, dict) and extra_workflow:
         workflow.update(extra_workflow)
+    workflow = _sanitize_for_json(workflow)
+    try:
+        sc = float(score or 0.0)
+        if not math.isfinite(sc):
+            sc = 0.0
+    except (TypeError, ValueError):
+        sc = 0.0
+    qs = _sanitize_for_json({"score": sc})
     row = ContentDraft(
         draft_id=draft_id,
         ip_id=ip_id or "1",
         level=level,
         workflow=workflow,
-        quality_score={"score": float(score or 0.0)},
+        quality_score=qs,
         compliance_status="passed",
     )
     db.add(row)

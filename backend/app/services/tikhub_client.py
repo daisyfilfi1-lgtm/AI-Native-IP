@@ -304,6 +304,38 @@ def parse_xhs_topic_feed_notes(
     return out
 
 
+async def resolve_share_url_for_tikhub(url: str) -> str:
+    """
+    小红书短链（xhslink.com）常带 http，需 https + 跟随跳转，hybrid 接口才易解析成功。
+    """
+    u = (url or "").strip()
+    if not u:
+        return u
+    if u.startswith("http://"):
+        u = "https://" + u[len("http://") :]
+    low = u.lower()
+    if "xhslink.com" not in low:
+        return u
+    try:
+        timeout = httpx.Timeout(25.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            r = await client.get(
+                u,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    ),
+                },
+            )
+            final = str(r.url)
+            if final.startswith("http"):
+                return final.split("#")[0]
+    except Exception as e:
+        logger.warning("resolve_share_url_for_tikhub failed url=%s: %s", url[:120], e)
+    return u
+
+
 async def extract_competitor_text_for_remix(url: str) -> str:
     """
     仿写解构用文本：抖音分享链优先走 Web 单条作品接口，其余走 hybrid。
@@ -311,6 +343,7 @@ async def extract_competitor_text_for_remix(url: str) -> str:
     u = url.strip()
     if not u:
         return ""
+    u = await resolve_share_url_for_tikhub(u)
     if looks_like_douyin_share_url(u):
         try:
             raw = await fetch_douyin_web_one_video_by_share_url(u)

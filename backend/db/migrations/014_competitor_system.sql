@@ -3,7 +3,7 @@
 -- Created: 2026-03-27
 
 -- ============================================================
--- 1. 创建竞品账号表
+-- 1. 创建竞品账号表（如果不存在）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS competitor_accounts (
     competitor_id VARCHAR(64) PRIMARY KEY,
@@ -17,6 +17,12 @@ CREATE TABLE IF NOT EXISTS competitor_accounts (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 修复：如果表已存在但缺少列，添加它们（使用 IF NOT EXISTS 避免报错）
+ALTER TABLE competitor_accounts ADD COLUMN IF NOT EXISTS external_id VARCHAR(255);
+ALTER TABLE competitor_accounts ADD COLUMN IF NOT EXISTS followers_display VARCHAR(64);
+ALTER TABLE competitor_accounts ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- 创建索引
 CREATE INDEX IF NOT EXISTS idx_competitor_accounts_ip_id ON competitor_accounts(ip_id);
 
 -- ============================================================

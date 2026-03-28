@@ -1,8 +1,9 @@
 """
-链接 → 仿写信源文本：可插拔链路（TikHub → 可选 yt-dlp → URL 兜底）。
+链接 → 仿写信源文本：可插拔链路（TikHub → yt-dlp → Web爬取 → URL 兜底）。
 
 - TikHub：见 tikhub_client.try_extract_competitor_text_tikhub
 - yt-dlp：需镜像内安装 `yt-dlp` 可执行文件，并设置 REMIX_YTDLP_FALLBACK=1
+- Web爬取：直接请求抖音/小红书移动端页面，提取标题和简介
 """
 
 from __future__ import annotations
@@ -11,8 +12,11 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 from typing import Any, Dict, List, Optional
+
+import httpx
 
 from app.services import tikhub_client
 
@@ -89,6 +93,104 @@ async def _try_ytdlp_metadata_text(url: str) -> str:
     return text[:12000] if text.strip() else ""
 
 
+# ==================== Web 爬取方案 ====================
+
+MOBILE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+}
+
+
+async def _extract_douyin_web(url: str) -> str:
+    """直接爬取抖音移动端页面提取文案"""
+    try:
+        # 抖音移动端页面
+        mobile_url = url
+        if "www.douyin.com" in url:
+            # 尝试获取 embed 页面
+            video_id = re.search(r'/video/(\d+)', url)
+            if video_id:
+                mobile_url = f"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id={video_id.group(1)}"
+        
+        timeout = httpx.Timeout(15.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            # 尝试 API 接口
+            if "/aweme/v1/web/aweme/detail/" in mobile_url:
+                r = await client.get(mobile_url, headers=MOBILE_HEADERS)
+                if r.status_code == 200:
+                    data = r.json()
+                    aweme_detail = data.get("aweme_detail", {})
+                    desc = aweme_detail.get("desc", "")
+                    if desc:
+                        return desc.strip()
+            
+            # 回退到网页爬取
+            r = await client.get(url, headers=MOBILE_HEADERS)
+            if r.status_code == 200:
+                html = r.text
+                # 尝试从 JSON 提取
+                patterns = [
+                    r'"desc"\s*:\s*"([^"]*)"',
+                    r'"description"\s*:\s*"([^"]*)"',
+                    r'"share_title"\s*:\s*"([^"]*)"',
+                ]
+                for pat in patterns:
+                    match = re.search(pat, html)
+                    if match:
+                        text = match.group(1).strip()
+                        if text:
+                            return text[:2000]
+                # 从 <title> 提取
+                title_match = re.search(r'<title>([^<]+)</title>', html)
+                if title_match:
+                    return title_match.group(1).strip()
+    except Exception as e:
+        logger.warning(f"抖音Web爬取失败: {e}")
+    return ""
+
+
+async def _extract_xiaohongshu_web(url: str) -> str:
+    """直接爬取小红书移动端页面提取文案"""
+    try:
+        timeout = httpx.Timeout(15.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            # 小红书移动端
+            r = await client.get(url, headers=MOBILE_HEADERS)
+            if r.status_code == 200:
+                html = r.text
+                # 从 JSON 提取标题和内容
+                patterns = [
+                    r'"title"\s*:\s*"([^"]*)"',
+                    r'"desc"\s*:\s*"([^"]*)"',
+                    r'"noteTitle"\s*:\s*"([^"]*)"',
+                    r'"content"\s*:\s*"([^"]*)"',
+                ]
+                parts = []
+                for pat in patterns:
+                    matches = re.findall(pat, html)
+                    for m in matches[:2]:  # 取前2个
+                        if m and len(m) > 5:
+                            parts.append(m.strip())
+                if parts:
+                    return "\n\n".join(parts)[:2000]
+    except Exception as e:
+        logger.warning(f"小红书Web爬取失败: {e}")
+    return ""
+
+
+async def _try_web_scraper(url: str) -> str:
+    """Web 爬取入口 - 自动识别平台"""
+    low = url.lower()
+    
+    if "douyin.com" in low:
+        return await _extract_douyin_web(url)
+    elif "xiaohongshu.com" in low or "xhslink" in low:
+        return await _extract_xiaohongshu_web(url)
+    
+    return ""
+
+
 async def extract_competitor_text_for_remix(url: str) -> str:
     """
     仿写入口：解析短链后依次尝试 TikHub、（可选）yt-dlp，最后退回标题+URL。
@@ -129,7 +231,14 @@ async def extract_competitor_text_for_remix(url: str) -> str:
                 return "【API权限不足】请在 TikHub 后台开启 API 权限：https://user.tikhub.io/dashboard/api"
             logger.error(f"TikHub 提取异常: {type(e).__name__}: {e}")
 
-    # 3. yt-dlp 备选
+    # 3. Web 爬取备选（不依赖 TikHub）
+    logger.info("尝试 Web 爬取...")
+    web_text = await _try_web_scraper(resolved)
+    if web_text.strip():
+        logger.info(f"Web 爬取成功，长度: {len(web_text)}")
+        return web_text.strip()
+
+    # 4. yt-dlp 备选
     if _ytdlp_enabled():
         logger.info("尝试 yt-dlp 备选...")
         ytdlp_text = await _try_ytdlp_metadata_text(resolved)
@@ -137,7 +246,7 @@ async def extract_competitor_text_for_remix(url: str) -> str:
             logger.info(f"yt-dlp 提取成功，长度: {len(ytdlp_text)}")
             return ytdlp_text.strip()
 
-    # 4. 兜底：从 URL 尝试提取有用信息
+    # 5. 兜底：从 URL 尝试提取有用信息
     fallback = build_fallback_text(resolved)
     logger.warning(f"所有方案失败，使用兜底方案: {len(fallback)} 字符")
     return fallback
@@ -174,41 +283,70 @@ async def resolve_short_url(url: str) -> str:
     return u
 
 
-def build_fallback_text(url: str) -> str:
-    """兜底方案：从 URL 提取主题信息"""
-    if not url:
-        return ""
+async def extract_competitor_text_with_fallback(url: str) -> dict:
+    """
+    带诊断信息的竞品文本提取。
     
-    # 尝试从 URL 提取有用信息
-    parts = []
-    
-    # 提取路径中的关键词
-    from urllib.parse import urlparse, parse_qs
+    返回:
+        dict: {
+            "success": bool,
+            "text": str,  # 成功时为提取的文本，失败时为""
+            "error": str,  # 失败时的错误信息
+            "method": str,  # 使用的提取方法
+        }
+    """
+    u = (url or "").strip()
+    if not u:
+        return {
+            "success": False,
+            "text": "",
+            "error": "链接不能为空",
+            "method": "none"
+        }
+
+    # 1. 短链解析
     try:
-        parsed = urlparse(url)
-        path = parsed.path
-        
-        # 抖音视频 ID
-        if "/video/" in path:
-            vid = path.split("/video/")[-1].split("/")[0].split("?")[0]
-            parts.append(f"抖音视频ID: {vid}")
-        
-        # 小红书笔记 ID  
-        if "/explore/" in path:
-            nid = path.split("/explore/")[-1].split("/")[0].split("?")[0]
-            parts.append(f"小红书笔记ID: {nid}")
-        
-        # 从域名提取平台
-        domain = parsed.netloc.lower()
-        if "douyin" in domain:
-            parts.append("来源: 抖音")
-        elif "xiaohongshu" in domain or "xhslink" in domain:
-            parts.append("来源: 小红书")
-            
+        resolved = await resolve_short_url(u)
     except Exception as e:
-        logger.debug(f"URL解析失败: {e}")
-    
-    if parts:
-        return "".join(parts) + f"\n原始链接: {url[:2000]}"
-    
-    return url[:2000]
+        return {
+            "success": False,
+            "text": "",
+            "error": f"短链解析失败: {e}",
+            "method": "none"
+        }
+
+    # 2. TikHub 提取
+    if tikhub_client.is_configured():
+        try:
+            t = await tikhub_client.try_extract_competitor_text_tikhub(resolved)
+            if t and t.strip():
+                return {
+                    "success": True,
+                    "text": t.strip(),
+                    "error": "",
+                    "method": "tikhub"
+                }
+        except Exception as e:
+            logger.warning(f"TikHub提取失败: {e}")
+
+    # 3. yt-dlp 备选
+    if _ytdlp_enabled():
+        try:
+            ytdlp_text = await _try_ytdlp_metadata_text(resolved)
+            if ytdlp_text.strip():
+                return {
+                    "success": True,
+                    "text": ytdlp_text.strip(),
+                    "error": "",
+                    "method": "ytdlp"
+                }
+        except Exception as e:
+            logger.warning(f"yt-dlp提取失败: {e}")
+
+    # 4. 都失败
+    return {
+        "success": False,
+        "text": "",
+        "error": "无法从链接提取内容。可能原因：\n1. TIKHUB_API_KEY未配置\n2. 链接无效或视频已删除\n3. 网络连接问题",
+        "method": "none"
+    }

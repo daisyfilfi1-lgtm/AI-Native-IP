@@ -1140,19 +1140,19 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
             # 提供更友好的错误信息
             error_msg = extraction_result["error"]
             
-            # 分类错误信息
+            # 分类错误信息 - 提供明确的解决方案
             if "TIKHUB_API_KEY" in error_msg:
-                user_error = "文本提取服务未配置（TIKHUB_API_KEY），请联系管理员配置或使用手动输入模式"
+                user_error = "文本提取服务未配置（TIKHUB_API_KEY），建议：\n1. 点击「第三方工具」提取文案\n2. 或使用「粘贴文案」手动输入"
             elif "403" in error_msg or "权限" in error_msg:
-                user_error = "API 权限不足，请联系管理员检查 TikHub 权限配置"
+                user_error = "API 权限不足，建议：\n1. 点击「第三方工具」提取文案\n2. 或使用「粘贴文案」手动输入\n3. 或联系管理员检查 TikHub 权限"
             elif "404" in error_msg or "不存在" in error_msg:
                 user_error = "视频不存在或已被删除，请检查链接是否有效"
             elif "超时" in error_msg:
                 user_error = "提取超时，请稍后重试或更换链接"
             elif "Web 爬取" in error_msg and "失败" in error_msg:
-                user_error = "无法自动提取该链接内容。建议：\n1. 检查链接是否有效\n2. 尝试复制视频文案手动粘贴\n3. 更换其他视频链接"
+                user_error = "无法自动提取该链接内容。建议：\n1. 点击「第三方工具」提取文案\n2. 使用「粘贴文案」手动输入\n3. 更换其他视频链接"
             else:
-                user_error = f"无法提取链接内容: {error_msg[:200]}"
+                user_error = f"无法提取链接内容，建议：\n1. 使用「第三方工具」提取文案\n2. 或「粘贴文案」手动输入"
             
             return {
                 "id": "gen_remix_extract_failed",

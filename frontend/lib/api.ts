@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosInstance } from 'axios';
 
+import { getBrowserApiBaseUrl } from '@/lib/apiBaseUrl';
 import { getStoredToken } from '@/lib/auth';
 
 import type { 
@@ -25,15 +26,13 @@ import type {
   AudioTopicsResult,
 } from '@/types';
 
-// 使用相对路径，让 Netlify Edge Function 代理请求到 Railway
-// 避免浏览器直接跨域请求 Railway 导致的 CORS 和超时问题
-const API_BASE_URL = '/api/v1';
-
 // API 密钥（从环境变量读取）
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
 
-console.log('[API] Base URL:', API_BASE_URL, '(via Netlify Edge Function)');
-console.log('[API] API Key configured:', API_KEY ? 'Yes' : 'No');
+if (process.env.NODE_ENV === 'development') {
+  // eslint-disable-next-line no-console
+  console.log('[API] API Key configured:', API_KEY ? 'Yes' : 'No');
+}
 
 class ApiClient {
   private client: AxiosInstance;
@@ -49,12 +48,15 @@ class ApiClient {
     }
     
     this.client = axios.create({
-      baseURL: API_BASE_URL,
+      baseURL: '/api/v1',
       headers,
       timeout: 30000,
     });
 
     this.client.interceptors.request.use((config) => {
+      if (typeof window !== 'undefined') {
+        config.baseURL = getBrowserApiBaseUrl();
+      }
       const token = getStoredToken();
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
@@ -77,6 +79,12 @@ class ApiClient {
   // IP APIs
   async listIPs(): Promise<IP[]> {
     const response = await this.client.get<IP[]>('/ip');
+    return response.data;
+  }
+
+  /** 当前登录用户拥有的 IP（需 Bearer JWT） */
+  async listMyIPs(): Promise<IP[]> {
+    const response = await this.client.get<IP[]>('/ip/mine');
     return response.data;
   }
 

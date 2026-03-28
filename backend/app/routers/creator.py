@@ -1633,65 +1633,134 @@ async def _topics_from_algorithm_or_fallback(
     return []
 
 
+def _normalize_topic_source_url(url: Optional[str]) -> str:
+    """仅保留可在浏览器新标签页打开的有效绝对 URL。"""
+    u = (url or "").strip()
+    if not u:
+        return ""
+    if u.startswith("//"):
+        return "https:" + u
+    if u.startswith("http://") or u.startswith("https://"):
+        return u
+    if u.startswith("www."):
+        return "https://" + u
+    return ""
+
+
+def _v4_display_score(total_score: Optional[float]) -> float:
+    """V4 内部总分为 0~1，映射到前端「策略评分」常用区间 3.0~5.0（避免全部显示 0.5）。"""
+    try:
+        t = float(total_score if total_score is not None else 0.5)
+    except (TypeError, ValueError):
+        t = 0.5
+    t = max(0.0, min(1.0, t))
+    return round(3.0 + 2.0 * t, 2)
+
+
+def _filter_topics_for_ip_alignment(
+    ip_id: str,
+    topics: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    与 legacy 一致：对有配置的 IP 应用白名单/黑名单；小敏 IP 额外要求核心词命中。
+    此前 V4 直接返回时跳过了本过滤，导致混入全网热点。
+    """
+    if not topics:
+        return []
+    whitelist = _IP_TOPIC_WHITELIST.get(ip_id) or []
+    blocklist = _IP_TOPIC_BLOCKLIST.get(ip_id) or []
+    out: List[Dict[str, Any]] = []
+    for raw in topics:
+        t = dict(raw)
+        if whitelist and not _topic_hit_whitelist(t, whitelist):
+            continue
+        if blocklist and _topic_hit_blocklist(t, blocklist):
+            continue
+        if ip_id in ("xiaomin", "xiaomin1") and not _topic_hit_core_keywords(t):
+            continue
+        su = _normalize_topic_source_url(str(t.get("sourceUrl") or ""))
+        if su:
+            t["sourceUrl"] = su
+        else:
+            t.pop("sourceUrl", None)
+        out.append(t)
+    return out
+
+
+async def _async_build_recommended_topic_list(
+    db: Session,
+    ip_id: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """V4 → IP 对齐过滤 → legacy → 快照/模板兜底（与 get/refresh 共用）。"""
+    try:
+        v4_service = get_recommendation_service_v4()
+        v4_topics = await v4_service.recommend_topics(
+            db=db,
+            ip_id=ip_id,
+            limit=limit,
+            strategy="competitor_first",
+        )
+        if v4_topics:
+            topics: List[Dict[str, Any]] = []
+            for topic in v4_topics:
+                nu = _normalize_topic_source_url(topic.url or "")
+                topics.append(
+                    {
+                        "id": topic.topic_id,
+                        "title": topic.title,
+                        "originalTitle": topic.original_title,
+                        "score": _v4_display_score(topic.total_score),
+                        "estimatedViews": topic.original_plays or "-",
+                        "estimatedCompletion": topic.viral_score or 35,
+                        "tags": topic.tags[:3] if topic.tags else ["创业"],
+                        "reason": f"竞品@{topic.competitor_name}" if topic.competitor_name else "智能推荐",
+                        "sourceUrl": nu,
+                        "competitorName": topic.competitor_name,
+                        "competitorPlatform": topic.competitor_platform,
+                        "remixPotential": topic.remix_potential,
+                        "viralScore": topic.viral_score,
+                        "originalPlays": topic.original_plays,
+                    }
+                )
+            aligned = _filter_topics_for_ip_alignment(ip_id, topics)
+            if aligned:
+                logger.info(
+                    "[V4] Returned %s topics after IP alignment for %s",
+                    len(aligned),
+                    ip_id,
+                )
+                return aligned
+            logger.info(
+                "[V4] All candidates removed by IP alignment for %s, falling back to legacy",
+                ip_id,
+            )
+    except Exception as e:
+        logger.warning("[V4] Failed to get recommendations: %s, falling back to legacy algorithm", e)
+
+    topics = await _topics_from_algorithm_or_fallback(db, ip_id=ip_id, limit=limit)
+
+    if ip_id in ("xiaomin", "xiaomin1"):
+        if not topics:
+            logger.info("xiaomin: No matching topics from TikHub, returning empty")
+        return topics
+
+    if not topics:
+        topics = _generate_hotlist_snapshot_topics(db, ip_id, limit)
+    if not topics:
+        topics = _generate_fallback_topics(db, ip_id, limit)
+
+    return topics
+
+
 @router.get("/topics/recommended")
 async def get_recommended_topics(
     ipId: str = Query("xiaomin1", description="IP 画像 id（须与 ip.ip_id 一致）"),
     limit: int = Query(12, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
-    """场景一第一步：推荐选题（V4竞品驱动算法）。"""
-    
-    # V4 竞品驱动推荐（xiaomin1 使用竞品爆款数据源）
-    try:
-        v4_service = get_recommendation_service_v4()
-        v4_topics = await v4_service.recommend_topics(
-            db=db,
-            ip_id=ipId,
-            limit=limit,
-            strategy="competitor_first"
-        )
-        
-        if v4_topics:
-            # 转换为前端期望的格式
-            topics = []
-            for topic in v4_topics:
-                topics.append({
-                    "id": topic.topic_id,
-                    "title": topic.title,
-                    "originalTitle": topic.original_title,
-                    "score": round(topic.total_score, 2) if topic.total_score else 3.5,
-                    "estimatedViews": topic.original_plays or "-",
-                    "estimatedCompletion": topic.viral_score or 35,
-                    "tags": topic.tags[:3] if topic.tags else ["创业"],
-                    "reason": f"竞品@{topic.competitor_name}" if topic.competitor_name else "智能推荐",
-                    "sourceUrl": topic.url or "",
-                    # V4 竞品字段
-                    "competitorName": topic.competitor_name,
-                    "competitorPlatform": topic.competitor_platform,
-                    "remixPotential": topic.remix_potential,
-                    "viralScore": topic.viral_score,
-                    "originalPlays": topic.original_plays,
-                })
-            logger.info(f"[V4] Returned {len(topics)} competitor-based topics for {ipId}")
-            return {"topics": topics}
-    except Exception as e:
-        logger.warning(f"[V4] Failed to get recommendations: {e}, falling back to legacy algorithm")
-    
-    # 回退到旧算法
-    topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
-
-    # 小敏IP：严格模式，不相关热点直接丢弃，不兜底
-    if ipId in ("xiaomin", "xiaomin1"):
-        if not topics:
-            logger.info("xiaomin1: No matching topics from TikHub, returning empty")
-        return {"topics": topics}
-
-    # 其他IP：如果外部API都失败，使用算法兜底生成选题
-    if not topics:
-        topics = _generate_hotlist_snapshot_topics(db, ipId, limit)
-    if not topics:
-        topics = _generate_fallback_topics(db, ipId, limit)
-
+    """场景一第一步：推荐选题（V4 竞品驱动 + IP 对齐过滤 + legacy 兜底）。"""
+    topics = await _async_build_recommended_topic_list(db, ipId, limit)
     return {"topics": topics}
 
 
@@ -1701,19 +1770,12 @@ async def refresh_topics(
     limit: int = Query(12, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
-    """刷新推荐选题（四维评分推荐后打散）。"""
-    topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
-
-    # 如果外部API都失败，使用算法兜底
-    if not topics:
-        topics = _generate_hotlist_snapshot_topics(db, ipId, limit)
-    if not topics:
-        topics = _generate_fallback_topics(db, ipId, limit)
-    else:
+    """刷新推荐选题（与 recommended 同源构建后再打散）。"""
+    topics = await _async_build_recommended_topic_list(db, ipId, limit)
+    if topics:
         shuffled = list(topics)
         random.shuffle(shuffled)
         topics = shuffled
-
     return {"topics": topics}
 
 
@@ -1818,12 +1880,15 @@ def _generate_hotlist_snapshot_topics(db: Session, ip_id: str, limit: int) -> Li
 @router.get("/library")
 async def list_creator_library(
     status: Optional[str] = None,
+    ipId: Optional[str] = Query(None, alias="ipId"),
     db: Session = Depends(get_db),
 ):
-    """内容库列表（来自 content_drafts；无数据时返回空数组）"""
+    """内容库列表（来自 content_drafts；无数据时返回空数组）。传 ipId 时仅返回该 IP 下的草稿。"""
+    q = db.query(ContentDraft)
+    if ipId:
+        q = q.filter(ContentDraft.ip_id == ipId)
     rows = (
-        db.query(ContentDraft)
-        .order_by(ContentDraft.created_at.desc())
+        q.order_by(ContentDraft.created_at.desc())
         .limit(200)
         .all()
     )
@@ -1869,9 +1934,15 @@ async def publish_content(req: PublishRequest, db: Session = Depends(get_db)):
 
 # === 数据分析 ===
 @router.get("/analytics")
-async def creator_analytics(db: Session = Depends(get_db)):
-    """创作端数据概览（基于 content_drafts 聚合；无数据时返回 0 与默认建议）"""
-    rows = db.query(ContentDraft).all()
+async def creator_analytics(
+    ipId: Optional[str] = Query(None, alias="ipId"),
+    db: Session = Depends(get_db),
+):
+    """创作端数据概览（基于 content_drafts 聚合；无数据时返回 0 与默认建议）。传 ipId 时仅统计该 IP。"""
+    q = db.query(ContentDraft)
+    if ipId:
+        q = q.filter(ContentDraft.ip_id == ipId)
+    rows = q.all()
     published = sum(1 for d in rows if _library_status(d) == "published")
     viral = sum(1 for d in rows if _library_status(d) == "viral")
     leads = published * 3 + viral * 20

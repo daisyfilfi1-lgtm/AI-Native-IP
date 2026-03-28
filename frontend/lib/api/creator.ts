@@ -9,7 +9,7 @@ import {
   StyleType,
   RemixRecommendationItem,
 } from '@/types/creator';
-import { getApiOriginOrEmpty } from '@/lib/apiBaseUrl';
+import { resolveV1ApiFetchUrl } from '@/lib/apiBaseUrl';
 import { getStoredToken } from '@/lib/auth';
 
 // ===== Agent配置状态类型 =====
@@ -283,12 +283,9 @@ async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> 
     headers.Authorization = `Bearer ${jwt}`;
   }
 
-  const isLocalBrowser =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  const apiOrigin = isLocalBrowser ? '' : getApiOriginOrEmpty();
+  const url = resolveV1ApiFetchUrl(endpoint);
 
-  const response = await fetch(`${apiOrigin}${endpoint}`, {
+  const response = await fetch(url, {
     ...options,
     headers,
   });
@@ -397,8 +394,12 @@ export const creatorApi = {
   },
 
   // ===== 场景三：爆款原创（支持文本/语音输入）=====
-  async generateFromOriginal(text: string, style: StyleType): Promise<GenerateResult> {
-    console.log('[API] Generate from original:', { text, style });
+  async generateFromOriginal(
+    text: string,
+    style: StyleType,
+    ipId: string = 'xiaomin1'
+  ): Promise<GenerateResult> {
+    console.log('[API] Generate from original:', { text, style, ipId });
     
     if (USE_MOCK) {
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -412,13 +413,17 @@ export const creatorApi = {
     
     return apiFetch('/api/v1/creator/generate/original', {
       method: 'POST',
-      body: JSON.stringify({ text, style })
+      body: JSON.stringify({ text, style, ipId })
     });
   },
 
   // 兼容旧调用：voice 已重命名为 original
-  async generateFromVoice(text: string, style: StyleType): Promise<GenerateResult> {
-    return this.generateFromOriginal(text, style);
+  async generateFromVoice(
+    text: string,
+    style: StyleType,
+    ipId: string = 'xiaomin1'
+  ): Promise<GenerateResult> {
+    return this.generateFromOriginal(text, style, ipId);
   },
 
   // ===== 场景三：爆款原创（工业化流水线）=====
@@ -482,7 +487,7 @@ export const creatorApi = {
   },
 
   // ===== 内容库 =====
-  async getLibraryItems(status?: string): Promise<LibraryItem[]> {
+  async getLibraryItems(status?: string, ipId?: string): Promise<LibraryItem[]> {
     if (USE_MOCK) {
       await new Promise(resolve => setTimeout(resolve, 800));
       
@@ -493,7 +498,11 @@ export const creatorApi = {
       return mockLibraryItems.filter(item => item.status === status);
     }
     
-    const url = status ? `/api/v1/creator/library?status=${status}` : '/api/v1/creator/library';
+    const params = new URLSearchParams();
+    if (status && status !== 'all') params.set('status', status);
+    if (ipId) params.set('ipId', ipId);
+    const qs = params.toString();
+    const url = qs ? `/api/v1/creator/library?${qs}` : '/api/v1/creator/library';
     return apiFetch(url);
   },
 
@@ -526,7 +535,7 @@ export const creatorApi = {
   },
 
   // ===== 数据分析 =====
-  async getAnalytics(): Promise<AnalyticsMetrics> {
+  async getAnalytics(ipId?: string): Promise<AnalyticsMetrics> {
     if (USE_MOCK) {
       await new Promise(resolve => setTimeout(resolve, 600));
       return {
@@ -561,7 +570,8 @@ export const creatorApi = {
         ]
       };
     }
-    return apiFetch('/api/v1/creator/analytics');
+    const q = ipId ? `?ipId=${encodeURIComponent(ipId)}` : '';
+    return apiFetch(`/api/v1/creator/analytics${q}`);
   },
 };
 

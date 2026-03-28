@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.db.models import IP
+from app.db.models import IP, User
+from app.deps.auth_user import get_current_user
 from app.services.memory_config_service import get_ip
 
 router = APIRouter()
@@ -133,6 +134,18 @@ def create_ip(payload: CreateIPRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(row)
     return ip_to_response(row)
+
+
+@router.get("/ip/mine", response_model=List[IPResponse])
+def list_my_ips(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """当前登录用户拥有的 IP 列表（按创建时间倒序）。创作端绑定用。"""
+    rows = (
+        db.query(IP)
+        .filter(IP.owner_user_id == user.user_id)
+        .order_by(IP.created_at.desc())
+        .all()
+    )
+    return [ip_to_response(r) for r in rows]
 
 
 @router.get("/ip/{ip_id}", response_model=IPResponse)

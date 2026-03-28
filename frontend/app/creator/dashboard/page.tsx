@@ -40,9 +40,10 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+import { useCreatorIp } from '@/contexts/CreatorIpContext';
+
 /** 接口仍要求 style 字段；生成侧以 IP 风格画像为准 */
 const DEFAULT_WORKFLOW_STYLE: StyleType = 'angry';
-const CREATOR_IP_ID = process.env.NEXT_PUBLIC_CREATOR_IP_ID || 'xiaomin1';
 
 // Agent配置状态组件
 function AgentStatusCard({ 
@@ -89,6 +90,18 @@ function AgentStatusCard({
   );
 }
 
+/** 仅允许 http(s)，避免 href 无效导致「点不进去」 */
+function safeExternalHref(url: string | undefined): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const t = url.trim();
+  if (!t.startsWith('http://') && !t.startsWith('https://')) return null;
+  try {
+    return new URL(t).href;
+  } catch {
+    return null;
+  }
+}
+
 // 选题卡片组件
 function TopicCardComponent({ 
   topic, 
@@ -101,6 +114,7 @@ function TopicCardComponent({
   onGenerate: (topic: TopicCard) => void;
   isGenerating: boolean;
 }) {
+  const sourceHref = safeExternalHref(topic.sourceUrl);
   const scoreColor = topic.score >= 4.8 ? 'text-accent-green' : topic.score >= 4.5 ? 'text-accent-yellow' : 'text-foreground';
 
   return (
@@ -141,10 +155,10 @@ function TopicCardComponent({
             </div>
           )}
           
-          {/* Source Link - 原链接 */}
-          {topic.sourceUrl && (
+          {/* Source Link - 原链接（后端未返回合法绝对 URL 时不展示，避免无效点击） */}
+          {sourceHref && (
             <a 
-              href={topic.sourceUrl}
+              href={sourceHref}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 mb-3 text-xs text-primary-400 hover:text-primary-300 transition-colors"
@@ -274,6 +288,7 @@ function InputModeSelector({
 // 主页面组件
 export default function CreatorDashboardPage() {
   const router = useRouter();
+  const { ipId, loading: ipCtxLoading, needsLogin, noIp, error: ipCtxError } = useCreatorIp();
   const [activeTab, setActiveTab] = useState('recommended');
   const [topics, setTopics] = useState<TopicCard[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentConfigStatus | null>(null);
@@ -287,9 +302,10 @@ export default function CreatorDashboardPage() {
   const [remixRecLoading, setRemixRecLoading] = useState(false);
 
   const loadRemixRecommendations = useCallback(async () => {
+    if (!ipId) return;
     setRemixRecLoading(true);
     try {
-      const items = await creatorApi.getRemixRecommendations(CREATOR_IP_ID);
+      const items = await creatorApi.getRemixRecommendations(ipId);
       setRemixRecs(items);
     } catch (e) {
       console.error('Remix recommendations failed:', e);
@@ -297,7 +313,7 @@ export default function CreatorDashboardPage() {
     } finally {
       setRemixRecLoading(false);
     }
-  }, []);
+  }, [ipId]);
   
   // 爆款原创相关
   const [viralInputMode, setViralInputMode] = useState<'text' | 'voice' | 'file'>('text');
@@ -312,38 +328,51 @@ export default function CreatorDashboardPage() {
   });
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (ipCtxLoading) return;
+    if (!ipId) {
+      setTopics([]);
+      setAgentStatus(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const [topicsData, statusData] = await Promise.all([
+          creatorApi.getRecommendedTopics(ipId),
+          creatorApi.getAgentConfigStatus(),
+        ]);
+        if (!cancelled) {
+          setTopics(topicsData);
+          setAgentStatus(statusData);
+        }
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ipId, ipCtxLoading]);
 
   useEffect(() => {
-    if (activeTab !== 'remix') return;
+    if (activeTab !== 'remix' || !ipId) return;
     void loadRemixRecommendations();
-  }, [activeTab, loadRemixRecommendations]);
-
-  const loadData = async () => {
-    try {
-      const [topicsData, statusData] = await Promise.all([
-        creatorApi.getRecommendedTopics(CREATOR_IP_ID),
-        creatorApi.getAgentConfigStatus()
-      ]);
-      setTopics(topicsData);
-      setAgentStatus(statusData);
-    } catch (error) {
-      console.error('Failed to load data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [activeTab, loadRemixRecommendations, ipId]);
 
   // 场景一：推荐选题生成
   const handleGenerateFromTopic = async (topic: TopicCard) => {
+    if (!ipId) return;
     setGeneratingTopicId(topic.id);
     try {
       const result = await creatorApi.generateFromTopic(
         topic.id,
         topic.title,
         DEFAULT_WORKFLOW_STYLE,
-        CREATOR_IP_ID
+        ipId
       );
       router.push(`/creator/generate?id=${result.id}&type=topic`);
     } catch (error) {
@@ -354,10 +383,10 @@ export default function CreatorDashboardPage() {
 
   // 场景二：仿写爆款
   const handleRemix = async () => {
-    if (!remixUrl.trim()) return;
+    if (!ipId || !remixUrl.trim()) return;
     setIsRemixing(true);
     try {
-      const result = await creatorApi.generateFromRemix(remixUrl, DEFAULT_WORKFLOW_STYLE, CREATOR_IP_ID);
+      const result = await creatorApi.generateFromRemix(remixUrl, DEFAULT_WORKFLOW_STYLE, ipId);
       router.push(`/creator/generate?id=${result.id}&type=remix`);
     } catch (error) {
       console.error('Remix failed:', error);
@@ -367,7 +396,7 @@ export default function CreatorDashboardPage() {
 
   // 场景三：爆款原创（工业化流水线生成）
   const handleViralGenerate = async () => {
-    if (!viralText.trim()) return;
+    if (!ipId || !viralText.trim()) return;
     setIsGeneratingViral(true);
     try {
       const useAutoElements =
@@ -375,7 +404,7 @@ export default function CreatorDashboardPage() {
         viralConfig.viralElements.includes('system_auto');
       // 调用工业化爆款生产流水线
       const result = await creatorApi.generateViralOriginal({
-        ipId: CREATOR_IP_ID,
+        ipId,
         input: viralText,
         inputMode: viralInputMode,
         scriptTemplate: viralConfig.scriptTemplate,
@@ -405,6 +434,30 @@ export default function CreatorDashboardPage() {
 
   return (
     <CreatorLayout>
+      {ipCtxError && (
+        <div className="mb-4 p-3 rounded-lg bg-accent-red/10 border border-accent-red/20 text-sm text-accent-red">
+          {ipCtxError}
+        </div>
+      )}
+      {needsLogin && (
+        <div className="mb-4 p-4 rounded-xl bg-background-tertiary border border-border text-sm text-foreground-secondary">
+          请先{' '}
+          <Link href="/login" className="text-primary-400 font-medium hover:underline">
+            登录
+          </Link>
+          ，以加载你账号下已绑定的 IP；创作将使用该 IP。
+        </div>
+      )}
+      {noIp && (
+        <div className="mb-4 p-4 rounded-xl bg-background-tertiary border border-border text-sm text-foreground-secondary">
+          当前账号下还没有 IP。请前往{' '}
+          <Link href="/ip" className="text-primary-400 font-medium hover:underline">
+            IP 管理
+          </Link>
+          创建 IP，并将拥有者设为当前登录用户。
+        </div>
+      )}
+
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground mb-2">
@@ -512,7 +565,7 @@ export default function CreatorDashboardPage() {
             </div>
 
             {/* 选题卡片 */}
-            {loading ? (
+            {ipCtxLoading || loading ? (
               <div className="flex items-center justify-center py-20">
                 <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
               </div>

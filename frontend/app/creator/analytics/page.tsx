@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { useCreatorIp } from '@/contexts/CreatorIpContext';
 import { CreatorLayout } from '@/components/creator/CreatorLayout';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -41,18 +43,20 @@ interface AnalyticsDisplayData {
 }
 
 export default function CreatorAnalyticsPage() {
+  const { ipId, loading: ipCtxLoading, needsLogin, noIp } = useCreatorIp();
   const [data, setData] = useState<AnalyticsDisplayData | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState('7d');
 
-  useEffect(() => {
-    loadAnalytics();
-  }, [timeRange]);
-
-  const loadAnalytics = async () => {
+  const loadAnalytics = useCallback(async () => {
+    if (!ipId) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const metrics: AnalyticsMetrics = await creatorApi.getAnalytics();
+      const metrics: AnalyticsMetrics = await creatorApi.getAnalytics(ipId);
       // Transform AnalyticsMetrics to display format
       setData({
         published: metrics.published,
@@ -81,7 +85,12 @@ export default function CreatorAnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [ipId]);
+
+  useEffect(() => {
+    if (ipCtxLoading) return;
+    void loadAnalytics();
+  }, [ipCtxLoading, loadAnalytics, timeRange]);
 
   const formatNumber = (num: number): string => {
     if (num >= 10000) return (num / 10000).toFixed(1) + 'w';
@@ -127,6 +136,35 @@ export default function CreatorAnalyticsPage() {
       </div>
     </Card>
   );
+
+  if (ipCtxLoading) {
+    return (
+      <CreatorLayout>
+        <div className="flex items-center justify-center py-20">
+          <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </CreatorLayout>
+    );
+  }
+
+  if (needsLogin || noIp) {
+    return (
+      <CreatorLayout>
+        {needsLogin && (
+          <div className="mb-4 p-4 rounded-xl bg-background-tertiary border border-border text-sm text-foreground-secondary">
+            请先 <Link href="/login" className="text-primary-400 font-medium hover:underline">登录</Link>
+            后查看与你账号绑定的 IP 数据。
+          </div>
+        )}
+        {noIp && (
+          <div className="mb-4 p-4 rounded-xl bg-background-tertiary border border-border text-sm text-foreground-secondary">
+            暂无 IP。请前往{' '}
+            <Link href="/ip" className="text-primary-400 font-medium hover:underline">IP 管理</Link> 创建。
+          </div>
+        )}
+      </CreatorLayout>
+    );
+  }
 
   if (loading || !data) {
     return (

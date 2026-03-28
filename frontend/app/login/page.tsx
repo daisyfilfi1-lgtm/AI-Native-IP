@@ -10,8 +10,8 @@ import { Input } from '@/components/ui/Input';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [phone, setPhone] = useState('18600200850');
-  const [code, setCode] = useState('123456');
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 

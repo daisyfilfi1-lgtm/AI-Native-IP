@@ -31,6 +31,22 @@ const EFFECTIVE_ALLOWED_ORIGINS = IS_PRODUCTION
   ? ALLOWED_ORIGINS 
   : [...ALLOWED_ORIGINS, ...DEV_ORIGINS];
 
+/** Netlify 分支预览、自定义域名等：允许 *.netlify.app / *.vercel.app，及环境变量追加 */
+function isOriginAllowed(origin: string): boolean {
+  if (!origin) return true;
+  if (EFFECTIVE_ALLOWED_ORIGINS.includes(origin)) return true;
+  try {
+    const u = new URL(origin);
+    const h = u.hostname.toLowerCase();
+    if (h.endsWith(".netlify.app") || h.endsWith(".vercel.app")) return true;
+  } catch {
+    return false;
+  }
+  const extra = Deno.env.get("NETLIFY_EXTRA_ORIGINS") || Deno.env.get("ALLOWED_ORIGINS") || "";
+  const list = extra.split(",").map((s) => s.trim()).filter(Boolean);
+  return list.includes(origin);
+}
+
 // 上传文件大小限制 (10MB，与后端一致)
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
 
@@ -55,9 +71,9 @@ export default async (request: Request): Promise<Response> => {
     return jsonResponse({ error: "Not Found" }, 404);
   }
 
-  // 3. 验证请求来源
+  // 3. 验证请求来源（含 Netlify 预览域名、可选环境变量白名单）
   const origin = request.headers.get("origin") || "";
-  if (origin && !EFFECTIVE_ALLOWED_ORIGINS.includes(origin)) {
+  if (origin && !isOriginAllowed(origin)) {
     console.warn(`[Edge] Blocked request from unauthorized origin: ${origin}`);
     return jsonResponse({ error: "Forbidden - Invalid origin" }, 403);
   }
@@ -199,14 +215,14 @@ function handleCorsPreflight(request: Request): Response {
   const origin = request.headers.get("origin") || "";
   
   // 验证来源是否允许
-  if (origin && !EFFECTIVE_ALLOWED_ORIGINS.includes(origin)) {
+  if (origin && !isOriginAllowed(origin)) {
     return new Response(null, { status: 403 });
   }
   
   return new Response(null, {
     status: 204,
     headers: {
-      "Access-Control-Allow-Origin": EFFECTIVE_ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+      "Access-Control-Allow-Origin": origin && isOriginAllowed(origin) ? origin : ALLOWED_ORIGINS[0],
       "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-API-Key",
       "Access-Control-Max-Age": "86400",

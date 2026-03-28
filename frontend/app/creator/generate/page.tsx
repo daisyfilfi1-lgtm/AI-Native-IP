@@ -248,7 +248,8 @@ function GeneratePageContent() {
   }
 
   return (
-    <CreatorLayout>
+    <>
+      <CreatorLayout>
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
         <Link 
@@ -674,6 +675,16 @@ function GeneratePageContent() {
         ) : null}
       </AnimatePresence>
     </CreatorLayout>
+
+      <RewriteFeedbackModal
+        isOpen={showFeedbackModal}
+        onClose={() => setShowFeedbackModal(false)}
+        draftId={id || ''}
+        ipId="xiaomin1"
+        onConfirm={confirmRegenerate}
+        isLoading={isRewriting}
+      />
+    </>
   );
 }
 
@@ -683,24 +694,16 @@ function cn(...classes: (string | undefined | false)[]) {
 
 export default function CreatorGeneratePage() {
   return (
-    <Suspense fallback={
-      <CreatorLayout>
-        <div className="flex items-center justify-center py-20">
-          <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      </CreatorLayout>
-    }>
+    <Suspense
+      fallback={
+        <CreatorLayout>
+          <div className="flex items-center justify-center py-20">
+            <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        </CreatorLayout>
+      }
+    >
       <GeneratePageContent />
     </Suspense>
-
-    {/* 重写反馈弹窗 */}
-    <RewriteFeedbackModal
-      isOpen={showFeedbackModal}
-      onClose={() => setShowFeedbackModal(false)}
-      draftId={id || ''}
-      ipId="xiaomin1"
-      onConfirm={confirmRegenerate}
-      isLoading={isRewriting}
-    />
   );
 }

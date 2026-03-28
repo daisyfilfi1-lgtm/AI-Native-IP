@@ -1,6 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { useCreatorIp } from '@/contexts/CreatorIpContext';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -26,6 +27,7 @@ interface CreatorLayoutProps {
 
 export function CreatorLayout({ children }: CreatorLayoutProps) {
   const pathname = usePathname();
+  const { ipId, ips, setIpId, loading: ipLoading, needsLogin, noIp } = useCreatorIp();
 
   return (
     <div className="min-h-screen bg-background">
@@ -64,16 +66,58 @@ export function CreatorLayout({ children }: CreatorLayoutProps) {
             })}
           </nav>
 
+          {/* 当前创作 IP（与登录账号绑定） */}
+          <div className="hidden md:flex items-center gap-2 flex-shrink-0 max-w-[200px]">
+            {!ipLoading && needsLogin && (
+              <Link
+                href="/login"
+                className="text-xs font-medium text-primary-400 hover:text-primary-300 whitespace-nowrap"
+              >
+                登录
+              </Link>
+            )}
+            {!ipLoading && noIp && (
+              <Link
+                href="/ip"
+                className="text-xs font-medium text-primary-400 hover:text-primary-300 whitespace-nowrap"
+              >
+                创建 IP
+              </Link>
+            )}
+            {!ipLoading && !needsLogin && !noIp && ips.length === 1 && (
+              <span
+                className="text-xs text-foreground-secondary truncate"
+                title={ips[0].name || ips[0].ip_id}
+              >
+                {ips[0].name || ips[0].ip_id}
+              </span>
+            )}
+            {!ipLoading && !needsLogin && !noIp && ips.length > 1 && (
+              <select
+                value={ipId ?? ''}
+                onChange={(e) => setIpId(e.target.value)}
+                className="text-xs bg-background-tertiary border border-border rounded-lg px-2 py-1.5 text-foreground max-w-[180px]"
+                aria-label="选择创作 IP"
+              >
+                {ips.map((i) => (
+                  <option key={i.ip_id} value={i.ip_id}>
+                    {i.name || i.ip_id}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           {/* User Actions */}
           <div className="flex items-center gap-2">
-            <button className="p-2 rounded-lg text-foreground-secondary hover:text-foreground hover:bg-background-tertiary transition-colors">
+            <button type="button" className="p-2 rounded-lg text-foreground-secondary hover:text-foreground hover:bg-background-tertiary transition-colors">
               <Settings className="w-5 h-5" />
             </button>
-            <button className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-foreground-secondary hover:text-foreground hover:bg-background-tertiary transition-colors">
+            <button type="button" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-foreground-secondary hover:text-foreground hover:bg-background-tertiary transition-colors">
               <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary-500 to-accent-cyan flex items-center justify-center">
                 <User className="w-4 h-4 text-white" />
               </div>
-              <span className="hidden sm:inline">张凯</span>
+              <span className="hidden sm:inline">创作者</span>
             </button>
           </div>
         </div>

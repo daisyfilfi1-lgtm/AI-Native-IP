@@ -10,6 +10,7 @@ import logging
 import os
 import re
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -525,9 +526,9 @@ def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]
         elif share_url:
             source_url = share_url
         else:
-            # 使用标题构建搜索链接
-            search_query = title[:20].replace(" ", "").replace("?", "").replace("？", "")
-            source_url = f"https://www.douyin.com/search/{search_query}"
+            # 使用标题构建搜索链接（必须 URL 编码，否则 # 等字符会被当作 fragment，导致「点不进去」）
+            search_query = title[:80].replace(" ", "").replace("?", "").replace("？", "")
+            source_url = f"https://www.douyin.com/search/{quote(search_query, safe='')}"
         
         out.append(
             {

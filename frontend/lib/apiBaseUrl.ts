@@ -61,7 +61,10 @@ export function getBrowserApiBaseUrl(): string {
     
     // Edge 模式：使用同源代理（Netlify Edge Function 处理）
     if (mode === 'edge' && isHosted) {
-      console.log('[API] 使用 Edge Function 代理模式');
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.log('[API] 使用 Edge Function 代理模式');
+      }
       return '/api/v1';
     }
     
@@ -71,7 +74,10 @@ export function getBrowserApiBaseUrl(): string {
       const origin = directOrigin || DEFAULT_PRODUCTION_API_ORIGIN;
       
       if (origin && /^https:\/\//i.test(origin)) {
-        console.log('[API] 使用直连 Railway:', origin);
+        if (process.env.NODE_ENV === 'development') {
+          // eslint-disable-next-line no-console
+          console.log('[API] 使用直连 Railway:', origin);
+        }
         return `${origin.replace(/\/$/, '')}/api/v1`;
       }
     }
@@ -148,4 +154,23 @@ export function getAuthSmsSendCodeUrl(): string {
     return `${origin}/api/auth/sms/send-code`;
   }
   return '/api/auth/sms/send-code';
+}
+
+/**
+ * 将 `/api/v1/...` 路径解析为 fetch 可用的 URL（与 axios 的 base 规则一致）。
+ * creator 等使用 fetch 的模块应使用此函数，避免与 `lib/api.ts` 在直连模式下分叉。
+ */
+export function resolveV1ApiFetchUrl(endpoint: string): string {
+  const ep = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  if (!ep.startsWith('/api/v1')) {
+    throw new Error(`resolveV1ApiFetchUrl: expected path starting with /api/v1, got: ${ep}`);
+  }
+  const rest = ep.slice('/api/v1'.length) || '/';
+  const base = getBrowserApiBaseUrl().replace(/\/$/, '');
+  if (base.startsWith('http')) {
+    const baseHasV1 = /\/api\/v1$/i.test(base);
+    const prefix = baseHasV1 ? base : `${base}/api/v1`;
+    return `${prefix}${rest}`;
+  }
+  return `/api/v1${rest}`;
 }

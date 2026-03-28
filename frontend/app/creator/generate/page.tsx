@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { RewriteFeedbackModal } from '@/components/creator/RewriteFeedbackModal';
 
 interface SectionConfig {
   title: string;
@@ -76,6 +77,8 @@ function GeneratePageContent() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [isRewriting, setIsRewriting] = useState(false);
 
   // 加载生成内容
   useEffect(() => {
@@ -188,12 +191,30 @@ function GeneratePageContent() {
     setIsPublishing(true);
     try {
       await creatorApi.publishContent(content?.id || '', ['douyin']);
-      // 跳转到内容库
       router.push('/creator/library');
     } catch (err) {
       setError('发布失败，请重试');
       setIsPublishing(false);
     }
+  };
+
+  // 重写（触发反馈弹窗）
+  const handleRegenerate = () => {
+    setShowFeedbackModal(true);
+  };
+
+  // 确认重写（反馈后执行）
+  const confirmRegenerate = async (reason: string, comment: string) => {
+    setShowFeedbackModal(false);
+    setIsRewriting(true);
+    
+    console.log('Regenerate with reason:', reason, 'comment:', comment);
+    
+    // 模拟重写过程
+    setTimeout(() => {
+      setIsRewriting(false);
+      loadContent();
+    }, 2000);
   };
 
   const getComplianceStatus = () => {
@@ -439,6 +460,17 @@ function GeneratePageContent() {
               </div>
             </div>
 
+            {/* 重写按钮 */}
+            <Button
+              variant="secondary"
+              className="w-full"
+              leftIcon={<RefreshCw className="w-4 h-4" />}
+              onClick={handleRegenerate}
+              isLoading={isRewriting}
+            >
+              {isRewriting ? '重写中...' : '重写内容'}
+            </Button>
+
             {/* Sidebar */}
             <div className="space-y-4">
               {/* 爆款原创特殊展示 */}
@@ -660,5 +692,15 @@ export default function CreatorGeneratePage() {
     }>
       <GeneratePageContent />
     </Suspense>
+
+    {/* 重写反馈弹窗 */}
+    <RewriteFeedbackModal
+      isOpen={showFeedbackModal}
+      onClose={() => setShowFeedbackModal(false)}
+      draftId={id || ''}
+      ipId="xiaomin1"
+      onConfirm={confirmRegenerate}
+      isLoading={isRewriting}
+    />
   );
 }

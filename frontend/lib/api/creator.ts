@@ -573,6 +573,28 @@ export const creatorApi = {
     const q = ipId ? `?ipId=${encodeURIComponent(ipId)}` : '';
     return apiFetch(`/api/v1/creator/analytics${q}`);
   },
+
+  // ===== 用户反馈（重写时）=====
+  async submitRewriteFeedback(params: {
+    draft_id: string;
+    ip_id: string;
+    rewrite_reason: string;
+    user_comment?: string;
+  }): Promise<{ ok: boolean; message: string; stats: Record<string, number> }> {
+    return apiFetch('/api/v1/creator/feedback/rewrite', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
+  },
+
+  async getFeedbackStats(ipId: string): Promise<{
+    ip_id: string;
+    total: number;
+    reason_counts: Record<string, number>;
+    recent: Array<{ reason: string; comment?: string; created_at: string }>;
+  }> {
+    return apiFetch(`/api/v1/creator/feedback/stats?ipId=${encodeURIComponent(ipId)}`);
+  },
 };
 
 // ===== 重新导出类型 =====

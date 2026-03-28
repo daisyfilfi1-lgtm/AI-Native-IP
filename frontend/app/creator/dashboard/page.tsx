@@ -792,14 +792,15 @@ export default function CreatorDashboardPage() {
                             </ul>
                           </div>
                         )}
-                        {remixError.includes('提取') && (
+                        {/* 提取失败或API错误时显示第三方工具 */}
+                        {(remixError.includes('提取') || remixError.includes('权限') || remixError.includes('API') || remixError.includes('TikHub') || remixError.includes('配置') || remixError.includes('第三方工具') || remixError.includes('无法自动提取')) && (
                           <>
                             <div className="mt-3 p-3 rounded-lg bg-background-tertiary/50 text-xs text-foreground-secondary">
-                              <p className="font-medium text-foreground mb-1">💡 可能原因：</p>
+                              <p className="font-medium text-foreground mb-1">💡 解决方案：</p>
                               <ul className="space-y-1">
-                                <li>• 视频链接已失效或被删除</li>
-                                <li>• 视频设置了隐私权限</li>
-                                <li>• 平台接口暂时不可用</li>
+                                <li>• 使用下方「第三方工具」提取文案</li>
+                                <li>• 或直接点击「粘贴文案」手动输入</li>
+                                <li>• 或更换其他视频链接重试</li>
                               </ul>
                             </div>
                             

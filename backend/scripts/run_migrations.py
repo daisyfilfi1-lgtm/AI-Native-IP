@@ -40,6 +40,7 @@ ORDER = [
     "011_auth_users.sql",
     "012_link_mantou_ip_owner.sql",
     "013_set_xiaomin_nickname.sql",
+    "014_competitor_system.sql",  -- V4选题推荐系统 - 竞品爆款数据源
 ]
 
 

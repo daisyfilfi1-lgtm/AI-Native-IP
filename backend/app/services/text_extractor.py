@@ -338,9 +338,11 @@ def _find_value_recursive(obj, keys, depth=0):
 
 
 async def _extract_xiaohongshu_web(url: str) -> str:
-    """爬取小红书页面"""
+    """爬取小红书页面 - 增强版"""
     try:
         timeout = httpx.Timeout(20.0, connect=10.0)
+        
+        # 方法1: 移动端页面
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             r = await client.get(
                 url,
@@ -350,13 +352,14 @@ async def _extract_xiaohongshu_web(url: str) -> str:
                 }
             )
             
-            if r.status_code != 200:
+            if r.status_code == 302 or "/404" in str(r.url):
+                logger.warning(f"小红书链接已失效或需要登录: {url}")
                 return ""
             
             html = r.text
             parts = []
             
-            # 提取标题
+            # 1. 从 meta 标签提取标题
             title_patterns = [
                 r'<meta[^>]*name=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']',
                 r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']',
@@ -371,40 +374,58 @@ async def _extract_xiaohongshu_web(url: str) -> str:
                         parts.append(title)
                         break
             
-            # 从 JSON 数据提取内容
-            # 小红书页面包含 SSR 数据
-            json_pattern = r'<script[^>]*>window\.__INITIAL_STATE__\s*=\s*({.+?})</script>'
-            match = re.search(json_pattern, html)
-            if match:
-                try:
-                    data = json.loads(match.group(1))
-                    # 遍历数据结构找内容
-                    def find_content(obj, depth=0):
-                        if depth > 5:
-                            return None
-                        if isinstance(obj, dict):
-                            for k, v in obj.items():
-                                if k in ["desc", "content", "text", "note", "title"]:
-                                    if isinstance(v, str) and len(v) > 10:
-                                        return v
-                                if isinstance(v, (dict, list)):
-                                    result = find_content(v, depth + 1)
-                                    if result:
-                                        return result
-                        elif isinstance(obj, list):
-                            for item in obj:
-                                result = find_content(item, depth + 1)
-                                if result:
-                                    return result
-                        return None
-                    
-                    content = find_content(data)
-                    if content:
-                        parts.append(content)
-                except:
-                    pass
+            # 2. 从 JSON 数据提取内容 (SSR)
+            json_patterns = [
+                r'window\.__INITIAL_STATE__\s*=\s*({.+?});',
+                r'window\.__UNIVERSAL_DATA__\s*=\s*({.+?});',
+            ]
             
-            # 去重拼接
+            for jp in json_patterns:
+                match = re.search(jp, html)
+                if match:
+                    try:
+                        import json
+                        data = json.loads(match.group(1))
+                        
+                        # 递归找内容字段
+                        def find_content(obj, depth=0):
+                            if depth > 4:
+                                return None
+                            if isinstance(obj, dict):
+                                for k in ["desc", "content", "text", "note", "title", "share_title"]:
+                                    if k in obj and isinstance(obj[k], str) and len(obj[k]) > 10:
+                                        return obj[k]
+                                for v in obj.values():
+                                    if isinstance(v, (dict, list)):
+                                        result = find_content(v, depth + 1)
+                                        if result:
+                                            return result
+                            elif isinstance(obj, list) and obj:
+                                return find_content(obj[0], depth + 1)
+                            return None
+                        
+                        content = find_content(data)
+                        if content:
+                            parts.append(content)
+                    except Exception as e:
+                        logger.debug(f"小红书JSON解析失败: {e}")
+            
+            # 3. 如果上述都失败，尝试从 HTML 结构提取
+            if not parts or len("".join(parts)) < 20:
+                # 尝试从 script 标签提取
+                script_pattern = r'<script[^>]*id="[^"]*initial[^"]*"[^>]*>(.+?)</script>'
+                match = re.search(script_pattern, html)
+                if match:
+                    try:
+                        import json
+                        data = json.loads(match.group(1))
+                        desc = find_content(data)
+                        if desc:
+                            parts.append(desc)
+                    except:
+                        pass
+            
+            # 去重
             seen = set()
             unique_parts = []
             for p in parts:
@@ -412,11 +433,15 @@ async def _extract_xiaohongshu_web(url: str) -> str:
                     seen.add(p)
                     unique_parts.append(p)
             
-            return "\n\n".join(unique_parts)[:3000]
-            
+            if unique_parts:
+                result = "\n\n".join(unique_parts)[:3000]
+                logger.info(f"小红书提取成功，长度: {len(result)}")
+                return result
+                
     except Exception as e:
         logger.warning(f"小红书爬取失败: {e}")
-        return ""
+    
+    return ""
 
 
 async def _extract_kuaishou_web(url: str) -> str:
@@ -630,10 +655,11 @@ async def extract_text(url: str, prefer_method: Optional[str] = None) -> Extract
             ("ytdlp", lambda: extract_with_ytdlp(resolved_url)),
         ]
     else:
-        # 默认顺序: TikHub -> Web -> yt-dlp
+        # 默认顺序: Web爬取(主) -> TikHub(备) -> yt-dlp(可选)
+        # 不依赖第三方，更稳定
         strategies = [
-            ("tikhub", lambda: extract_with_tikhub(resolved_url, platform)),
             ("web_scrape", lambda: extract_with_web_scrape(resolved_url, platform)),
+            ("tikhub", lambda: extract_with_tikhub(resolved_url, platform)),
             ("ytdlp", lambda: extract_with_ytdlp(resolved_url)),
         ]
     

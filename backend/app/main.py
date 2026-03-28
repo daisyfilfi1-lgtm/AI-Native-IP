@@ -23,6 +23,7 @@ from app.routers import (
     creator,
     debug,
     feishu_sync,
+    fix_competitor,
     graph,
     ip,
     memory,
@@ -174,6 +175,8 @@ def create_app() -> FastAPI:
     app.include_router(remix.router, prefix="/api/v1", tags=["remix"], dependencies=api_key_dep)
     app.include_router(topic_recommendation.router, prefix="/api/v1", tags=["topic"], dependencies=api_key_dep)
     app.include_router(debug.router, prefix="/api/v1", tags=["debug"], dependencies=api_key_dep)
+    # 临时修复路由 - 迁移竞品账号
+    app.include_router(fix_competitor.router, prefix="/api/v1", tags=["admin"], dependencies=api_key_dep)
     # Creator 路由 - 推荐选题等接口公开访问
     app.include_router(creator.router, prefix="/api/v1", tags=["creator"])
 

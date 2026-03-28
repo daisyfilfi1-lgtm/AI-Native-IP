@@ -12,6 +12,7 @@ import re
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -1657,6 +1658,33 @@ def _v4_display_score(total_score: Optional[float]) -> float:
     return round(3.0 + 2.0 * t, 2)
 
 
+def _format_play_count_label(play_count: int) -> str:
+    """与 V4 _format_play_count 一致，供 API 层兜底展示。"""
+    try:
+        pc = int(play_count)
+    except (TypeError, ValueError):
+        return "-"
+    if pc <= 0:
+        return "-"
+    if pc >= 1000000:
+        return f"{pc / 10000:.0f}万+"
+    if pc >= 10000:
+        return f"{pc / 10000:.1f}万"
+    if pc >= 1000:
+        return f"{pc / 1000:.1f}千"
+    return str(pc)
+
+
+def _v4_topic_douyin_search_url(title: str) -> str:
+    t = (title or "").strip()
+    if not t:
+        return ""
+    q = t[:80].replace(" ", "").replace("?", "").replace("？", "")
+    if not q:
+        return ""
+    return f"https://www.douyin.com/search/{quote(q, safe='')}"
+
+
 def _filter_topics_for_ip_alignment(
     ip_id: str,
     topics: List[Dict[str, Any]],
@@ -1705,16 +1733,30 @@ async def _async_build_recommended_topic_list(
             topics: List[Dict[str, Any]] = []
             for topic in v4_topics:
                 nu = _normalize_topic_source_url(topic.url or "")
+                if not nu:
+                    nu = _normalize_topic_source_url(
+                        _v4_topic_douyin_search_url(topic.original_title or topic.title)
+                    )
+                est_views = topic.original_plays or _format_play_count_label(
+                    int(topic.competitor_play_count or 0)
+                )
+                src = (getattr(topic, "source", None) or "") or ""
+                if topic.competitor_name:
+                    reason = f"竞品@{topic.competitor_name}"
+                elif src:
+                    reason = f"大数据 · {src}"
+                else:
+                    reason = "智能推荐"
                 topics.append(
                     {
                         "id": topic.topic_id,
                         "title": topic.title,
                         "originalTitle": topic.original_title,
                         "score": _v4_display_score(topic.total_score),
-                        "estimatedViews": topic.original_plays or "-",
+                        "estimatedViews": est_views,
                         "estimatedCompletion": topic.viral_score or 35,
                         "tags": topic.tags[:3] if topic.tags else ["创业"],
-                        "reason": f"竞品@{topic.competitor_name}" if topic.competitor_name else "智能推荐",
+                        "reason": reason,
                         "sourceUrl": nu,
                         "competitorName": topic.competitor_name,
                         "competitorPlatform": topic.competitor_platform,

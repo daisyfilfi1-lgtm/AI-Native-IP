@@ -298,6 +298,7 @@ export default function CreatorDashboardPage() {
   // 仿写爆款相关
   const [remixUrl, setRemixUrl] = useState('');
   const [isRemixing, setIsRemixing] = useState(false);
+  const [remixError, setRemixError] = useState<string | null>(null);
   const [remixRecs, setRemixRecs] = useState<RemixRecommendationItem[]>([]);
   const [remixRecLoading, setRemixRecLoading] = useState(false);
 
@@ -339,13 +340,22 @@ export default function CreatorDashboardPage() {
     (async () => {
       setLoading(true);
       try {
-        const [topicsData, statusData] = await Promise.all([
+        const [topicsRes, statusRes] = await Promise.allSettled([
           creatorApi.getRecommendedTopics(ipId),
           creatorApi.getAgentConfigStatus(),
         ]);
-        if (!cancelled) {
-          setTopics(topicsData);
-          setAgentStatus(statusData);
+        if (cancelled) return;
+        if (topicsRes.status === 'fulfilled') {
+          setTopics(topicsRes.value);
+        } else {
+          console.error('Recommended topics failed:', topicsRes.reason);
+          setTopics([]);
+        }
+        if (statusRes.status === 'fulfilled') {
+          setAgentStatus(statusRes.value);
+        } else {
+          console.error('Agent status failed:', statusRes.reason);
+          setAgentStatus(null);
         }
       } catch (error) {
         console.error('Failed to load data:', error);
@@ -384,12 +394,16 @@ export default function CreatorDashboardPage() {
   // 场景二：仿写爆款
   const handleRemix = async () => {
     if (!ipId || !remixUrl.trim()) return;
+    setRemixError(null);
     setIsRemixing(true);
     try {
       const result = await creatorApi.generateFromRemix(remixUrl, DEFAULT_WORKFLOW_STYLE, ipId);
       router.push(`/creator/generate?id=${result.id}&type=remix`);
     } catch (error) {
       console.error('Remix failed:', error);
+      const msg =
+        error instanceof Error ? error.message : '仿写请求失败，请检查网络或稍后重试';
+      setRemixError(msg);
       setIsRemixing(false);
     }
   };
@@ -429,6 +443,9 @@ export default function CreatorDashboardPage() {
   const isGenerationReady = agentStatus?.generation.status === 'ready';
   const isRemixReady = agentStatus?.remix.status === 'ready';
   const isComplianceReady = agentStatus?.compliance.status === 'ready';
+  /** agent-status 拉取失败时 agentStatus 为 null，不阻断仿写（后端仍会校验） */
+  const remixAgentsBlock =
+    agentStatus != null && (!isRemixReady || !isMemoryReady);
 
   const allReady = isStrategyReady && isMemoryReady && isGenerationReady && isComplianceReady;
 
@@ -723,6 +740,12 @@ export default function CreatorDashboardPage() {
                   </div>
                 </div>
 
+                {remixError && (
+                  <div className="p-3 rounded-xl bg-accent-red/10 border border-accent-red/25 text-sm text-accent-red">
+                    {remixError}
+                  </div>
+                )}
+
                 {/* 生成按钮 */}
                 <Button
                   className="w-full"
@@ -730,7 +753,7 @@ export default function CreatorDashboardPage() {
                   leftIcon={isRemixing ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
                   onClick={handleRemix}
                   isLoading={isRemixing}
-                  disabled={!remixUrl.trim() || isRemixing || !isRemixReady || !isMemoryReady}
+                  disabled={!remixUrl.trim() || isRemixing || remixAgentsBlock}
                 >
                   {isRemixing ? '解构与生成中...' : '开始仿写'}
                 </Button>

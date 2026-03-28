@@ -39,9 +39,11 @@ export interface AgentConfigStatus {
 // ===== 生成结果类型 =====
 export interface GenerateResult {
   id: string;
-  status: 'processing' | 'completed' | 'failed';
+  status?: 'processing' | 'completed' | 'failed';
   progress?: number;
   estimatedTime?: number;
+  /** 后端在 HTTP 200 时仍可能返回失败原因（如仿写管线异常） */
+  error?: string;
 }
 
 // ===== Mock数据 =====
@@ -387,10 +389,14 @@ export const creatorApi = {
       };
     }
     
-    return apiFetch('/api/v1/creator/generate/remix', {
+    const result = await apiFetch<GenerateResult>('/api/v1/creator/generate/remix', {
       method: 'POST',
-      body: JSON.stringify({ url, style, ipId })
+      body: JSON.stringify({ url, style, ipId }),
     });
+    if (result.status === 'failed') {
+      throw new Error(result.error?.trim() || '仿写生成失败，请稍后重试或检查链接是否有效');
+    }
+    return result;
   },
 
   // ===== 场景三：爆款原创（支持文本/语音输入）=====

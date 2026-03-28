@@ -118,7 +118,7 @@ def _parse_hot_cards(markdown: str, limit: int) -> List[Dict[str, Any]]:
                 "tags": ["抖音", "热榜"],
                 "reason": "抖音热榜（douyin-hot-hub）",
                 "estimatedViews": "—",
-                "estimatedCompletion": 0,
+                "estimatedCompletion": 35,
                 "sourceUrl": url,
             }
         )

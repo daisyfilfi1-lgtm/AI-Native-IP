@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -474,6 +475,57 @@ def _tags_from_item(item: Any) -> List[str]:
     return tags[:4]
 
 
+def _play_count_from_billboard_item(item: Any) -> int:
+    """从热榜单条结构中解析播放量（抖音 statistics.play_count 等）。"""
+    if not isinstance(item, dict):
+        return 0
+
+    def _from_stats(obj: Any) -> int:
+        if not isinstance(obj, dict):
+            return 0
+        st = obj.get("statistics")
+        if isinstance(st, dict):
+            for k in ("play_count", "play_cnt", "read_count"):
+                v = st.get(k)
+                if isinstance(v, (int, float)) and v > 0:
+                    return int(v)
+        for k in ("play_count", "play_cnt"):
+            v = obj.get(k)
+            if isinstance(v, (int, float)) and v > 0:
+                return int(v)
+        return 0
+
+    pc = _from_stats(item)
+    if pc:
+        return pc
+    for key in ("aweme_detail", "video", "item", "data"):
+        sub = item.get(key)
+        if isinstance(sub, dict):
+            pc = _from_stats(sub)
+            if pc:
+                return pc
+    return 0
+
+
+def _format_views_for_topic_card(pc: int) -> str:
+    if pc <= 0:
+        return "—"
+    if pc >= 1000000:
+        return f"{pc / 10000:.0f}万+"
+    if pc >= 10000:
+        return f"{pc / 10000:.1f}万"
+    if pc >= 1000:
+        return f"{pc / 1000:.1f}千"
+    return str(pc)
+
+
+def _completion_from_play_count(pc: int) -> int:
+    """有播放量时用对数映射到预估完播率区间，避免与无数据时全是 35% 雷同。"""
+    if pc <= 0:
+        return 35
+    return min(92, max(24, int(26 + math.log10(pc + 1) * 9)))
+
+
 def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]:
     """将热榜接口 data 转为前端 TopicCard 所需字段（由 creator 再包一层 topics）"""
     items: List[Any] = []
@@ -529,7 +581,11 @@ def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]
             # 使用标题构建搜索链接（必须 URL 编码，否则 # 等字符会被当作 fragment，导致「点不进去」）
             search_query = title[:80].replace(" ", "").replace("?", "").replace("？", "")
             source_url = f"https://www.douyin.com/search/{quote(search_query, safe='')}"
-        
+
+        play_cnt = _play_count_from_billboard_item(item)
+        est_views = _format_views_for_topic_card(play_cnt)
+        est_complete = _completion_from_play_count(play_cnt)
+
         out.append(
             {
                 "id": str(len(out) + 1),
@@ -538,8 +594,8 @@ def billboard_to_topic_cards(data: Any, limit: int = 12) -> List[Dict[str, Any]]
                 "score": _score_from_item(item, len(out)),
                 "tags": _tags_from_item(item) or ["抖音", "热榜"],
                 "reason": "抖音高播放量热榜（TikHub）",
-                "estimatedViews": "—",
-                "estimatedCompletion": 0,
+                "estimatedViews": est_views,
+                "estimatedCompletion": est_complete,
                 "sourceUrl": source_url,  # 添加原链接
             }
         )

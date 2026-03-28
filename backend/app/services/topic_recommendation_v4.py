@@ -15,6 +15,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
+from urllib.parse import quote
 
 from app.services.datasource import get_datasource_manager_v2
 from app.services.datasource.base import TopicData
@@ -79,6 +80,21 @@ class TopicRecommendationServiceV4:
     def __init__(self):
         self.datasource_manager = get_datasource_manager_v2()
         self.remixer = CompetitorContentRemixer()
+
+    @staticmethod
+    def _fallback_topic_url(title: str, platform: str = "douyin") -> str:
+        """大数据源未给链接时，用原标题生成可打开的搜索页（与 TikHub billboard 逻辑一致）。"""
+        t = (title or "").strip()
+        if not t:
+            return ""
+        q = t[:80].replace(" ", "").replace("?", "").replace("？", "")
+        if not q:
+            return ""
+        safe_q = quote(q, safe="")
+        plat = (platform or "douyin").lower()
+        if plat == "xiaohongshu":
+            return f"https://www.xiaohongshu.com/search_result?keyword={safe_q}"
+        return f"https://www.douyin.com/search/{safe_q}"
         
         # 内容类型分布比例（4-3-2-1矩阵）
         self.content_matrix = {
@@ -281,8 +297,12 @@ class TopicRecommendationServiceV4:
         viral_score = self._calculate_viral_score(play_count, original.extra.get("like_count", 0))
         
         # 格式化播放量显示
-        original_plays = self._format_play_count(play_count)
-        
+        original_plays = self._format_play_count(play_count) if play_count > 0 else None
+        resolved_url = (original.url or "").strip() or self._fallback_topic_url(
+            remix.original_title or remix.remixed_title or original.title,
+            original.platform,
+        )
+
         return RecommendedTopicV4(
             topic_id=original.id,
             title=remix.remixed_title,  # 使用重构后的标题
@@ -298,7 +318,7 @@ class TopicRecommendationServiceV4:
             remix_confidence=remix.confidence,
             remix_reason=remix.reason,
             tags=original.tags,
-            url=original.url,
+            url=resolved_url,
             extra={
                 "content_structure": remix.structure,
                 **original.extra
@@ -313,10 +333,15 @@ class TopicRecommendationServiceV4:
     
     def _create_topic_from_data(self, topic: TopicData) -> RecommendedTopicV4:
         """从TopicData创建RecommendedTopicV4"""
-        play_count = topic.extra.get("play_count", 0)
-        like_count = topic.extra.get("like_count", 0)
+        play_count = int(topic.extra.get("play_count") or 0)
+        like_count = int(topic.extra.get("like_count") or 0)
         is_competitor = topic.extra.get("is_competitor_topic", False)
-        
+        # 非竞品热点（抖音热榜等）也展示播放量与爆款分，便于与大数据对齐
+        resolved_url = (topic.url or "").strip() or self._fallback_topic_url(
+            topic.original_title or topic.title,
+            topic.platform,
+        )
+
         return RecommendedTopicV4(
             topic_id=topic.id,
             title=topic.title,
@@ -328,14 +353,16 @@ class TopicRecommendationServiceV4:
             competitor_like_count=like_count,
             content_type=topic.extra.get("content_type", "unknown"),
             tags=topic.tags,
-            url=topic.url,
+            url=resolved_url,
             extra=topic.extra,
             # V4 前端展示字段（如果是竞品选题）
             competitor_name=topic.extra.get("competitor_name") if is_competitor else None,
             competitor_platform=topic.extra.get("competitor_platform", "douyin") if is_competitor else None,
             remix_potential=self._calculate_remix_potential(play_count, 0.5) if is_competitor else None,
-            viral_score=self._calculate_viral_score(play_count, like_count) if is_competitor else None,
-            original_plays=self._format_play_count(play_count) if is_competitor else None
+            viral_score=self._calculate_viral_score(play_count, like_count)
+            if (play_count > 0 or like_count > 0)
+            else None,
+            original_plays=self._format_play_count(play_count) if play_count > 0 else None,
         )
     
     def _calculate_remix_potential(self, play_count: int, confidence: float) -> str:

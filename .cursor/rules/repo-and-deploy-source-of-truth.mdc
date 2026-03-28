@@ -11,5 +11,6 @@ alwaysApply: true
   - which repository remote will receive the push
   - which branch will be pushed
   - which directory/repo is the deploy source (`frontend` for frontend deploys).
-- Do not mix unrelated commits: push **`master`** to **`origin`** for the monorepo; push the subtree branch to **`frontend`** for Netlify when the site is wired to `ai-native-ip-frontend`.
+- **Railway backend:** This GitHub repo’s default branch is **`master`** (`origin/HEAD` → `master`). Railway deploys from **`master`** unless you changed it in Railway Settings. Pushes to **`main` alone do not trigger Railway** in the default setup.
+- Do not mix unrelated commits: push **`master`** to **`origin`** for the monorepo backend deploy; push the subtree branch to **`frontend`** for Netlify when the site is wired to `ai-native-ip-frontend`.
 - After push, report the exact commit SHA and repo/branch so user can verify deployment source.

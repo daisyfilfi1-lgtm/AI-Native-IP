@@ -1090,7 +1090,7 @@ class RemixGenerateRequest(BaseModel):
 
 @router.post("/generate/remix")
 async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(get_db)):
-    """场景二：仿写爆款（TikHub 优先；可选 yt-dlp；失败时返回明确错误）"""
+    """场景二：仿写爆款（链接文案：Web / yt-dlp / Playwright，可选 TikHub 兜底；失败时返回明确错误）"""
     
     # 参数校验
     url = (req.url or "").strip()

@@ -1,13 +1,17 @@
 """
 统一文本提取服务
-整合多种提取策略：TikHub API、Web爬取、yt-dlp
-智能选择最优方案
+整合多种提取策略：Web 爬取、yt-dlp、Playwright、可选 TikHub API。
+
+抖音/小红书：默认优先自研链路（Web → yt-dlp → Playwright），TikHub 置后且可用
+REMIX_SKIP_TIKHUB=1 跳过。Web 结果过短（REMIX_MIN_WEB_CHARS，默认 50）视为失败并继续尝试。
+Playwright 使用 domcontentloaded + 页面内 JSON（__UNIVERSAL_DATA__ 等）解析，避免 networkidle 卡死。
 """
 import json
 import logging
 import os
 import re
 import shutil
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
@@ -17,6 +21,33 @@ from app.services import tikhub_client
 from app.services.link_resolver import resolve_any_url, detect_platform
 
 logger = logging.getLogger(__name__)
+
+# 抖音/小红书：纯 HTTP 常只拿到标题或壳页面，过短则视为失败，继续走 yt-dlp / Playwright
+_DEFAULT_MIN_WEB_CHARS = 50
+
+
+def _min_web_chars_for_platform(platform: Optional[str]) -> int:
+    raw = os.environ.get("REMIX_MIN_WEB_CHARS", "").strip()
+    if raw.isdigit():
+        return max(10, int(raw))
+    return _DEFAULT_MIN_WEB_CHARS
+
+
+def _tikhub_in_chain() -> bool:
+    return os.environ.get("REMIX_SKIP_TIKHUB", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _is_weak_web_extract(text: str, platform: Optional[str]) -> bool:
+    if platform not in ("douyin", "xiaohongshu"):
+        return False
+    if not text or not text.strip():
+        return True
+    return len(text.strip()) < _min_web_chars_for_platform(platform)
 
 
 @dataclass
@@ -157,12 +188,41 @@ def _extract_from_tikhub_response(data: Any) -> str:
 
 # ============== Web 爬取 ==============
 
+# 增强版浏览器 Headers - 模拟真实浏览器
 MOBILE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "zh-CN,zh;q=0.9",
-    "Accept-Encoding": "gzip, deflate",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+DESKTOP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+# 平台特定的 Headers
+PLATFORM_HEADERS = {
+    "douyin": {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
+        "Referer": "https://www.douyin.com/",
+    },
+    "xiaohongshu": {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
+        "Referer": "https://www.xiaohongshu.com/",
+    },
 }
 
 
@@ -608,6 +668,269 @@ def _ytdlp_enabled() -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+# ============== Playwright 浏览器提取 (终极方案) ==============
+
+_playwright_instance = None
+
+async def _get_playwright():
+    """获取或初始化 Playwright"""
+    global _playwright_instance
+    if _playwright_instance is None:
+        try:
+            from playwright.async_api import async_playwright
+            _playwright_instance = await async_playwright().start()
+        except Exception as e:
+            logger.warning(f"Playwright 初始化失败: {e}")
+            return None
+    return _playwright_instance
+
+
+# 在页面上下文中从 SPA 注入的全局 JSON 与 script 块解析文案（比 CSS 类名稳定）
+# 避免把「最长字符串」选成 App 拉起配置等无关 JSON（如 dslVersion / launchApp）
+_PLAYWRIGHT_EVAL_EXTRACT = """
+() => {
+  const MIN = 12;
+  const JUNK_SUBSTR = /dslVersion|launchApp|tencentAppStore|wxopentag|universallink|jumpinstallurl|urlschema/i;
+  const SKIP_KEYS = new Set([
+    'strategies', 'launchApp', 'riskInfo', 'tracking', 'ads', 'report', 'abConfig',
+  ]);
+  function hasChinese(s) {
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c >= 0x4e00 && c <= 0x9fff) return true;
+    }
+    return false;
+  }
+  function isGarbage(s) {
+    const t = (s || '').trim();
+    if (t.length < MIN) return true;
+    if (t.startsWith('{') || t.startsWith('[')) return true;
+    if (JUNK_SUBSTR.test(t)) return true;
+    return false;
+  }
+  function chineseNonTagChars(s) {
+    let t = (s || '').replace(/#[^#\\n]+#/g, ' ').replace(/\\[话题\\]/g, '');
+    let n = 0;
+    for (let i = 0; i < t.length; i++) {
+      const c = t.charCodeAt(i);
+      if (c >= 0x4e00 && c <= 0x9fff) n++;
+    }
+    return n;
+  }
+  function score(s) {
+    const body = chineseNonTagChars(s);
+    const tags = (s.match(/#/g) || []).length;
+    // 优先正文句子，避免只剩话题标签
+    return body * 120 + tags * 8 + Math.min(s.length, 1500) * 0.05;
+  }
+  function walk(obj, parentKey, depth, out) {
+    if (depth > 14 || obj == null) return;
+    if (typeof obj === 'string') {
+      const t = obj.trim();
+      if (!isGarbage(t)) out.push(t);
+      return;
+    }
+    if (Array.isArray(obj)) {
+      for (const x of obj) walk(x, parentKey, depth + 1, out);
+      return;
+    }
+    if (typeof obj === 'object') {
+      for (const [k, v] of Object.entries(obj)) {
+        if (SKIP_KEYS.has(k)) continue;
+        walk(v, k, depth + 1, out);
+      }
+    }
+  }
+  function bestFromRoots() {
+    const roots = [
+      typeof window.__UNIVERSAL_DATA__ !== 'undefined' ? window.__UNIVERSAL_DATA__ : null,
+      typeof window.__INITIAL_STATE__ !== 'undefined' ? window.__INITIAL_STATE__ : null,
+      typeof window.__NEXT_DATA__ !== 'undefined' ? window.__NEXT_DATA__ : null,
+    ];
+    const candidates = [];
+    for (const r of roots) {
+      if (!r) continue;
+      walk(r, '', 0, candidates);
+    }
+    let best = '';
+    let bestSc = -1;
+    for (const p of candidates) {
+      const sc = score(p);
+      if (sc > bestSc || (sc === bestSc && p.length > best.length)) {
+        bestSc = sc;
+        best = p;
+      }
+    }
+    return best;
+  }
+  function fromScriptTags() {
+    const scripts = document.querySelectorAll('script');
+    const candidates = [];
+    for (const s of scripts) {
+      const t = (s.textContent || '').trim();
+      if (t.length < 60) continue;
+      try {
+        const j = JSON.parse(t);
+        walk(j, '', 0, candidates);
+      } catch (e) { /* ignore */ }
+    }
+    let best = '';
+    let bestSc = -1;
+    for (const p of candidates) {
+      const sc = score(p);
+      if (sc > bestSc || (sc === bestSc && p.length > best.length)) {
+        bestSc = sc;
+        best = p;
+      }
+    }
+    return best;
+  }
+  let text = bestFromRoots();
+  const s2 = fromScriptTags();
+  if (s2 && score(s2) > score(text)) text = s2;
+  return text || '';
+}
+"""
+
+
+async def extract_with_playwright(url: str, platform: Optional[str] = None) -> ExtractResult:
+    """
+    使用 Playwright 无头浏览器提取文本
+    抖音/小红书为强 JS 站：优先从 window 级 JSON / 内联 script 解析，再回退 DOM / meta。
+    """
+    try:
+        playwright = await _get_playwright()
+        if not playwright:
+            return ExtractResult(
+                success=False,
+                text="",
+                method="playwright",
+                error="Playwright 未安装或未初始化"
+            )
+        
+        # 启动浏览器
+        browser = await playwright.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+        )
+        
+        try:
+            context = await browser.new_context(
+                user_agent=MOBILE_HEADERS["User-Agent"],
+                viewport={"width": 375, "height": 812},
+                device_scale_factor=2,
+                locale="zh-CN",
+            )
+            
+            page = await context.new_page()
+            
+            # 抖音/小红书长连接多，networkidle 易超时；先 DOM 再短暂等待脚本注入
+            page.set_default_timeout(25000)
+            
+            logger.info(f"Playwright 访问: {url[:60]}...")
+            await page.goto(url, wait_until="domcontentloaded")
+            await asyncio.sleep(2.5)
+            
+            text = ""
+            try:
+                ev = await page.evaluate(_PLAYWRIGHT_EVAL_EXTRACT)
+                if isinstance(ev, str) and len(ev.strip()) > 15:
+                    text = ev.strip()
+            except Exception as e:
+                logger.debug(f"Playwright evaluate JSON 提取: {e}")
+            
+            if platform == "douyin":
+                selectors = [
+                    '[data-e2e="video-desc"]',
+                    '[data-e2e="browse-video-desc"]',
+                    '.video-info-title',
+                    'h1',
+                ]
+                for selector in selectors:
+                    try:
+                        element = await page.query_selector(selector)
+                        if element:
+                            t2 = await element.text_content()
+                            if t2 and len(t2.strip()) > len(text):
+                                text = t2.strip()
+                            if text and len(text) > 20:
+                                break
+                    except Exception:
+                        continue
+                        
+            elif platform == "xiaohongshu":
+                selectors = [
+                    '#detail-desc',
+                    '.note-content',
+                    '[class*="desc"]',
+                    'article',
+                    'h1',
+                ]
+                for selector in selectors:
+                    try:
+                        element = await page.query_selector(selector)
+                        if element:
+                            t2 = await element.text_content()
+                            if t2 and len(t2.strip()) > len(text):
+                                text = t2.strip()
+                            if text and len(text) > 20:
+                                break
+                    except Exception:
+                        continue
+            
+            if not text or len(text) < 10:
+                title = await page.title()
+                meta_desc = await page.evaluate(
+                    """() => {
+                    const meta = document.querySelector('meta[name="description"]') ||
+                        document.querySelector('meta[property="og:description"]');
+                    return meta ? meta.content : '';
+                }"""
+                )
+                parts = []
+                if title and "抖音" not in title and "小红书" not in title:
+                    parts.append(title)
+                if meta_desc:
+                    parts.append(meta_desc)
+                text = "\n".join(parts)
+            
+            text = text.strip() if text else ""
+            if platform == "xiaohongshu" and text:
+                text = re.sub(r"^展开\s*", "", text).strip()
+            
+            if text and len(text) > 10:
+                return ExtractResult(
+                    success=True,
+                    text=text[:12000],
+                    method="playwright",
+                    metadata={"platform": platform, "sub_method": "chromium_json_dom"}
+                )
+            return ExtractResult(
+                success=False,
+                text="",
+                method="playwright",
+                error="Playwright 未能提取到有效文本"
+            )
+                
+        finally:
+            await browser.close()
+            
+    except Exception as e:
+        logger.warning(f"Playwright 提取失败: {e}")
+        return ExtractResult(
+            success=False,
+            text="",
+            method="playwright",
+            error=f"Playwright 异常: {str(e)[:200]}"
+        )
+
+
+def _playwright_enabled() -> bool:
+    """检查是否启用 Playwright"""
+    v = os.environ.get("REMIX_PLAYWRIGHT_FALLBACK", "1").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
 # ============== 统一入口 ==============
 
 async def extract_text(url: str, prefer_method: Optional[str] = None) -> ExtractResult:
@@ -641,27 +964,47 @@ async def extract_text(url: str, prefer_method: Optional[str] = None) -> Extract
     
     # 定义提取策略顺序
     strategies = []
+    use_tikhub = _tikhub_in_chain()
     
     if prefer_method == "tikhub":
         strategies = [
             ("tikhub", lambda: extract_with_tikhub(resolved_url, platform)),
             ("web_scrape", lambda: extract_with_web_scrape(resolved_url, platform)),
             ("ytdlp", lambda: extract_with_ytdlp(resolved_url)),
+            ("playwright", lambda: extract_with_playwright(resolved_url, platform)),
         ]
     elif prefer_method == "web_scrape":
         strategies = [
             ("web_scrape", lambda: extract_with_web_scrape(resolved_url, platform)),
-            ("tikhub", lambda: extract_with_tikhub(resolved_url, platform)),
-            ("ytdlp", lambda: extract_with_ytdlp(resolved_url)),
         ]
-    else:
-        # 默认顺序: Web爬取(主) -> TikHub(备) -> yt-dlp(可选)
-        # 不依赖第三方，更稳定
+        if use_tikhub:
+            strategies.append(("tikhub", lambda: extract_with_tikhub(resolved_url, platform)))
+        strategies.extend(
+            [
+                ("ytdlp", lambda: extract_with_ytdlp(resolved_url)),
+                ("playwright", lambda: extract_with_playwright(resolved_url, platform)),
+            ]
+        )
+    elif platform in ("douyin", "xiaohongshu"):
+        # 抖音/小红书：不依赖第三方 API。顺序：轻量 Web → yt-dlp（抖音元数据常可用）→ Playwright（真实渲染 + JSON）→ 可选 TikHub
         strategies = [
             ("web_scrape", lambda: extract_with_web_scrape(resolved_url, platform)),
-            ("tikhub", lambda: extract_with_tikhub(resolved_url, platform)),
             ("ytdlp", lambda: extract_with_ytdlp(resolved_url)),
         ]
+        if _playwright_enabled():
+            strategies.append(("playwright", lambda: extract_with_playwright(resolved_url, platform)))
+        if use_tikhub:
+            strategies.append(("tikhub", lambda: extract_with_tikhub(resolved_url, platform)))
+    else:
+        # 其他平台：Web → 可选 TikHub → yt-dlp → Playwright
+        strategies = [
+            ("web_scrape", lambda: extract_with_web_scrape(resolved_url, platform)),
+        ]
+        if use_tikhub:
+            strategies.append(("tikhub", lambda: extract_with_tikhub(resolved_url, platform)))
+        strategies.append(("ytdlp", lambda: extract_with_ytdlp(resolved_url)))
+        if _playwright_enabled():
+            strategies.append(("playwright", lambda: extract_with_playwright(resolved_url, platform)))
     
     # 尝试每种策略
     errors = []
@@ -669,8 +1012,14 @@ async def extract_text(url: str, prefer_method: Optional[str] = None) -> Extract
         try:
             result = await extractor_func()
             if result.success and len(result.text) > 10:
+                if result.method == "web_scrape" and _is_weak_web_extract(result.text, platform):
+                    msg = (
+                        f"web_scrape: 内容过短({len(result.text.strip())}字符)，"
+                        f"已尝试后续策略（阈值 { _min_web_chars_for_platform(platform) }）"
+                    )
+                    errors.append(msg)
+                    continue
                 logger.info(f"提取成功: method={result.method}, length={len(result.text)}")
-                # 添加解析元数据
                 result.metadata.update({
                     "original_url": url,
                     "resolved_url": resolved_url,

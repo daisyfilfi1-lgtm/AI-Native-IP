@@ -2,15 +2,40 @@
 # 与仓库根 Dockerfile 行为一致：迁移后启动 Uvicorn。
 FROM python:3.11-slim
 
-# 安装 SSL 证书（解决 HTTPS 拉取问题）
+# 安装系统依赖（包括 Playwright 需要的依赖）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
+    wget \
+    gnupg \
+    libglib2.0-0 \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# 安装 Playwright 浏览器
+RUN python -m playwright install chromium
+RUN python -m playwright install-deps chromium
 
 COPY . .
 RUN chmod +x worker_entrypoint.sh

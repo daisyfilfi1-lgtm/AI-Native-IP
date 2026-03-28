@@ -7,8 +7,9 @@
 # Testing
 /coverage
 
-# Next.js
+# Next.js（含子目录下的构建输出，如 Netlify handler）
 /.next/
+**/.next/
 /out/
 
 # Production

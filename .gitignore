@@ -29,3 +29,8 @@ Thumbs.db
 
 # 本地开发上传文件
 backend/data/
+
+# Node / Next / Netlify 构建产物（禁止提交）
+node_modules/
+**/.next/
+.netlify/

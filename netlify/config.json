@@ -1,0 +1,30 @@
+{
+  "site": {
+    "id": "ai-native-ip",
+    "name": "ai-native-ip"
+  },
+  "build": {
+    "command": "npm run build",
+    "publish": ".next",
+    "environment": {
+      "NODE_VERSION": "18"
+    }
+  },
+  "functions": {
+    "directory": "netlify/functions"
+  },
+  "edge_functions": {
+    "directory": "netlify/edge-functions"
+  },
+  "redirects": [
+    {
+      "from": "/api/*",
+      "to": "/.netlify/functions/api-proxy",
+      "status": 200,
+      "force": true,
+      "conditions": {
+        "Role": []
+      }
+    }
+  ]
+}

@@ -1,32 +1,26 @@
+# Netlify 根配置 - 指向 frontend 目录
 [build]
+  base = "frontend"
   command = "npm run build"
   publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
   NEXT_TELEMETRY_DISABLED = "1"
-  # ⚠️ API 密钥：不要在代码库中设置真实值！
-  # 请在 Netlify Dashboard → Site settings → Environment variables 中设置:
-  # NEXT_PUBLIC_API_KEY = your-secret-key-here
-  # 开发环境可以在 .env.local 中设置
 
-# ─────────────────────────────────────────────
 # Edge Functions 配置
-# ─────────────────────────────────────────────
 [[edge_functions]]
   function = "api-proxy"
   path = "/api/*"
 
-# ─────────────────────────────────────────────
-# 重定向规则（作为 Edge Function 失败时的 fallback）
-# ─────────────────────────────────────────────
+# API 代理到 Railway
 [[redirects]]
   from = "/api/*"
   to = "https://ai-native-ip-production.up.railway.app/api/:splat"
   status = 200
   force = true
 
-# 健康检查端点
+# 健康检查
 [[redirects]]
   from = "/health"
   to = "https://ai-native-ip-production.up.railway.app/health"

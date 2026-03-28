@@ -1,5 +1,16 @@
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+
 # Dependencies
 /node_modules
+**/node_modules/
 /.pnp
 .pnp.js
 .yarn/install-state.gz
@@ -9,6 +20,7 @@
 
 # Next.js
 /.next/
+**/.next/
 /out/
 
 # Production
@@ -26,13 +38,29 @@ yarn-error.log*
 # Local env files
 .env*.local
 .env
+*.egg-info/
+.eggs/
+dist/
 
-# Vercel
-.vercel
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# TypeScript
-*.tsbuildinfo
-next-env.d.ts
+# OS
+Thumbs.db
 
-# Local Netlify folder
-.netlify
+# Local / secrets
+*.local
+.env.local
+.env.*.local
+
+# 前端为独立 Git 仓库（推送见 frontend 目录内 origin）
+frontend/
+
+# 本地开发上传文件
+backend/data/
+
+# Local scratch / duplicate builds
+frontend-clean/

@@ -1,0 +1,942 @@
+"""
+素材录入流水线：根据任务拉取内容、分块、写入 ip_assets，并更新 ingest_tasks。
+支持：text/document 的 URL 或本地上传（UTF-8 的 txt/md、docx 正文、PDF 可选字层文本）；video/audio 的 URL 或本地上传（Whisper 转写）。
+已配置 LLM 时，会自动调用打标（asset_meta.auto_labels）。
+
+优化版本 - 包含：
+- P1: 递归分块（智能语义分块）
+- P2: 智能重试（指数退避）
+- P3: 父子文档索引
+- P4: 元数据强化
+
+防OOM优化：
+- 任务超时控制（软超时，定期检查）
+- 内存使用限制
+- 更频繁的数据库提交
+"""
+import gc
+import io
+import logging
+import os
+import tempfile
+import time
+import uuid
+import zipfile
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+
+import requests
+from sqlalchemy.orm import Session
+
+from app.db.models import FileObject, IPAsset, IngestTask, TagConfig, AssetVector
+from app.db.models import now_utc
+from app.services.ai_client import (
+    embed_texts_batched,
+    suggest_tags_for_content,
+    transcribe,
+    transcribe_from_url,
+)
+from app.db.session import SessionLocal
+from app.services.storage_service import download_bytes
+from app.services.vector_service import upsert_asset_vector
+
+# 尝试导入新的分块服务
+try:
+    from app.services.chunking_service import recursive_chunk, hybrid_chunk, Chunk
+    CHUNKING_AVAILABLE = True
+except ImportError:
+    CHUNKING_AVAILABLE = False
+
+# 分块默认长度（字符），可按需调整
+CHUNK_SIZE = 2000
+CHUNK_OVERLAP = 100
+
+# ===== P2: 智能重试配置 =====
+def _get_max_retries() -> int:
+    """获取最大重试次数"""
+    raw = os.environ.get("INGEST_MAX_RETRIES", "").strip()
+    if raw:
+        try:
+            return max(0, min(5, int(raw)))
+        except ValueError:
+            pass
+    return 3  # 默认3次
+
+
+def _get_retry_delay() -> float:
+    """获取基础重试延迟（秒）"""
+    raw = os.environ.get("INGEST_RETRY_DELAY", "").strip()
+    if raw:
+        try:
+            return max(1, float(raw))
+        except ValueError:
+            pass
+    return 2.0  # 默认2秒
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    """
+    判断错误是否可重试
+    
+    可重试：
+    - 网络超时/连接错误
+    - 临时服务不可用（503等）
+    - 配额限制（429）
+    
+    不可重试：
+    - 配置错误（缺环境变量）
+    - 格式错误（文件损坏）
+    - 认证错误
+    """
+    error_str = str(error).lower()
+    
+    # 不可重试的错误模式
+    non_retryable = [
+        "not set",           # 配置缺失
+        "not found",         # 资源不存在
+        "unauthorized",      # 认证失败
+        "forbidden",         # 权限不足
+        "invalid",           # 格式错误
+        "parse error",       # 解析失败
+        "not supported",     # 不支持
+        "missing",           # 缺少必要字段
+    ]
+    
+    for pattern in non_retryable:
+        if pattern in error_str:
+            return False
+    
+    # 可重试的错误模式
+    retryable = [
+        "timeout",           # 超时
+        "connection",        # 连接错误
+        "temporary",         # 临时错误
+        "429",               # 速率限制
+        "503",               # 服务不可用
+        "502",               # 网关错误
+        "504",               # 网关超时
+        "rate limit",        # 速率限制
+        "too many requests", # 请求过多
+    ]
+    
+    for pattern in retryable:
+        if pattern in error_str:
+            return True
+    
+    # 默认不重试（保守策略）
+    return False
+
+
+def _exponential_backoff(attempt: int, base_delay: float = 2.0) -> float:
+    """计算指数退避延迟"""
+    # 2^attempt * base_delay，最大60秒
+    delay = min(60, (2 ** attempt) * base_delay)
+    # 添加随机抖动（±25%）
+    import random
+    jitter = delay * 0.25 * (2 * random.random() - 1)
+    return delay + jitter
+
+# 大素材保护：避免海量分块 ×（每块 LLM + Embedding）拖垮内存与 CPU（OOM / Killed）
+def _ingest_max_text_chars() -> int:
+    raw = os.environ.get("INGEST_MAX_TEXT_CHARS", "").strip()
+    if not raw:
+        return 500_000
+    try:
+        return max(10_000, int(raw))
+    except ValueError:
+        return 500_000
+
+
+def _ingest_max_chunks() -> int:
+    raw = os.environ.get("INGEST_MAX_CHUNKS", "").strip()
+    if not raw:
+        return 120
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 120
+
+
+def _ingest_embed_batch_size() -> int:
+    raw = os.environ.get("INGEST_EMBED_BATCH_SIZE", "").strip()
+    if not raw:
+        return 16
+    try:
+        return max(1, min(64, int(raw)))
+    except ValueError:
+        return 16
+
+
+def _ingest_commit_every() -> int:
+    raw = os.environ.get("INGEST_COMMIT_EVERY", "").strip()
+    if not raw:
+        return 25
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 25
+
+
+def _ingest_max_url_bytes() -> int:
+    raw = os.environ.get("INGEST_MAX_URL_BYTES", "").strip()
+    if not raw:
+        return 20 * 1024 * 1024
+    try:
+        return max(64 * 1024, int(raw))
+    except ValueError:
+        return 20 * 1024 * 1024
+
+
+def _ingest_skip_embedding() -> bool:
+    """整段录入不写向量（仅文本入库），用于极低内存或排查 OOM。"""
+    raw = os.environ.get("INGEST_SKIP_EMBEDDING", "").strip().lower()
+    if raw in ("1", "true", "yes"):
+        return True
+    if raw in ("0", "false", "no"):
+        return False
+    # 生产默认跳过 embedding，优先保证录入链路稳定；需要时可显式设置为 false 开启。
+    return os.environ.get("RAILWAY_ENVIRONMENT_NAME") == "production"
+
+
+def _ingest_task_timeout() -> int:
+    """任务执行软超时时间（秒），用于 TimeLimitChecker 定期检查。"""
+    raw = os.environ.get("INGEST_TASK_TIMEOUT", "").strip()
+    if not raw:
+        return 60
+    try:
+        return max(15, min(120, int(raw)))
+    except ValueError:
+        return 60
+
+
+class TimeoutException(Exception):
+    """任务超时异常"""
+    pass
+
+
+class TimeLimitChecker:
+    """软超时检查器（线程安全，适用于 Railway 后台任务）"""
+    def __init__(self, seconds: int):
+        self.seconds = seconds
+        self.start_time = time.time()
+        self.timed_out = False
+    
+    def check(self):
+        """检查是否已超时，如果超时则抛出异常"""
+        if time.time() - self.start_time > self.seconds:
+            self.timed_out = True
+            raise TimeoutException(f"Task exceeded {self.seconds} seconds")
+    
+    def remaining(self) -> float:
+        """返回剩余时间"""
+        return max(0, self.seconds - (time.time() - self.start_time))
+
+
+def get_ingest_task(db: Session, task_id: str) -> IngestTask | None:
+    return db.query(IngestTask).filter(IngestTask.task_id == task_id).first()
+
+
+def mark_stale_processing_as_timeout(db: Session, stale_seconds: int = 300) -> int:
+    """
+    将超时无心跳的 PROCESSING 任务标记为 TIMEOUT（集成执行标准 v1.0）。
+    返回标记数量。
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy import and_, or_
+    threshold = datetime.utcnow() - timedelta(seconds=stale_seconds)
+    stale = (
+        db.query(IngestTask)
+        .filter(
+            and_(
+                IngestTask.status == "PROCESSING",
+                or_(
+                    IngestTask.last_heartbeat == None,
+                    IngestTask.last_heartbeat < threshold,
+                ),
+            )
+        )
+        .all()
+    )
+    for t in stale:
+        t.status = "TIMEOUT"
+        t.error_message = (
+            t.error_message or ""
+        ) + f" [无心跳超过{stale_seconds}秒，系统自动标记]"
+    if stale:
+        db.commit()
+    return len(stale)
+
+
+def _normalize_http_url(url: str | None) -> str:
+    """
+    补全 http(s) 协议，避免 requests / urllib 抛出 MissingSchema。
+    用户常漏写协议（如只填域名或误填「ddd」）。
+    """
+    u = (url or "").strip()
+    if not u:
+        return ""
+    if u.startswith("//"):
+        return "https:" + u
+    low = u.lower()
+    if low.startswith("http://") or low.startswith("https://"):
+        return u
+    return "https://" + u
+
+
+def _fetch_text_from_url(url: str) -> str:
+    """流式拉取 URL，避免超大响应一次性占满内存。"""
+    resolved = _normalize_http_url(url)
+    if not resolved:
+        raise ValueError("source_url 为空或仅空白，请填写以 http:// 或 https:// 开头的完整链接。")
+    max_bytes = _ingest_max_url_bytes()
+    try:
+        resp = requests.get(resolved, timeout=60, stream=True)
+    except requests.RequestException as e:
+        raise ValueError(
+            f"无法拉取 URL（{resolved}）：{e}"
+        ) from e
+    try:
+        resp.raise_for_status()
+        buf = bytearray()
+        for chunk in resp.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            buf.extend(chunk)
+            if len(buf) > max_bytes:
+                raise ValueError(
+                    f"URL 正文超过 INGEST_MAX_URL_BYTES 上限（{max_bytes} bytes）"
+                )
+        enc = (resp.encoding or "utf-8").strip() or "utf-8"
+        return bytes(buf).decode(enc, errors="replace")
+    finally:
+        resp.close()
+
+
+def _transcribe_from_file_object(db: Session, task: IngestTask) -> str:
+    """从对象存储已上传文件转写音视频（Whisper）。"""
+    if not task.local_file_id:
+        return ""
+    row = (
+        db.query(FileObject)
+        .filter(FileObject.file_id == task.local_file_id, FileObject.ip_id == task.ip_id)
+        .first()
+    )
+    if not row:
+        return ""
+    data = download_bytes(row.bucket, row.object_key)
+    if not data:
+        return ""
+    suffix = Path(row.file_name or row.object_key or "").suffix or ".bin"
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        return (transcribe(tmp_path) or "").strip()
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _text_from_docx(data: bytes) -> str:
+    """从 .docx（OOXML）提取纯文本：段落 + 表格单元格。"""
+    try:
+        from docx import Document
+    except ImportError:
+        return ""
+    try:
+        doc = Document(io.BytesIO(data))
+        parts: List[str] = []
+        for para in doc.paragraphs:
+            t = (para.text or "").strip()
+            if t:
+                parts.append(t)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    t = (cell.text or "").strip()
+                    if t:
+                        parts.append(t)
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
+def _looks_like_pdf(data: bytes) -> bool:
+    return len(data) >= 5 and data[:5] == b"%PDF-"
+
+
+def _looks_like_docx_ooxml(data: bytes) -> bool:
+    """docx 为 ZIP，内含 word/document.xml（与 xlsx/pptx 区分）。"""
+    if len(data) < 4 or data[:2] != b"PK":
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = zf.namelist()
+            return any(n == "word/document.xml" or n.endswith("/word/document.xml") for n in names)
+    except Exception:
+        return False
+
+
+def _text_from_pdf(data: bytes) -> str:
+    """
+    从 PDF 提取可选中文字层（非扫描件）。扫描版 PDF 无文本层时结果为空，需 OCR 另处理。
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        parts: List[str] = []
+        for page in reader.pages:
+            t = (page.extract_text() or "").strip()
+            if t:
+                parts.append(t)
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
+def _load_text_from_file_object(db: Session, task: IngestTask) -> str:
+    if not task.local_file_id:
+        return ""
+    row = (
+        db.query(FileObject)
+        .filter(FileObject.file_id == task.local_file_id, FileObject.ip_id == task.ip_id)
+        .first()
+    )
+    if not row:
+        return ""
+    data = download_bytes(row.bucket, row.object_key)
+    if not data:
+        return ""
+    try:
+        name = (row.file_name or row.object_key or "").lower()
+        if name.endswith(".docx"):
+            text = _text_from_docx(data)
+            if text.strip():
+                return text
+            return ""
+        if name.endswith(".doc"):
+            # 旧版 Word 二进制 .doc，需 LibreOffice/专用解析；此处不冒充文本
+            return ""
+        if name.endswith(".pdf"):
+            text = _text_from_pdf(data)
+            if text.strip():
+                return text
+            return ""
+        # 扩展名缺失或误命名时，用魔数补救（如 object_key 为 upload.bin）
+        if _looks_like_pdf(data):
+            text = _text_from_pdf(data)
+            if text.strip():
+                return text
+        if _looks_like_docx_ooxml(data):
+            text = _text_from_docx(data)
+            if text.strip():
+                return text
+        # .txt / .md / .csv 等：按 UTF-8 读取
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                return data.decode("utf-8", errors="ignore")
+            except Exception:
+                return ""
+    finally:
+        del data
+
+
+def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
+    """按长度分块，带重叠，避免截断在句中对齐到换行。"""
+    text = (text or "").strip()
+    if not text:
+        return []
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        if end < len(text):
+            # 尽量在换行处截断
+            last_nl = text.rfind("\n", start, end + 1)
+            if last_nl > start:
+                end = last_nl + 1
+        chunks.append(text[start:end].strip())
+        if not chunks[-1]:
+            start = end
+            continue
+        start = end - overlap
+        if start >= len(text):
+            break
+    return [c for c in chunks if c]
+
+
+def _build_asset_title(task_title: Optional[str], chunk_index: int, total_chunks: int) -> str:
+    """
+    Build a stable ASCII suffix to avoid mojibake in some terminals/UIs.
+    """
+    base = (task_title or "").strip() or "Untitled"
+    base = " ".join(base.split())
+    if total_chunks > 1:
+        return f"{base} (chunk-{chunk_index + 1})"
+    return base
+
+
+def _enable_async_vector_backfill() -> bool:
+    raw = os.environ.get("INGEST_ASYNC_VECTOR_BACKFILL", "").strip().lower()
+    if raw in ("1", "true", "yes"):
+        return True
+    if raw in ("0", "false", "no"):
+        return False
+    return True
+
+
+def _run_ingest_pipeline(
+    db: Session,
+    task: IngestTask,
+    *,
+    checker: Optional[TimeLimitChecker] = None,
+) -> None:
+    """执行录入：拉取内容 → 分块 → 写入 ip_assets → 更新 task。可选 checker 用于后台线程中的软超时（不可用 signal）。"""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    if checker:
+        logger.info(
+            "Starting pipeline for task: %s (soft timeout %ss)",
+            task.task_id,
+            checker.seconds,
+        )
+    else:
+        logger.info("Starting pipeline for task: %s", task.task_id)
+
+    task.status = "PROCESSING"
+    task.last_heartbeat = now_utc()
+    db.commit()
+
+    try:
+        if checker:
+            checker.check()
+        st = task.source_type or "text"
+        # 当 local_file_id 与 source_url 同时存在时，优先使用本地上传（用户显式选择的文件）
+        if st in ("video", "audio") and task.local_file_id:
+            raw_text = _transcribe_from_file_object(db, task)
+            if not (raw_text or "").strip():
+                raw_text = (
+                    f"[{st} 转写失败或未配置 Whisper] {task.title or task.local_file_id}\n\n"
+                    "请检查 OPENAI_TRANSCRIPTION_API_KEY（或主 OPENAI_API_KEY）及文件格式。"
+                )
+        elif st in ("video", "audio") and task.source_url:
+            src = _normalize_http_url(task.source_url)
+            if not src:
+                raw_text = (
+                    f"[{st} 转写失败] source_url 无效或为空。\n\n"
+                    "请填写以 http:// 或 https:// 开头的完整音视频链接。"
+                )
+            else:
+                raw_text = transcribe_from_url(src)
+            if not (raw_text or "").strip():
+                raw_text = (
+                    f"[{st} 转写失败或未配置 Whisper] {task.title or task.source_url or '未命名'}\n\n"
+                    "请检查转写 API 及网络。"
+                )
+        elif st in ("text", "document", "file") and task.local_file_id:
+            raw_text = _load_text_from_file_object(db, task)
+            if not raw_text.strip():
+                raw_text = (
+                    f"[文件解析失败] {task.title or task.local_file_id}\n\n"
+                    "已支持：UTF-8 文本（txt/md）、docx、含文字层的 PDF（扫描件无文字层则为空）。"
+                    "若仍为失败，请确认文件未加密；旧版 .doc 尚未接入。"
+                )
+        elif st in ("text", "document", "file") and task.source_url:
+            raw_text = _fetch_text_from_url(task.source_url)
+        elif task.local_file_id:
+            raw_text = _load_text_from_file_object(db, task)
+            if not (raw_text or "").strip():
+                raw_text = _transcribe_from_file_object(db, task)
+            if not (raw_text or "").strip():
+                raw_text = (
+                    f"[文件解析失败] {task.title or task.local_file_id}\n\n"
+                    "请确认 source_type 为 text/document/file（文本）或 audio/video（音视频）；"
+                    "文本类已支持 txt/md、docx、PDF（文字层）。"
+                )
+        elif st in ("video", "audio"):
+            raw_text = (
+                f"[{st} 待转写] {task.title or '未命名'}\n\n"
+                "请填写 source_url，或先上传文件并传入 local_file_id。"
+            )
+        else:
+            raw_text = f"[待处理] {task.title or '未命名'}\n\nsource_type={st}"
+
+        if checker:
+            checker.check()
+
+        max_chars = _ingest_max_text_chars()
+        max_chunks = _ingest_max_chunks()
+        embed_bs = _ingest_embed_batch_size()
+        commit_every = _ingest_commit_every()
+        skip_emb = _ingest_skip_embedding()
+
+        ingest_notes: List[str] = []
+        rt = raw_text or ""
+        if len(rt) > max_chars:
+            ingest_notes.append(f"正文已截断至前 {max_chars} 字符，避免录入任务 OOM")
+            rt = rt[:max_chars]
+
+        if skip_emb:
+            ingest_notes.append("INGEST_SKIP_EMBEDDING=1：已跳过向量写入，仅保存文本与素材记录")
+
+        # ===== P1: 智能分块 =====
+        if CHUNKING_AVAILABLE:
+            # 使用新的递归分块策略
+            chunk_objs = hybrid_chunk(rt, max_chunks=max_chunks)
+            chunks = [c.content for c in chunk_objs]
+            chunk_metadata = {i: c.metadata for i, c in enumerate(chunk_objs)}
+            # 记录使用的分块策略
+            if chunk_objs:
+                strategy = chunk_objs[0].metadata.get("strategy", "unknown") if chunk_objs[0].metadata else "recursive"
+                ingest_notes.append(f"使用智能分块策略: {strategy}")
+        else:
+            # 降级到旧的分块方式
+            chunks = _chunk_text(rt)
+            chunk_metadata = {}
+
+        if not chunks:
+            chunks = [rt or "(无内容)"]
+
+        if len(chunks) > max_chunks:
+            ingest_notes.append(f"分块仅保留前 {max_chunks} 段（共 {len(chunks)} 段），请拆分素材或调大 INGEST_MAX_CHUNKS")
+            chunks = chunks[:max_chunks]
+
+        # ===== P4: 元数据强化 =====
+        enhanced_metadata: Dict[str, Any] = {}
+        
+        # 提取文档标题（从task title或首行）
+        if task.title:
+            enhanced_metadata["title"] = task.title
+        elif chunks and len(chunks[0]) > 10:
+            # 取首行作为标题
+            first_line = chunks[0].strip().split('\n')[0][:100]
+            enhanced_metadata["title_from_content"] = first_line
+        
+        # 记录原文长度（用于评估完整度）
+        enhanced_metadata["original_length"] = len(raw_text) if raw_text else 0
+        enhanced_metadata["chunk_count"] = len(chunks)
+        
+        # 记录使用的分块策略
+        enhanced_metadata["chunking_strategy"] = "hybrid" if CHUNKING_AVAILABLE else "legacy"
+
+        if checker:
+            checker.check()
+
+        tag_cfg = db.query(TagConfig).filter(TagConfig.ip_id == task.ip_id).first()
+        categories = (tag_cfg.tag_categories if tag_cfg else None) or None
+
+        if checker:
+            checker.check()
+
+        # 每块各打一次 LLM 会极慢且易爆内存；整任务只打标一次（用开头片段）
+        shared_tags = None
+        try:
+            tag_snippet = (rt or "")[:4000]
+            if tag_snippet.strip():
+                shared_tags = suggest_tags_for_content(tag_snippet, categories)
+        except Exception:
+            shared_tags = None
+
+        # 按批向量化并落库：每批仅保留当前批的向量，避免「全部分块 embedding 列表」撑爆内存（OOM / Killed）
+        created_ids: List[str] = []
+        total = len(chunks)
+        for batch_start in range(0, total, embed_bs):
+            if checker:
+                checker.check()
+            task.last_heartbeat = now_utc()
+            db.commit()
+            batch_chunks = chunks[batch_start : batch_start + embed_bs]
+            if skip_emb:
+                batch_embeddings: List[list[float] | None] = [None] * len(batch_chunks)
+            else:
+                batch_embeddings = embed_texts_batched(
+                    batch_chunks,
+                    batch_size=min(embed_bs, len(batch_chunks)),
+                )
+            for j, content in enumerate(batch_chunks):
+                i = batch_start + j
+                asset_id = f"asset_{task.ip_id}_{uuid.uuid4().hex[:12]}"
+                title = _build_asset_title(task.title, i, total)
+                # ===== P3/P4: 合并元数据 =====
+                meta: dict = {
+                    "source_task_id": task.task_id,
+                    "source_type": task.source_type,
+                    "chunk_index": i,
+                    "total_chunks": total,
+                }
+                
+                # 合并增强元数据（仅首个块记录整体信息）
+                if i == 0:
+                    meta.update(enhanced_metadata)
+                
+                # 添加P1分块元数据（如果有）
+                if chunk_metadata and i in chunk_metadata:
+                    meta["chunk_info"] = chunk_metadata[i]
+                
+                if ingest_notes and i == 0:
+                    meta["ingest_warnings"] = ingest_notes
+                if shared_tags:
+                    meta["auto_labels"] = shared_tags
+                db.add(
+                    IPAsset(
+                        asset_id=asset_id,
+                        ip_id=task.ip_id,
+                        asset_type="story",
+                        title=title,
+                        content=content,
+                        content_vector_ref=None,
+                        asset_meta=meta,
+                        relations=[],
+                        status="active",
+                    )
+                )
+                try:
+                    emb = batch_embeddings[j] if j < len(batch_embeddings) else None
+                    upsert_asset_vector(
+                        db,
+                        asset_id=asset_id,
+                        ip_id=task.ip_id,
+                        content=content,
+                        precomputed_embedding=emb,
+                    )
+                except Exception:
+                    pass
+                created_ids.append(asset_id)
+
+                if (i + 1) % commit_every == 0:
+                    db.commit()
+                    db.refresh(task)
+
+            del batch_embeddings
+
+        db.refresh(task)
+        if task.status != "PROCESSING":
+            logger.warning(
+                "ingest task %s no longer PROCESSING before COMPLETED (skip overwrite)",
+                task.task_id,
+            )
+            db.rollback()
+            return
+        task.status = "COMPLETED"
+        task.created_asset_ids = created_ids
+        task.error_message = None
+    except TimeoutException:
+        raise
+    except Exception as e:
+        logger.exception("ingest pipeline failed: %s", task.task_id)
+        task.status = "FAILED"
+        task.error_message = str(e)
+        task.created_asset_ids = []
+
+    db.commit()
+
+    # 文本先入库、向量事后补齐：避免 ingest 主链路被 embedding 慢请求阻塞/放大内存。
+    if skip_emb and created_ids and _enable_async_vector_backfill():
+        try:
+            from app.queue import enqueue_vector_backfill
+            enqueued = enqueue_vector_backfill(task.task_id)
+            if enqueued:
+                logger.info("[Ingest] queued vector backfill for task %s", task.task_id)
+            else:
+                logger.warning("[Ingest] vector backfill queue unavailable for task %s", task.task_id)
+        except Exception:
+            logger.exception("[Ingest] failed to enqueue vector backfill for task %s", task.task_id)
+
+
+def process_ingest_task(task_id: str) -> None:
+    """
+    后台执行录入任务（在独立会话中）。
+    使用软超时机制（定期检查），适用于 Railway 后台任务线程。
+    """
+    logger = logging.getLogger(__name__)
+    start_time = time.time()
+    timeout_seconds = _ingest_task_timeout()
+    logger.info(f"[Ingest] Starting task {task_id}, timeout={timeout_seconds}s")
+
+    db = SessionLocal()
+    try:
+        task = get_ingest_task(db, task_id)
+        if not task:
+            logger.warning(f"[Ingest] Task {task_id} not found")
+            return
+        if task.status != "QUEUED":
+            logger.warning(f"[Ingest] Task {task_id} already processed: {task.status}")
+            return
+
+        # ===== P2: 智能重试 =====
+        max_retries = _get_max_retries()
+        retry_delay = _get_retry_delay()
+        
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                # 执行流水线（软超时，适用于后台线程，禁止使用 signal.SIGALRM）
+                _run_ingest_pipeline(
+                    db,
+                    task,
+                    checker=TimeLimitChecker(timeout_seconds),
+                )
+                
+                duration = time.time() - start_time
+                logger.info(f"[Ingest] Completed task {task_id} in {duration:.1f}s (attempt {attempt + 1})")
+                return  # 成功，直接返回
+                
+            except TimeoutException:
+                # 超时不重试，直接失败
+                duration = time.time() - start_time
+                logger.error(f"[Ingest] Task {task_id} TIMEOUT after {duration:.1f}s")
+                
+                db.refresh(task)
+                task.status = "TIMEOUT"
+                task.error_message = (
+                    f"处理超时({timeout_seconds}秒)。"
+                    f"建议：1) 压缩文件 2) 拆分成小文件(<5MB) 3) 稍后重试"
+                )
+                db.commit()
+                return
+                
+            except Exception as e:
+                last_error = e
+                duration = time.time() - start_time
+                
+                # 判断是否可重试
+                if attempt < max_retries and _is_retryable_error(e):
+                    backoff = _exponential_backoff(attempt, retry_delay)
+                    logger.warning(
+                        f"[Ingest] Task {task_id} failed (attempt {attempt + 1}/{max_retries + 1}), "
+                        f"retrying in {backoff:.1f}s: {e}"
+                    )
+                    time.sleep(backoff)
+                    # 重新查询任务状态（可能被其他进程修改）
+                    db.expire_all()
+                    task = get_ingest_task(db, task_id)
+                    if not task or task.status != "QUEUED":
+                        logger.warning(f"[Ingest] Task {task_id} no longer QUEUED, aborting retry")
+                        return
+                    continue
+                else:
+                    # 不可重试或已达最大重试次数
+                    logger.error(
+                        f"[Ingest] Task {task_id} FAILED after {attempt + 1} attempt(s): {e}"
+                    )
+                    db.refresh(task)
+                    task.status = "FAILED"
+                    
+                    # 区分可重试和不可重试错误
+                    if attempt >= max_retries:
+                        task.error_message = (
+                            f"重试{attempt}次后仍失败: {str(e)[:400]}"
+                        )
+                    else:
+                        task.error_message = f"失败（不重试）: {str(e)[:400]}"
+                    
+                    task.created_asset_ids = []
+                    db.commit()
+                    return
+        
+        # 兜底（理论上不会走到这里）
+        logger.error(f"[Ingest] Task {task_id} failed unexpectedly after {max_retries + 1} attempts")
+        db.refresh(task)
+        task.status = "FAILED"
+        task.error_message = f"未知错误: {str(last_error)[:400]}" if last_error else "未知错误"
+        db.commit()
+    finally:
+        db.close()
+        gc.collect()
+        logger.info(f"[Ingest] Task {task_id} cleanup complete")
+
+
+def backfill_vectors_for_task(task_id: str) -> None:
+    """
+    事后异步补齐向量：
+    - 仅处理 ingest 已创建的素材
+    - 跳过已存在向量的素材
+    - 无视 INGEST_SKIP_EMBEDDING（force=True）写入向量
+    """
+    logger = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        task = get_ingest_task(db, task_id)
+        if not task:
+            logger.warning("[VectorBackfill] task not found: %s", task_id)
+            return
+
+        raw_ids = task.created_asset_ids or []
+        asset_ids = [str(x) for x in raw_ids if str(x).strip()]
+        if not asset_ids:
+            logger.info("[VectorBackfill] no assets to backfill for task: %s", task_id)
+            return
+
+        existing_ids = set(
+            x[0]
+            for x in (
+                db.query(AssetVector.asset_id)
+                .filter(AssetVector.asset_id.in_(asset_ids))
+                .all()
+            )
+        )
+        pending_ids = [aid for aid in asset_ids if aid not in existing_ids]
+        if not pending_ids:
+            logger.info("[VectorBackfill] all vectors already exist for task: %s", task_id)
+            return
+
+        rows = (
+            db.query(IPAsset)
+            .filter(IPAsset.asset_id.in_(pending_ids), IPAsset.status == "active")
+            .all()
+        )
+        row_map = {r.asset_id: r for r in rows}
+        ordered_rows = [row_map[aid] for aid in pending_ids if aid in row_map]
+        if not ordered_rows:
+            logger.info("[VectorBackfill] no active assets found for task: %s", task_id)
+            return
+
+        batch_size = _ingest_embed_batch_size()
+        success = 0
+        for start in range(0, len(ordered_rows), batch_size):
+            batch_rows = ordered_rows[start : start + batch_size]
+            texts = [(r.content or "").strip() for r in batch_rows]
+            embeddings = embed_texts_batched(texts, batch_size=min(batch_size, len(texts)))
+            for i, row in enumerate(batch_rows):
+                emb = embeddings[i] if i < len(embeddings) else None
+                if not emb:
+                    continue
+                try:
+                    ok = upsert_asset_vector(
+                        db,
+                        asset_id=row.asset_id,
+                        ip_id=row.ip_id,
+                        content=row.content or "",
+                        precomputed_embedding=emb,
+                        force=True,
+                    )
+                    if ok:
+                        success += 1
+                except Exception:
+                    logger.exception("[VectorBackfill] upsert failed for asset %s", row.asset_id)
+            db.commit()
+
+        logger.info(
+            "[VectorBackfill] task=%s done, success=%s, total=%s",
+            task_id,
+            success,
+            len(ordered_rows),
+        )
+    except Exception:
+        logger.exception("[VectorBackfill] failed for task=%s", task_id)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()

@@ -1,0 +1,443 @@
+
+## 🏗️ 系统架构：爆款仿写三层迁移引擎
+
+```
+外部爆款链接输入
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ 第一层：爆款解构（Structure Extraction）  │
+│ • 提取钩子类型（反问/反差/数据/见证）     │
+│ • 提取情绪曲线（焦虑→希望/质疑→认同）     │
+│ • 提取段落结构（几段/每段功能/句长分布）   │
+│ • 提取内容实体（原爆款的血肉素材）        │
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ 第二层：风格迁移（Style Transfer）        │
+│ • 用Style Corpus匹配相似结构模板          │
+│ • 注入IP风格DNA（口癖/句式/数据呈现）     │
+│ • 替换内容实体（用IPAsset填充血肉）         │
+│ • 强制约束解码（变异系数/短句占比）         │
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ 第三层：爆款校验（Quality Control）       │
+│ • 校验钩子强度（是否足够痛/足够好奇）      │
+│ • 校验IP一致性（口癖出现率/禁用词检查）    │
+│ • 校验数据密度（每100字必须有具体数字）   │
+│ • 不通过则回滚重写（Style Rewrite Layer） │
+└─────────────────────────────────────────┘
+    │
+    ▼
+符合IP风格的爆款文案输出
+```
+
+---
+
+## 📝 爆款解构模板（把外部爆款解析为可复用的Structure）
+
+当用户输入一个爆款链接（或粘贴文案），系统需要将其解析为以下结构：
+
+```json
+{
+  "external_hit": {
+    "url": "输入的链接",
+    "raw_text": "爆款的原始文案",
+    
+    "structure_skeleton": {
+      "hook_type": "反差质疑型",  // 从IP风格库的6种钩子类型匹配
+      "hook_pattern": "你们都说X不行，但我用Y实现了Z",  // 抽象模板
+      "paragraph_count": 5,
+      "paragraph_functions": ["反差钩", "背景铺", "过程细", "数据证", "转化收"],
+      "sentence_lengths": [35, 28, 32, 25, 30, 28, 22, 35, 20],  // 句长序列
+      "burstiness_score": 0.48,  // 变异系数
+      "emotion_curve": ["质疑→好奇→共情→信任→行动"],
+      "logic_flow": "否定开场→身份建立→过程展示→数据验证→转化"
+    },
+    
+    "content_entities": {
+      "core_topic": "原爆款主题（如：美甲店创业）",
+      "pain_point": "原痛点（如：上班不自由）",
+      "solution": "原方案（如：开美甲店）",
+      "key_data": ["3000元启动", "月入5万", "3个员工"],
+      "call_to_action": "原转化方式"
+    },
+    
+    "hit_factors": {
+      "why_hit": "开头反差足够强/数据足够具象/情绪转折自然",
+      "audience_match": "宝妈群体/时间自由需求",
+      "timing": "春节后复工季"
+    }
+  }
+}
+```
+
+---
+
+## 🔄 风格迁移算法：Structure Mapping + Content Filling
+
+### Step 1：结构匹配（Match Structure）
+
+```python
+def match_structure(external_hit, style_corpus):
+    """
+    将外部爆款结构映射到IP的风格模板库
+    """
+    # 1. 计算结构相似度（基于段落功能和情绪曲线）
+    similarities = []
+    for sample in style_corpus["samples"]:
+        sim = calculate_structure_similarity(
+            external_hit["structure_skeleton"],
+            sample["structure_template"]
+        )
+        similarities.append((sample["sample_id"], sim))
+    
+    # 2. 选择Top3最相似的IP风格模板
+    # 例如：外部爆款是"美甲店反差型" → 匹配小敏的"馒头反差型"（opinion_005）
+    matched_templates = sorted(similarities, key=lambda x: x[1], reverse=True)[:3]
+    
+    return matched_templates  # 返回 ["opinion_005", "story_001", "opinion_002"]
+```
+
+### Step 2：实体替换（Entity Replacement）
+
+```python
+def replace_entities(external_hit, ip_assets):
+    """
+    把外部爆款的具体内容，替换成IP的人生故事库素材
+    保留结构，替换血肉
+    """
+    replacement_map = {
+        # 外部爆款的实体 → IP Asset中的对应实体
+        "原痛点：上班不自由": "ip_story：负债400万/手心向上",
+        "原方案：开美甲店": "ip_solution：2000块做花样馒头",
+        "原数据：3000元启动": "ip_data：2000块买二手设备",
+        "原成果：月入5万": "ip_data：一天卖2000个馒头/月入五六万",
+        "原过程：学美甲3个月": "ip_process：冬至摆摊54块到朋友圈爆单",
+        "原钩子：你们都说美甲不挣钱": "ip_hook：你们都说卖馒头又累又不挣钱"
+    }
+    
+    # 从IP Asset检索最匹配的故事片段
+    ip_fragments = retrieve_ip_fragments(
+        theme=external_hit["content_entities"]["core_topic"],
+        emotion=external_hit["structure_skeleton"]["emotion_curve"],
+        data_requirement=len(external_hit["content_entities"]["key_data"])
+    )
+    
+    return ip_fragments
+```
+
+### Step 3：风格注入（Style Injection）
+
+```python
+def inject_style(raw_draft, style_constraints):
+    """
+    用Global Style Constraints约束生成/改写
+    """
+    # 1. 句式重构（强制短句化）
+    if calculate_burstiness(raw_draft) < style_constraints["variation_coefficient"]:
+        raw_draft = split_long_sentences(raw_draft, max_length=35)
+    
+    # 2. 口癖注入（强制插入IP标志性语言）
+    raw_draft = inject_catchphrases(
+        raw_draft,
+        mandatory_phrases=["姐妹们", "听我一句实话", "把真金白银揣进口袋"],
+        density=0.12  # 每100字至少1个
+    )
+    
+    # 3. 数据具象化（替换模糊词汇）
+    raw_draft = replace_vague_words(
+        raw_draft,
+        forbidden=["很多", "大量", "比较"],
+        replacement_strategy="specific_numbers"
+    )
+    
+    # 4. 禁用词清洗
+    raw_draft = remove_banned_words(raw_draft, banned_list=["赛道", "赋能"])
+    
+    return raw_draft
+```
+
+---
+
+## 🎯 实战示例：爆款仿写全流程
+
+**用户输入**：外部爆款链接（美甲店创业）
+> "你们都说开美甲店不挣钱，但我靠这个50平小店买了房。三年前我还是个月薪3000的文员，现在带3个员工月入5万..."
+
+**系统处理**：
+
+### Phase 1：解构外部爆款
+```json
+{
+  "hook_type": "反差质疑型",
+  "structure_pattern": "否定开场→身份反差→时间线→数据验证",
+  "emotion_curve": ["质疑→好奇→励志→信任"],
+  "content_entities": {
+    "identity": "月薪3000文员",
+    "turning_point": "开50平美甲店",
+    "key_data": ["3年前", "50平", "3个员工", "月入5万", "买房"],
+    "pain_point": "上班低收入"
+  }
+}
+```
+
+### Phase 2：匹配IP风格模板
+系统检索Style Corpus，匹配到：
+- **Primary Match**: `story_007`（"这就是你们最看不起的馒头" → 同为"反差质疑型"）
+- **Secondary Match**: `story_001`（负债翻身故事 → 同为"谷底反弹型"）
+- **Structure Template**: 采用`story_007`的"质疑→身份→忙碌→反思"结构
+
+### Phase 3：实体替换（IP Asset注入）
+| 外部爆款实体 | 替换为IP实体（从人生故事库检索） |
+|-------------|-------------------------------|
+| 月薪3000文员 | 负债400万宝妈/手心向上 |
+| 50平美甲店 | 2000块设备起步/家里10平方厨房 |
+| 3个员工 | 从1人到带2000+学员 |
+| 月入5万买房 | 一天卖2000个馒头/月入五六万 |
+| 3年前开始 | 2023年冬至第一次摆摊 |
+| 学美甲3个月 | 摆摊2小时卖54块到回购 |
+
+### Phase 4：风格注入（生成Prompt）
+
+```markdown
+【系统角色】你是小敏，馍范女子创始人。
+【结构模板】（从story_007继承）
+- 钩子：反差质疑（你们都说X看不起/不行）
+- 身份：90后二胎宝妈/负债翻身实战派
+- 过程：时间线压缩+数字奇观
+- 反思：金句升华
+
+【强制约束】
+- 句长变异系数≥0.45（长短句交替）
+- 必用口癖："姐妹们""这就是你们最看不起的""受得了不"
+- 数据呈现：具体数字（2000块/54块/2000个/360天）
+- 禁用词：赛道/赋能/底层逻辑
+
+【内容素材】（从IP Asset调用）
+- 至暗时刻：老公实体失败，负债400万，流动资金不到1万
+- 启动细节：2023年冬至，2000块二手设备，30个馒头，2小时卖54块
+- 高光数据：180天33万个馒头，带出500+姐妹，卖到100+城市
+- 辛苦证明：每天9点半开工，忙到11点，连续360天
+
+【仿写任务】
+基于外部爆款结构"反差质疑型"，用IP素材填充，生成符合小敏风格的爆款文案。
+要求：
+1. 保留原爆款的"质疑→身份→过程→数据"结构
+2. 完全替换为IP的人生故事和口头禅
+3. 必须使用至少3个具体数字和2个反问句
+4. 结尾要有不卑不亢的转化钩子
+```
+
+### Phase 5：输出生成
+> "这就是你们最看不起的卖馒头，觉得又累还又赚不到钱。我给你说，我一天的业绩能赶上别人两个月的工资，你无法想象他得有多累..."
+> 
+> （实际生成会结合story_007的结构 + story_001的谷底故事 + opinion_005的数据呈现方式）
+
+---
+
+## 🛠️ 技术实现建议
+
+### 1. 爆款链接输入模块
+- 支持用户粘贴链接或文案
+- 自动解析（如果链接可爬取）或手动解构（用户标记钩子/数据/情绪）
+- 快速分类：选择最接近的IP风格模板（说观点/讲故事/晒过程/说观点）
+
+### 2. 实体对齐模块（关键）
+建立**主题映射表**，自动识别外部爆款的"通用主题"对应IP的"具体素材"：
+
+```json
+{
+  "theme_mapping": {
+    "低成本创业": ["2000块设备", "家里厨房起步", "轻装上阵"],
+    "负债翻身": ["400万负债", "54块摆摊", "100+城市"],
+    "时间管理": ["9点半开工", "接送孩子", "360天无休"],
+    "产品差异化": ["0添加", "果蔬汁上色", "面包概念做馒头"]
+  }
+}
+```
+
+### 3. 混合检索策略（RAG Fusion）
+当用户输入新爆款时，同时检索：
+- **Structure Index**: 找到IP风格库中最相似的结构模板
+- **Content Index**: 找到IP人生故事库中最匹配的故事片段
+- **Constraint Layer**: 应用Global Style Constraints强制改写
+
+### 4. 人机协作优化
+对于复杂爆款，建议：
+- **系统预生成**：基于结构匹配自动生成初稿
+- **人工标记调整**：用户可标记"这里换另一个故事""这里加一句口癖"
+- **迭代重写**：根据反馈调整Structure Template的选择
+
+---
+
+## 📋 Prompt模板
+
+```markdown
+# 爆款仿写Agent（系统提示词）
+
+你是小敏IP的爆款仿写专家。你的任务是将外部爆款的成功结构，转化为符合小敏风格的内容。
+
+## 输入处理
+用户会提供：
+1. 外部爆款文案（或链接）
+2. 期望的内容类型（可选：说观点/讲故事/晒过程/说观点）
+
+## 处理流程
+
+### Step 1：解构外部爆款
+分析并提供：
+- 钩子类型：[反问/反差/数据/见证/算账/劝退]
+- 情绪曲线：[谷底反弹/稳步上升/对比冲突]
+- 段落结构：[几段/每段功能/句长分布]
+- 内容实体：[身份/痛点/解决方案/关键数据]
+
+### Step 2：匹配IP风格模板
+从Style Corpus选择最匹配的模板ID：[opinion_XXX/story_XXX]
+匹配理由：[结构相似度/情绪曲线匹配/钩子类型一致]
+
+### Step 3：实体替换映射
+展示替换方案：
+- 外部身份（如：月薪3000文员）→ IP身份（负债400万宝妈）
+- 外部方案（如：50平美甲店）→ IP方案（2000块馒头创业）
+- 外部数据（如：月入5万）→ IP数据（一天2000个馒头/月入五六万）
+
+### Step 4：风格约束生成
+强制应用：
+- 短句占比≥60%，平均句长18字
+- 必用口癖："姐妹们""听我一句实话""把真金白银揣进口袋"
+- 数据具象化：禁止"很多/大量"，必须用"54块/2000个"
+- 禁用词检查：自动替换"赛道/赋能"为"死磕产品/在公域里捞人"
+
+### Step 5：输出仿写文案
+提供：
+1. 完整仿写文案（符合IP风格）
+2. 结构对比说明（原爆款结构 vs IP适配结构）
+3. 素材来源标注（引用了IP Asset中的哪些故事）
+4. 优化建议（如果需要增强钩子或调整情绪）
+
+## 输出格式
+【仿写文案】
+...
+
+【结构溯源】
+原爆款钩子类型：XXX → 匹配IP模板：story_007
+原爆款情绪：质疑→希望 → 匹配IP情绪曲线：谷底反弹
+
+【素材来源】
+- 冬至54块故事（来自IP人生故事库）
+- 2000块设备细节（来自story_001）
+- 360天无休（来自story_007）
+
+【风格校验】
+- 口癖出现率：X%（目标≥12%）
+- 数据密度：每100字X个（目标≥1个）
+- 变异系数：X（目标≥0.45）
+```
+
+这套系统的核心优势是：**保留爆款的"成功结构"（已被验证的钩子+情绪+节奏），但彻底替换为IP的"风格DNA"和"人生血肉"**。这样既保证了内容的爆款潜力，又确保了IP风格的一致性。
+
+---
+
+## ✅ 结合当前代码的 V2 落地优化（建议直接按此实施）
+
+你们当前后端已有：
+- `ScenarioTwoGenerator`（结构解析 + 改写）
+- `StyleCorpusService`（风格约束 + 人味评分）
+- `creator.generate/remix` 链路
+
+建议把“爆款仿写”升级为 **6 个明确阶段**，每个阶段产出结构化中间件，避免黑盒重写。
+
+### Phase A：输入标准化（Input Normalization）
+- 输入统一对象：`source_url | raw_text | ip_id | template_hint | strictness`
+- 先抽取文本，再做最小清洗（emoji/广告尾巴/重复空行）
+- 输出 `normalized_input`，写入 draft metadata，便于回放复现
+
+### Phase B：结构解构（Structure Extraction）
+- 输出固定 JSON：`hook_type / emotion_curve / paragraph_functions / data_points / cta_type`
+- 解构失败要降级：使用规则提取（正则 + 句长统计）作为 fallback
+- 结构结果单独持久化：`structure_snapshot`
+
+### Phase C：双检索融合（RAG Fusion）
+- 检索 A：Style Corpus（结构相似）
+- 检索 B：IP Assets（事实/故事片段）
+- 融合规则：
+  - 先保结构（A）
+  - 再填血肉（B）
+  - 最后套 `global_style_constraints`
+- 输出 `retrieval_trace`：样本 ID、相似度、命中关键词
+
+### Phase D：受控改写（Constrained Rewrite）
+- 改写 Prompt 强制包含：
+  - 主题白名单（小敏：创业/翻身/变现/私域）
+  - 禁用黑话词
+  - 数据密度下限（每 100 字至少 1 个数字）
+  - 自称规则与禁用称呼
+- 生成参数固定为可配置（temperature/top_p），记录到 metadata
+
+### Phase E：对抗校验（Adversarial Validation）
+- 必测项：
+  - `ip_consistency_score`
+  - `burstiness_score`
+  - `imperfection_score`
+  - `domain_focus_hit`（白名单命中）
+- 规则：任一不达标 => 进入 Rewrite Layer（最多 2 次）
+- 最终输出 `validation_report`
+
+### Phase F：结果可解释（Explainability）
+- 对前端返回额外字段：
+  - `structure_compare`（原结构 vs 新结构）
+  - `source_attribution`（用了哪些 IP 素材）
+  - `why_passed`（哪些指标达标）
+
+---
+
+## 📏 建议验收指标（Definition of Done）
+
+- 成功率：`/generate/remix` 端到端成功率 >= 95%
+- 风格一致性：`ip_consistency_score >= 0.8`
+- 主题聚焦：白名单命中率 >= 98%
+- 人味指标：`burstiness + imperfection` 达标率 >= 85%
+- 可解释性：100% 返回 `retrieval_trace + validation_report`
+
+---
+
+## 🧪 测试用例最小集合（必须自动化）
+
+1. **正常链路**：小红书短链可解析并完成生成  
+2. **降级链路**：链接解析失败时，仍可用 raw_text 生成  
+3. **风格守卫**：输出不含白名单词时，触发纠偏重写  
+4. **禁词守卫**：出现“赛道/赋能/底层逻辑”时自动重写  
+5. **可追踪性**：结果包含样本溯源和校验报告  
+
+---
+
+## 🌿 Git 交付最佳实践（适合你们当前仓库）
+
+- 小步提交：每个 Phase 独立 PR（A/B/C...），避免“大而全”
+- PR 模板固定三段：
+  - Summary（做了什么）
+  - Risk（可能影响）
+  - Test Plan（如何验证）
+- Feature Flag：
+  - `REMIX_V2_ENABLED=true/false`
+  - 可灰度放量，出问题可一键回退旧链路
+- ADR 文档化：
+  - 记录“为什么选三层迁移 + 对抗校验”
+  - 记录阈值来源（0.8/0.45 等）
+
+---
+
+## 🚀 建议实施顺序（两周版本）
+
+- Week 1：
+  - 落地 Phase A/B/C（输入标准化、结构解构、双检索）
+  - 增加 `retrieval_trace`
+- Week 2：
+  - 落地 Phase D/E/F（受控改写、对抗校验、可解释输出）
+  - 接入 Feature Flag + 自动化回归
+
+按这个顺序做，可以在不重写全部代码的前提下，把“仿写像小敏”稳定性拉起来。

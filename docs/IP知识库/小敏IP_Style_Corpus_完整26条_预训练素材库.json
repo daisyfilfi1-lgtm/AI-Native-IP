@@ -1,0 +1,2514 @@
+{
+  "corpus_metadata": {
+    "ip_name": "小敏（馍范女子）",
+    "total_samples": 26,
+    "content_types": {
+      "说观点": 14,
+      "讲故事": 12
+    },
+    "analysis_date": "2026-03-26",
+    "style_version": "2.0_导师定位",
+    "key_characteristics": [
+      "短句暴力美学（平均12-18字）",
+      "数据具象化（54块/2000个/400万）",
+      "反问句高频（15-20%占比）",
+      "口语化过渡（呢/啊/吧/说实话）",
+      "情绪过山车（谷底→反弹→高光）",
+      "不完美性注入（冗余/语气词/思维跳跃）"
+    ],
+    "usage_instructions": {
+      "retrieval_strategy": "基于structure_template匹配，而非文本相似度",
+      "generation_constraint": "必须使用global_style_constraints进行解码控制",
+      "variation_handling": "重复样本（如story_001与story_005）用于A/B测试和细节增强",
+      "template_samples": "opinion_011为opinion_002的矩阵变体，用于行业替换"
+    }
+  },
+  "samples": [
+    {
+      "sample_id": "opinion_001",
+      "content_type": "说观点",
+      "raw_topic": "产品重要还是营销重要"
+    },
+    {
+      "sample_id": "opinion_003",
+      "content_type": "说观点",
+      "raw_topic": "烤面包店vs花样馒头投入对比",
+      "performance_tags": [
+        "算账",
+        "对比",
+        "轻资产"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "反差钩",
+            "sentences": 1,
+            "word_count": 25,
+            "content": "20万开一家烤面包店，还不如投2000块做新中式花样馒头。"
+          },
+          {
+            "position": 1,
+            "type": "身份立",
+            "sentences": 2,
+            "word_count": 40,
+            "content": "我是在南京做花样馒头的左右吗？十年前开面包店的理想..."
+          },
+          {
+            "position": 2,
+            "type": "对比论",
+            "sentences": 5,
+            "word_count": 130,
+            "content": "很多宝妈们做花样馒头和烤面包...所以口味的丰富性更适合挑剔的孩子。"
+          },
+          {
+            "position": 3,
+            "type": "算账收",
+            "sentences": 2,
+            "word_count": 45,
+            "content": "由于不需要烤制...投入成本比烤面包低很多。"
+          },
+          {
+            "position": 4,
+            "type": "转化钩",
+            "sentences": 2,
+            "word_count": 30,
+            "content": "我家花样馒头有几十种口味...你的城市有花样馒头吗？"
+          }
+        ],
+        "sentence_length_pattern": [
+          25,
+          22,
+          28,
+          35,
+          30,
+          25,
+          28,
+          32,
+          27,
+          25,
+          20,
+          15
+        ],
+        "burstiness_score": 0.35,
+        "hook_type": "数据反差（20万vs2000块）",
+        "emotion_curve": [
+          "震惊→怀旧→理性分析→算账→好奇"
+        ],
+        "logic_flow": "数据钩子→身份建立→产品对比→成本算账→地域扩散"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "还不如",
+          "十年前...今天",
+          "误打误撞"
+        ],
+        "rhetorical_questions": [
+          "你的城市有花样馒头吗？"
+        ],
+        "data_points": [
+          "20万",
+          "2000块",
+          "十年前",
+          "几十种口味"
+        ],
+        "transitional_markers": [
+          "由于",
+          "所以"
+        ],
+        "imperfection_markers": [
+          "呢",
+          "吧"
+        ],
+        "sentence_rhythm": "算账段中长句，钩子短句",
+        "vocabulary_profile": [
+          "烤制",
+          "蒸制",
+          "低糖低油"
+        ]
+      },
+      "content_entities": {
+        "core_topic": "轻资产创业选择",
+        "pain_point": "开面包店成本高、设备要求高",
+        "solution": "2000块做花样馒头替代",
+        "key_concept": "蒸制vs烤制，健康差异"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "轻资产",
+          "项目对比",
+          "健康理念"
+        ],
+        "emotion_tags": [
+          "务实",
+          "算账",
+          "诱导"
+        ],
+        "target_audience": [
+          "B类：全职宝妈",
+          "F类：年轻女性"
+        ],
+        "scene_context": [
+          "项目选择",
+          "成本控制"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "20万开一家烤面包店，还不如投2000块做新中式花样馒头",
+        "accounting_point": "投入成本比烤面包低很多",
+        "conversion_hook": "你的城市有花样馒头吗？"
+      }
+    },
+    {
+      "sample_id": "opinion_004",
+      "content_type": "说观点",
+      "raw_topic": "开店前7个问题",
+      "performance_tags": [
+        "清单体",
+        "认知框架",
+        "避坑"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "权威立",
+            "sentences": 1,
+            "word_count": 18,
+            "content": "会赚钱的老板，他在开店之前都会问自己以下7个问题"
+          },
+          {
+            "position": 1,
+            "type": "清单体",
+            "sentences": 8,
+            "word_count": 95,
+            "content": "一、我到底是卖什么的？...八、到底是谁在跟我抢客户呢？"
+          }
+        ],
+        "sentence_length_pattern": [
+          18,
+          12,
+          15,
+          12,
+          15,
+          12,
+          15,
+          12,
+          15,
+          12
+        ],
+        "burstiness_score": 0.15,
+        "hook_type": "权威断言",
+        "emotion_curve": [
+          "权威→清单焦虑→认知负荷"
+        ],
+        "logic_flow": "权威开场→连续发问→认知覆盖"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "会赚钱的老板"
+        ],
+        "rhetorical_questions": [
+          "一、...？",
+          "二、...？"
+        ],
+        "data_points": [
+          "7个问题",
+          "8个问题"
+        ],
+        "transitional_markers": [
+          "一、",
+          "二、"
+        ],
+        "imperfection_markers": [],
+        "sentence_rhythm": "极短句，清单式",
+        "literary_devices": [
+          "排比",
+          "清单"
+        ]
+      },
+      "content_entities": {
+        "core_topic": "创业前自检",
+        "pain_point": "盲目开店",
+        "solution": "8个问题清单",
+        "key_concept": "商业逻辑自检"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "商业逻辑",
+          "避坑",
+          "清单"
+        ],
+        "emotion_tags": [
+          "严肃",
+          "警示"
+        ],
+        "target_audience": [
+          "A类：宝妈开店",
+          "C类：异业加品"
+        ],
+        "scene_context": [
+          "创业前准备"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "会赚钱的老板，他在开店之前都会问自己以下7个问题",
+        "list_structure": "一、我到底是卖什么的？二、我的产品卖点是什么？"
+      }
+    },
+    {
+      "sample_id": "opinion_006",
+      "content_type": "说观点",
+      "raw_topic": "纯手工保证",
+      "performance_tags": [
+        "真诚",
+        "过程秀",
+        "信任建立"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "反差钩",
+            "sentences": 1,
+            "word_count": 45,
+            "content": "从来不去保证我们家的东西有多好吃...但是每个人的口味都不一样。"
+          },
+          {
+            "position": 1,
+            "type": "承诺立",
+            "sentences": 1,
+            "word_count": 35,
+            "content": "但是我唯一能保证是...绝对没有任何科技与狠活"
+          },
+          {
+            "position": 2,
+            "type": "过程细",
+            "sentences": 6,
+            "word_count": 180,
+            "content": "好多时候我都是会自己守在工作室...没有那些让人看不懂的添加剂"
+          },
+          {
+            "position": 3,
+            "type": "情怀升",
+            "sentences": 3,
+            "word_count": 75,
+            "content": "其实啊，这些料和工序它其实都是成本...让你安心又健康"
+          }
+        ],
+        "sentence_length_pattern": [
+          45,
+          35,
+          40,
+          35,
+          38,
+          32,
+          30,
+          28,
+          25,
+          32,
+          28,
+          25
+        ],
+        "burstiness_score": 0.25,
+        "hook_type": "否定转肯定（不保证好吃→保证健康）",
+        "emotion_curve": [
+          "意外→信任→心疼→敬佩"
+        ],
+        "logic_flow": "反常识开场→承诺聚焦→过程见证→价值升华"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "科技与狠活",
+          "增白剂",
+          "亲手",
+          "指尖"
+        ],
+        "rhetorical_questions": [
+          "你知道作坊里面常用增白剂吗？"
+        ],
+        "data_points": [
+          "上百次",
+          "三四个钟头",
+          "10g",
+          "20g"
+        ],
+        "transitional_markers": [
+          "但是",
+          "其实",
+          "所以"
+        ],
+        "imperfection_markers": [
+          "呢",
+          "啊",
+          "吧"
+        ],
+        "sentence_rhythm": "叙述长句+感性短句",
+        "sensory_details": [
+          "指尖触到那份扎实的筋道",
+          "满屋子的米香味"
+        ]
+      },
+      "content_entities": {
+        "core_topic": "食品安全信任状",
+        "pain_point": "添加剂担忧",
+        "solution": "纯手工过程展示",
+        "key_concept": "零添加=健康"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "食品安全",
+          "手工价值",
+          "信任建立"
+        ],
+        "emotion_tags": [
+          "真诚",
+          "执着",
+          "感人"
+        ],
+        "target_audience": [
+          "B类：宝妈",
+          "所有关注健康人群"
+        ],
+        "scene_context": [
+          "品质证明",
+          "差异化"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "从来不去保证我们家的东西有多好吃，因为每个人的口味都不一样",
+        "trust_punch": "但是我唯一能保证是，我们家的东西纯手工无添加，绝对没有任何科技与狠活",
+        "process_detail": "直到我的指尖触到那份扎实的筋道，才肯塑形开针"
+      }
+    },
+    {
+      "sample_id": "opinion_007",
+      "content_type": "说观点",
+      "raw_topic": "选择方向跟对人",
+      "performance_tags": [
+        "地域信任",
+        "血统论",
+        "CALL我钩子"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "劝退钩",
+            "sentences": 2,
+            "word_count": 40,
+            "content": "如果你也想做私房早餐，在来我这边之前啊，千万不要做决定"
+          },
+          {
+            "position": 1,
+            "type": "方向论",
+            "sentences": 3,
+            "word_count": 75,
+            "content": "做什么事情啊，方向要选对...跟着山东人啊做面点，这才没有错"
+          },
+          {
+            "position": 2,
+            "type": "血统证",
+            "sentences": 3,
+            "word_count": 85,
+            "content": "在我山东老家...才有了今天的花样馒头和蒸面包的商业做法"
+          },
+          {
+            "position": 3,
+            "type": "成果晒",
+            "sentences": 4,
+            "word_count": 110,
+            "content": "为了做好这些产品呢...男女老少他都爱吃"
+          },
+          {
+            "position": 4,
+            "type": "转化收",
+            "sentences": 2,
+            "word_count": 35,
+            "content": "做私房早餐的姐妹们...点个红心，留下六六六，我带带你"
+          }
+        ],
+        "sentence_length_pattern": [
+          22,
+          18,
+          25,
+          30,
+          28,
+          32,
+          35,
+          30,
+          28,
+          32,
+          35,
+          30,
+          28,
+          25,
+          18,
+          17
+        ],
+        "burstiness_score": 0.32,
+        "hook_type": "劝退+吸引",
+        "emotion_curve": [
+          "谨慎→地域认同→血统信任→成果展示→机会诱惑"
+        ],
+        "logic_flow": "前置劝退→方向选择→血统背书→产品矩阵→转化"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "千万不要做决定",
+          "这才没有错",
+          "功夫不负有心人",
+          "光浪费的食材就已经无法计算了"
+        ],
+        "rhetorical_questions": [],
+        "data_points": [
+          "60多个品种"
+        ],
+        "transitional_markers": [
+          "于是",
+          "所以",
+          "呢"
+        ],
+        "imperfection_markers": [
+          "啊",
+          "呢"
+        ],
+        "sentence_rhythm": "地域段中长句，钩子短句",
+        "regional_identity": "山东人做面点"
+      },
+      "content_entities": {
+        "core_topic": "教学招募",
+        "pain_point": "方向选错",
+        "solution": "跟着山东人学",
+        "key_concept": "地域血统=专业能力"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "教学",
+          "地域信任",
+          "血统"
+        ],
+        "emotion_tags": [
+          "自信",
+          "传承",
+          "诱导"
+        ],
+        "target_audience": [
+          "G类：国外人群",
+          "所有想学手艺的"
+        ],
+        "scene_context": [
+          "招生",
+          "信任建立"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "如果你也想做私房早餐，在来我这边之前啊，千万不要做决定",
+        "regional_punch": "跟着广东人做肠粉，跟着河南人做烩面，跟着云南人做米线，跟着山东人啊做面点",
+        "conversion": "点个红心，留下六六六，我带带你"
+      }
+    },
+    {
+      "sample_id": "opinion_008",
+      "content_type": "说观点",
+      "raw_topic": "摆摊不丢人",
+      "performance_tags": [
+        "价值观",
+        "尊严",
+        "共情"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "观点立",
+            "sentences": 1,
+            "word_count": 35,
+            "content": "我从来没有觉得说摆摊这个事情非常丢人，挣钱没有哪个行业说不累的"
+          },
+          {
+            "position": 1,
+            "type": "尊严论",
+            "sentences": 2,
+            "word_count": 55,
+            "content": "也没有哪个行业说不辛苦的，靠自己的劳动所得，我们没有什么丢人的"
+          },
+          {
+            "position": 2,
+            "type": "故事证",
+            "sentences": 4,
+            "word_count": 95,
+            "content": "我去摆摊呢，印象给我最深刻的就是...一下子特别有信心"
+          }
+        ],
+        "sentence_length_pattern": [
+          35,
+          28,
+          27,
+          32,
+          30,
+          28,
+          25,
+          30
+        ],
+        "burstiness_score": 0.3,
+        "hook_type": "价值观宣言",
+        "emotion_curve": [
+          "坚定→共情→回忆→温暖"
+        ],
+        "logic_flow": "观点开场→尊严论证→故事验证"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "非常丢人",
+          "劳动所得",
+          "回头客"
+        ],
+        "rhetorical_questions": [],
+        "data_points": [
+          "50多块钱",
+          "第二天"
+        ],
+        "transitional_markers": [
+          "呢",
+          "所以"
+        ],
+        "imperfection_markers": [
+          "呢",
+          "啊"
+        ],
+        "sentence_rhythm": "宣言式，情感长句"
+      },
+      "content_entities": {
+        "core_topic": "摆摊尊严",
+        "pain_point": "面子问题",
+        "solution": "劳动光荣",
+        "key_concept": "回头客验证"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "尊严",
+          "价值观",
+          "心理建设"
+        ],
+        "emotion_tags": [
+          "坚定",
+          "正能量"
+        ],
+        "target_audience": [
+          "所有想摆摊的",
+          "面子薄的"
+        ],
+        "scene_context": [
+          "心理建设"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "我从来没有觉得说摆摊这个事情非常丢人",
+        "value_punch": "靠自己的劳动所得，我们没有什么丢人的",
+        "story_proof": "虽然我只卖了50多块钱，但是呢，我第二天就有了回头客"
+      }
+    },
+    {
+      "sample_id": "opinion_009",
+      "content_type": "说观点",
+      "raw_topic": "六步劝退宝妈",
+      "performance_tags": [
+        "反向营销",
+        "避坑",
+        "干货"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "劝退钩",
+            "sentences": 2,
+            "word_count": 45,
+            "content": "六步劝退宝妈小白，千万别做小学生私房早餐...全网粉丝60万"
+          },
+          {
+            "position": 1,
+            "type": "清单体",
+            "sentences": 12,
+            "word_count": 320,
+            "content": "第一，小白别做设备党...最后呢，天下没有躺赚的生意"
+          }
+        ],
+        "sentence_length_pattern": [
+          25,
+          20,
+          15,
+          12,
+          18,
+          15,
+          20,
+          15,
+          18,
+          15,
+          22,
+          15,
+          25,
+          15,
+          20,
+          15,
+          18
+        ],
+        "burstiness_score": 0.45,
+        "hook_type": "反向劝退（实为吸引）",
+        "emotion_curve": [
+          "震惊→干货→算账→激励"
+        ],
+        "logic_flow": "反 Hook→清单干货→成功案例→金句收尾"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "千万别做",
+          "踩过的坑",
+          "躺赚的生意"
+        ],
+        "rhetorical_questions": [
+          "你能跨省定了，怎么预定？"
+        ],
+        "data_points": [
+          "60万",
+          "2000多块钱",
+          "300块钱",
+          "60%",
+          "4-6个",
+          "50块钱",
+          "月入两三万"
+        ],
+        "transitional_markers": [
+          "第一",
+          "第二",
+          "第三",
+          "第四",
+          "最后"
+        ],
+        "imperfection_markers": [
+          "呢",
+          "啊",
+          "吧"
+        ],
+        "sentence_rhythm": "清单体短句+解释中长句"
+      },
+      "content_entities": {
+        "core_topic": "创业避坑",
+        "pain_point": "小白踩坑",
+        "solution": "六步避坑法",
+        "key_concept": "设备→工具→包装→品类→证件→心态"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "避坑",
+          "干货",
+          "反向营销"
+        ],
+        "emotion_tags": [
+          "警示",
+          "干货",
+          "励志"
+        ],
+        "target_audience": [
+          "A类：宝妈私房",
+          "小白"
+        ],
+        "scene_context": [
+          "避坑指南"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "六步劝退宝妈小白，千万别做小学生私房早餐",
+        "reverse_logic": "最后呢，小敏还想对所有想入行的姐妹说天下没有躺赚的生意",
+        "data_proof": "第一次出摊也就赚了50块钱...第三个月的时候订单突然就爆了"
+      }
+    },
+    {
+      "sample_id": "opinion_010",
+      "content_type": "说观点",
+      "raw_topic": "三招锁住顾客",
+      "performance_tags": [
+        "方法论",
+        "人性",
+        "转化"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "金句钩",
+            "sentences": 2,
+            "word_count": 45,
+            "content": "教你抓住人性弱点，卖馒头都能疯狂爆单...宁愿让老客复购100次"
+          },
+          {
+            "position": 1,
+            "type": "方法论",
+            "sentences": 9,
+            "word_count": 210,
+            "content": "1、价格锚钉数...三视觉诱惑处..."
+          }
+        ],
+        "sentence_length_pattern": [
+          28,
+          17,
+          15,
+          25,
+          18,
+          22,
+          20,
+          25,
+          18,
+          20,
+          15
+        ],
+        "burstiness_score": 0.4,
+        "hook_type": "金句+方法论",
+        "emotion_curve": [
+          "好奇→干货→恍然大悟"
+        ],
+        "logic_flow": "金句Hook→三点方法论→转化"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "疯狂爆单",
+          "锁住顾客钱包",
+          "占便宜心理",
+          "薅羊毛"
+        ],
+        "rhetorical_questions": [],
+        "data_points": [
+          "100次",
+          "买2减几"
+        ],
+        "transitional_markers": [
+          "1、",
+          "2、",
+          "3、"
+        ],
+        "imperfection_markers": [
+          "呢"
+        ],
+        "sentence_rhythm": "方法论清单"
+      },
+      "content_entities": {
+        "core_topic": "客户留存",
+        "pain_point": "获客难",
+        "solution": "三招复购",
+        "key_concept": "价格锚定+占便宜心理+视觉诱惑"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "营销技巧",
+          "人性",
+          "留存"
+        ],
+        "emotion_tags": [
+          "干货",
+          "实用"
+        ],
+        "target_audience": [
+          "A类：开店",
+          "C类：加品"
+        ],
+        "scene_context": [
+          "营销教学"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "教你抓住人性弱点，卖馒头都能疯狂爆单",
+        "method_punch": "宁愿让老客复购100次，也别贪新客数量",
+        "conversion": "扣666，一起探讨"
+      }
+    },
+    {
+      "sample_id": "opinion_011",
+      "content_type": "说观点",
+      "raw_topic": "美肤店模式",
+      "performance_tags": [
+        "重复",
+        "矩阵",
+        "变体"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "变异钩",
+            "sentences": 1,
+            "word_count": 25,
+            "content": "我开了家从不在早上营业的美肤店..."
+          }
+        ],
+        "sentence_length_pattern": [
+          25,
+          20,
+          30,
+          25,
+          28
+        ],
+        "burstiness_score": 0.3,
+        "hook_type": "换壳重复",
+        "emotion_curve": [
+          "重复"
+        ],
+        "logic_flow": "同opinion_002，换行业关键词"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "美肤店",
+          "精神股东"
+        ],
+        "template_similarity": "opinion_002",
+        "variation_type": "行业替换"
+      },
+      "retrieval_tags": {
+        "template": "opinion_002",
+        "usage": "矩阵复制"
+      },
+      "key_fragments": {
+        "note": "本条目为opinion_002的模板变体，用于矩阵内容生产"
+      }
+    },
+    {
+      "sample_id": "opinion_012",
+      "content_type": "说观点",
+      "raw_topic": "二胎宝妈创业独白",
+      "performance_tags": [
+        "人设",
+        "反差",
+        "共鸣"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "身份立",
+            "sentences": 2,
+            "word_count": 40,
+            "content": "90后二胎宝妈在南京江宁开了一家新中式馒头店...形象代言人还是我"
+          },
+          {
+            "position": 1,
+            "type": "反差展",
+            "sentences": 3,
+            "word_count": 75,
+            "content": "起初呢...脑子也快锈顿了。可是呢，大家天天都要上班"
+          },
+          {
+            "position": 2,
+            "type": "过程述",
+            "sentences": 3,
+            "word_count": 70,
+            "content": "我就想着...越来越多的人被我的花样馒头所吸引"
+          },
+          {
+            "position": 3,
+            "type": "金句收",
+            "sentences": 1,
+            "word_count": 25,
+            "content": "不是为了赚米而生活，而是为了生活必须赚米"
+          }
+        ],
+        "sentence_length_pattern": [
+          25,
+          15,
+          30,
+          25,
+          28,
+          22,
+          25,
+          20,
+          25
+        ],
+        "burstiness_score": 0.28,
+        "hook_type": "一人公司人设",
+        "emotion_curve": [
+          "自嘲→转折→行动→金句"
+        ],
+        "logic_flow": "身份→反差→过程→升华"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "老板是我，员工是我，形象代言人还是我",
+          "脑子也快锈顿了",
+          "不是为了赚米而生活"
+        ],
+        "data_points": [
+          "200平方"
+        ],
+        "imperfection_markers": [
+          "呢",
+          "啊"
+        ],
+        "sentence_rhythm": "自述式"
+      },
+      "content_entities": {
+        "core_topic": "人设建立",
+        "key_concept": "一人公司"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "人设",
+          "一人公司"
+        ],
+        "target_audience": [
+          "B类：宝妈"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "老板是我，员工是我，形象代言人还是我",
+        "golden_quote": "不是为了赚米而生活，而是为了生活必须赚米"
+      }
+    },
+    {
+      "sample_id": "opinion_013",
+      "content_type": "说观点",
+      "raw_topic": "8个月翻身",
+      "performance_tags": [
+        "成果",
+        "差异化",
+        "招募"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "质疑钩",
+            "sentences": 1,
+            "word_count": 18,
+            "content": "见过靠馒头翻身的人吗？"
+          },
+          {
+            "position": 1,
+            "type": "成果晒",
+            "sentences": 2,
+            "word_count": 50,
+            "content": "8个月我就靠这个花样馒头给了家里面人不一样的生活。"
+          },
+          {
+            "position": 2,
+            "type": "差异化",
+            "sentences": 4,
+            "word_count": 110,
+            "content": "我们家的花样馒头蒸面包跟传统的早餐卖的真的不一样..."
+          },
+          {
+            "position": 3,
+            "type": "数据证",
+            "sentences": 2,
+            "word_count": 35,
+            "content": "买过的客人80%都成为我的回头客..."
+          },
+          {
+            "position": 4,
+            "type": "转化钩",
+            "sentences": 3,
+            "word_count": 65,
+            "content": "我想找一些踏实肯干...你们那里有这样的花样馒头吗？"
+          }
+        ],
+        "sentence_length_pattern": [
+          18,
+          32,
+          28,
+          35,
+          30,
+          28,
+          32,
+          28,
+          25,
+          30,
+          22,
+          25
+        ],
+        "burstiness_score": 0.35,
+        "hook_type": "见证式",
+        "emotion_curve": [
+          "好奇→震撼→认同→招募"
+        ],
+        "logic_flow": "疑问→成果→差异化→数据→招募"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "翻身",
+          "情绪价值",
+          "踏实肯干"
+        ],
+        "data_points": [
+          "8个月",
+          "80%",
+          "一个月"
+        ],
+        "sentence_rhythm": "成果展示型"
+      },
+      "content_entities": {
+        "core_topic": "成功见证",
+        "key_story": "8个月翻身"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "成果",
+          "招募"
+        ],
+        "target_audience": [
+          "想翻身的"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "见过靠馒头翻身的人吗？",
+        "differentiation": "买的不止是好吃，还有情绪"
+      }
+    },
+    {
+      "sample_id": "opinion_014",
+      "content_type": "说观点",
+      "raw_topic": "国民甜点使命",
+      "performance_tags": [
+        "情怀",
+        "文化",
+        "升维"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "对立钩",
+            "sentences": 1,
+            "word_count": 45,
+            "content": "当蛋糕马卡龙刷爆你的朋友圈的时候，我偏要用一个中式花样馒头来掰掰手腕"
+          },
+          {
+            "position": 1,
+            "type": "身份立",
+            "sentences": 2,
+            "word_count": 40,
+            "content": "我是小敏...35岁了不上班做私房，他不就是为了赚钱吗？"
+          },
+          {
+            "position": 2,
+            "type": "转折深",
+            "sentences": 3,
+            "word_count": 85,
+            "content": "但后来事情就开始不一样了...也能有更大的意义"
+          },
+          {
+            "position": 3,
+            "type": "使命升",
+            "sentences": 2,
+            "word_count": 65,
+            "content": "现在我找到了比翻身更大的目标...国民甜点"
+          }
+        ],
+        "sentence_length_pattern": [
+          45,
+          25,
+          15,
+          35,
+          32,
+          30,
+          35,
+          30
+        ],
+        "burstiness_score": 0.38,
+        "hook_type": "文化对立",
+        "emotion_curve": [
+          "对抗→真实→顿悟→使命"
+        ],
+        "logic_flow": "中西对立→坦诚→转变→升华"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "掰掰手腕",
+          "为了赚钱",
+          "更大的意义",
+          "国民甜点"
+        ],
+        "literary_devices": [
+          "对比",
+          "转折"
+        ],
+        "sentence_rhythm": "宣言式"
+      },
+      "content_entities": {
+        "core_topic": "品牌使命",
+        "key_concept": "新中式=国民甜点"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "情怀",
+          "文化",
+          "品牌升维"
+        ],
+        "target_audience": [
+          "文化认同者"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "当蛋糕马卡龙刷爆你的朋友圈的时候，我偏要用一个中式花样馒头来掰掰手腕",
+        "mission": "让更多的人都看到咱们花样馒头不仅还能管饱，也可以是个国民甜点"
+      }
+    },
+    {
+      "sample_id": "story_002",
+      "content_type": "讲故事",
+      "raw_topic": "8年家庭主妇首次出镜",
+      "performance_tags": [
+        "反差",
+        "勇气",
+        "原始股东"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "反差钩",
+            "sentences": 3,
+            "word_count": 70,
+            "content": "8年家庭主妇卖馒头，日入破万，嗨，我是左右妈妈...鼓起勇气勇闯自媒体"
+          },
+          {
+            "position": 1,
+            "type": "背景铺",
+            "sentences": 3,
+            "word_count": 65,
+            "content": "35岁的年龄，有两个上幼儿园的孩子...满足孩子的问题"
+          },
+          {
+            "position": 2,
+            "type": "能力展",
+            "sentences": 2,
+            "word_count": 35,
+            "content": "一家这35年没打下事业的江山，却打下了厨房的10个平方"
+          },
+          {
+            "position": 3,
+            "type": "困境现",
+            "sentences": 4,
+            "word_count": 95,
+            "content": "馒头会做了，客源哪里来？...根本不好意思收钱"
+          },
+          {
+            "position": 4,
+            "type": "转折醒",
+            "sentences": 2,
+            "word_count": 45,
+            "content": "送了999个馒头后...再送下去，我和我的娃都要吹西北风"
+          },
+          {
+            "position": 5,
+            "type": "招募收",
+            "sentences": 3,
+            "word_count": 60,
+            "content": "我的精神股东们...到5万个精神股东的时候，小敏给大家送了一个大满贯"
+          }
+        ],
+        "sentence_length_pattern": [
+          25,
+          22,
+          23,
+          22,
+          20,
+          25,
+          18,
+          20,
+          25,
+          30,
+          28,
+          25,
+          22,
+          20,
+          25,
+          22,
+          20
+        ],
+        "burstiness_score": 0.42,
+        "hook_type": "身份反差（主妇→日入破万）",
+        "emotion_curve": [
+          "勇气→自嘲→能力→困境→醒悟→招募"
+        ],
+        "logic_flow": "反差开场→背景→能力展示→困境→转折→原始股东招募"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "勇闯自媒体",
+          "张飞吃豆腐小菜一样",
+          "精神股东",
+          "吹西北风",
+          "大满贯"
+        ],
+        "data_points": [
+          "8年",
+          "日入破万",
+          "35岁",
+          "10个平方",
+          "999个",
+          "5万个"
+        ],
+        "imperfection_markers": [
+          "呢",
+          "吧",
+          "啊"
+        ],
+        "sentence_rhythm": "自述+互动",
+        "colloquialisms": [
+          "嗨",
+          "打下了",
+          "混个脸熟"
+        ]
+      },
+      "content_entities": {
+        "core_topic": "从零开始做自媒体",
+        "pain_point": "不好意思收钱",
+        "solution": "精神股东模式",
+        "key_story": "送999个馒头后醒悟"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "自媒体启动",
+          "心理障碍",
+          "原始股东"
+        ],
+        "emotion_tags": [
+          "真诚",
+          "自嘲",
+          "励志"
+        ],
+        "target_audience": [
+          "不好意思卖货的"
+        ],
+        "scene_context": [
+          "启动阶段",
+          "心理突破"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "8年零社交，从来都不敢在互联网上露脸。这一次，鼓起勇气勇闯自媒体",
+        "vulnerability": "熟人一问，我就会送一个这个，送一个那个，根本不好意思收钱",
+        "wake_up": "送了999个馒头后，我突然顿悟，再送下去，我和我的娃都要吹西北风",
+        "mechanism": "现在关注我，你就是原始股东"
+      }
+    },
+    {
+      "sample_id": "story_004",
+      "content_type": "讲故事",
+      "raw_topic": "老公介绍视角",
+      "performance_tags": [
+        "第三方",
+        "家庭",
+        "逆袭"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "结果钩",
+            "sentences": 1,
+            "word_count": 20,
+            "content": "我没有别的本事，就是花样馒头做的好。"
+          },
+          {
+            "position": 1,
+            "type": "身份立",
+            "sentences": 2,
+            "word_count": 50,
+            "content": "我家小敏90年...老公一夜之间赔了好几百万"
+          },
+          {
+            "position": 2,
+            "type": "起源述",
+            "sentences": 3,
+            "word_count": 85,
+            "content": "我们家两个孩子的早餐...才有了现在这个像面包一样的馒头"
+          },
+          {
+            "position": 3,
+            "type": "发展现",
+            "sentences": 4,
+            "word_count": 95,
+            "content": "刚开始呢，我就一个人做...谁挣钱谁说了算"
+          },
+          {
+            "position": 4,
+            "type": "模式晒",
+            "sentences": 5,
+            "word_count": 120,
+            "content": "我们家所有的馅料...基本上10个20个的存"
+          },
+          {
+            "position": 5,
+            "type": "转化收",
+            "sentences": 2,
+            "word_count": 40,
+            "content": "像我这种私房馒头...评论666，让我看到"
+          }
+        ],
+        "sentence_length_pattern": [
+          20,
+          30,
+          20,
+          35,
+          30,
+          28,
+          32,
+          30,
+          28,
+          25,
+          30,
+          28,
+          32,
+          30,
+          28,
+          25,
+          22,
+          20
+        ],
+        "burstiness_score": 0.38,
+        "hook_type": "第三方视角（老公讲述）",
+        "emotion_curve": [
+          "平淡→危机→转机→成就→模式→转化"
+        ],
+        "logic_flow": "结果→背景→起源→发展→模式→转化"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "我家小敏",
+          "一夜之间",
+          "谁挣钱谁说了算",
+          "误打误撞"
+        ],
+        "data_points": [
+          "90年",
+          "35岁",
+          "好几百万",
+          "两三千块钱",
+          "三四万块钱"
+        ],
+        "perspective": "第三人称（老公）",
+        "imperfection_markers": [
+          "呢",
+          "啊"
+        ],
+        "sentence_rhythm": "叙述+见证"
+      },
+      "content_entities": {
+        "core_topic": "家庭逆袭见证",
+        "pain_point": "老公赔几百万",
+        "solution": "宝妈做馒头翻身",
+        "key_concept": "谁挣钱谁说了算"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "家庭",
+          "逆袭",
+          "夫妻"
+        ],
+        "emotion_tags": [
+          "温情",
+          "支持"
+        ],
+        "target_audience": [
+          "夫妻创业"
+        ],
+        "scene_context": [
+          "家庭支持"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "我没有别的本事，就是花样馒头做的好",
+        "third_perspective": "我家小敏90年，今年35岁",
+        "power_shift": "谁挣钱谁说了算",
+        "differentiation": "我们跟市面上那些传统的早餐相比，最大的优势就是差异化"
+      }
+    },
+    {
+      "sample_id": "story_005",
+      "content_type": "讲故事",
+      "raw_topic": "负债宝妈重复叙事",
+      "performance_tags": [
+        "重复",
+        "变体",
+        "S级"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "质疑钩",
+            "sentences": 2,
+            "word_count": 40,
+            "content": "你们说我纯靠打工能养活我两个孩子和老公吗？..."
+          },
+          {
+            "position": 1,
+            "type": "背景铺",
+            "sentences": 3,
+            "word_count": 75,
+            "content": "今年35岁...真的没想到我做的馒头会有那么多人喜欢"
+          },
+          {
+            "position": 2,
+            "type": "差异点",
+            "sentences": 1,
+            "word_count": 18,
+            "content": "摆了一个月就摆不下去了。"
+          },
+          {
+            "position": 3,
+            "type": "现状晒",
+            "sentences": 4,
+            "word_count": 95,
+            "content": "后来啊，我就再也没出过摊儿了...一天能卖2000多个"
+          },
+          {
+            "position": 4,
+            "type": "细节证",
+            "sentences": 6,
+            "word_count": 140,
+            "content": "所有的设备加起来...半小时就能出200多个"
+          },
+          {
+            "position": 5,
+            "type": "情感收",
+            "sentences": 5,
+            "word_count": 110,
+            "content": "买过一次的顾客啊...我已经觉得很满足了"
+          }
+        ],
+        "sentence_length_pattern": [
+          20,
+          20,
+          25,
+          30,
+          15,
+          18,
+          25,
+          20,
+          35,
+          18,
+          22,
+          25,
+          28,
+          25,
+          22,
+          20,
+          25,
+          28,
+          25,
+          22,
+          20,
+          25,
+          20
+        ],
+        "burstiness_score": 0.48,
+        "hook_type": "重复优化（与story_001结构相似，细节微调）",
+        "emotion_curve": "同story_001",
+        "logic_flow": "同story_001",
+        "variation_note": "与story_001相比，增加'摆不下去'细节，增强真实性"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "你们说我",
+          "大大咧咧的性格",
+          "想多挣点钱"
+        ],
+        "data_points": [
+          "2000多个",
+          "2000多块钱",
+          "100个",
+          "200多个"
+        ],
+        "variation_from": "story_001",
+        "differences": [
+          "增加'摆不下去'挫折",
+          "更强调设备便宜"
+        ],
+        "imperfection_markers": [
+          "啊",
+          "呢",
+          "吧"
+        ]
+      },
+      "content_entities": {
+        "core_topic": "负债翻身（变体）",
+        "variation_type": "挫折增强版"
+      },
+      "retrieval_tags": {
+        "template": "story_001",
+        "variation": "细节增强",
+        "usage": "A/B测试或重复发布"
+      },
+      "key_fragments": {
+        "variation_detail": "摆了一个月就摆不下去了",
+        "enhancement": "所有的设备加起来也就花了2000多块钱"
+      }
+    },
+    {
+      "sample_id": "story_007",
+      "content_type": "讲故事",
+      "raw_topic": "业绩 vs 辛苦",
+      "performance_tags": [
+        "反差",
+        "辛苦",
+        "成果"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "质疑钩",
+            "sentences": 2,
+            "word_count": 55,
+            "content": "这就是你们最看不起的馒头，觉得又累还又赚不到钱...一天业绩能赶上别人两个月工资"
+          },
+          {
+            "position": 1,
+            "type": "身份立",
+            "sentences": 1,
+            "word_count": 25,
+            "content": "你无法想象他得有多累。没有异于常人的经历，就别来搞餐饮"
+          },
+          {
+            "position": 2,
+            "type": "日常晒",
+            "sentences": 3,
+            "word_count": 85,
+            "content": "我是小敏...晚上还要准备我第二天的馅料"
+          },
+          {
+            "position": 3,
+            "type": "忙碌证",
+            "sentences": 4,
+            "word_count": 110,
+            "content": "现在大家的口味啊...连续七天才能全部做完打包发货"
+          },
+          {
+            "position": 4,
+            "type": "反思升",
+            "sentences": 4,
+            "word_count": 95,
+            "content": "有一个网友...连续工作360天，这个你受得了不？"
+          }
+        ],
+        "sentence_length_pattern": [
+          35,
+          20,
+          25,
+          20,
+          25,
+          28,
+          30,
+          28,
+          32,
+          30,
+          28,
+          25,
+          30,
+          28,
+          25,
+          22,
+          25,
+          22
+        ],
+        "burstiness_score": 0.4,
+        "hook_type": "反差质疑（看不起→业绩高）",
+        "emotion_curve": [
+          "辩护→辛苦→忙碌→反思→挑战"
+        ],
+        "logic_flow": "质疑回应→身份→日常→忙碌→反思"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "最看不起的",
+          "异于常人的经历",
+          "跟打仗一样",
+          "受得了不"
+        ],
+        "data_points": [
+          "两个月工资",
+          "9点半",
+          "11点左右",
+          "360天"
+        ],
+        "imperfection_markers": [
+          "啊",
+          "呢"
+        ],
+        "sentence_rhythm": "辩护型"
+      },
+      "content_entities": {
+        "core_topic": "辛苦与回报",
+        "pain_point": "被质疑又累又不赚钱",
+        "solution": "展示高业绩+辛苦过程",
+        "key_concept": "异于常人的经历"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "辛苦",
+          "回报",
+          "坚持"
+        ],
+        "emotion_tags": [
+          "辩护",
+          "坚韧"
+        ],
+        "target_audience": [
+          "怕吃苦的"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "这就是你们最看不起的馒头，觉得又累还又赚不到钱。我给你说，我一天的业绩能赶上别人两个月的工资",
+        "challenge": "连续工作360天，这个你受得了不？"
+      }
+    },
+    {
+      "sample_id": "story_008",
+      "content_type": "讲故事",
+      "raw_topic": "工作室自由与尊严",
+      "performance_tags": [
+        "温情",
+        "诗意",
+        "时间自由"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "场景立",
+            "sentences": 2,
+            "word_count": 45,
+            "content": "我是小敏，90年二胎宝妈，守着一家200平方私房早餐工作室"
+          },
+          {
+            "position": 1,
+            "type": "反差问",
+            "sentences": 1,
+            "word_count": 25,
+            "content": "经常呢，有人问我，听说你的早餐店不用早起？"
+          },
+          {
+            "position": 2,
+            "type": "自由晒",
+            "sentences": 2,
+            "word_count": 50,
+            "content": "是啊，我早上送完孩子上学...时间自己说了算"
+          },
+          {
+            "position": 3,
+            "type": "谷底忆",
+            "sentences": 3,
+            "word_count": 85,
+            "content": "现在的你们肯定想象不到...连哭都得躲着孩子"
+          },
+          {
+            "position": 4,
+            "type": "过程悟",
+            "sentences": 4,
+            "word_count": 110,
+            "content": "直到现在...多熬几回，它会更甜"
+          },
+          {
+            "position": 5,
+            "type": "使命收",
+            "sentences": 3,
+            "word_count": 75,
+            "content": "我想把这时间自由的早餐工作室一直做下去...捏出花来"
+          }
+        ],
+        "sentence_length_pattern": [
+          25,
+          20,
+          25,
+          28,
+          25,
+          30,
+          35,
+          32,
+          30,
+          35,
+          32,
+          30,
+          28,
+          25,
+          30,
+          28,
+          25,
+          22
+        ],
+        "burstiness_score": 0.35,
+        "hook_type": "场景诗意",
+        "emotion_curve": [
+          "温馨→自由→心酸→顿悟→希望"
+        ],
+        "logic_flow": "场景→反差→自由→谷底→顿悟→使命"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "时间自己说了算",
+          "连哭都得躲着孩子",
+          "多熬几回，它会更甜",
+          "捏出花来"
+        ],
+        "data_points": [
+          "90年",
+          "200平方",
+          "9点半",
+          "4点多",
+          "几百万"
+        ],
+        "literary_devices": [
+          "比喻",
+          "诗意"
+        ],
+        "imperfection_markers": [
+          "呢",
+          "啊"
+        ],
+        "sentence_rhythm": "诗意叙述"
+      },
+      "content_entities": {
+        "core_topic": "时间自由与尊严",
+        "pain_point": "交不起学费，负债几百万",
+        "solution": "私房早餐工作室",
+        "key_concept": "时间自由+尊严"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "时间自由",
+          "尊严",
+          "诗意"
+        ],
+        "emotion_tags": [
+          "温情",
+          "励志",
+          "诗意"
+        ],
+        "target_audience": [
+          "B类：要照顾家庭的"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "我是小敏，90年二胎宝妈，守着一家200平方私房早餐工作室",
+        "poetic": "花会沿着路盛开，咱揉面的手也能把日子捏出花来",
+        "dignity": "我想把这时间自由的早餐工作室一直做下去，让更多的宝妈知道，不用早起，不用存货，带着孩子也能活得有尊严"
+      }
+    },
+    {
+      "sample_id": "story_009",
+      "content_type": "讲故事",
+      "raw_topic": "从0到100万完整时间线",
+      "performance_tags": [
+        "完整",
+        "时间线",
+        "团队"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "成果钩",
+            "sentences": 1,
+            "word_count": 30,
+            "content": "从两个人到10个人从0到100万，我们到底经历了什么？"
+          },
+          {
+            "position": 1,
+            "type": "时间铺",
+            "sentences": 3,
+            "word_count": 85,
+            "content": "2023年12月21日冬至...每天忙得像陀螺一样，一天就睡4个小时"
+          },
+          {
+            "position": 2,
+            "type": "谷底详",
+            "sentences": 4,
+            "word_count": 110,
+            "content": "创业初期呢...家里面总共生了可以用的资金都不到1万块钱"
+          },
+          {
+            "position": 3,
+            "type": "启动细",
+            "sentences": 6,
+            "word_count": 160,
+            "content": "我俩在琢磨干点啥呢...也就花了两千来块钱"
+          },
+          {
+            "position": 4,
+            "type": "成果收",
+            "sentences": 4,
+            "word_count": 95,
+            "content": "就这三十多瓶让我成功翻身了...不辜负你们的喜欢和我们自己"
+          }
+        ],
+        "sentence_length_pattern": [
+          30,
+          35,
+          30,
+          28,
+          32,
+          35,
+          30,
+          32,
+          35,
+          30,
+          28,
+          32,
+          35,
+          30,
+          28,
+          25,
+          30,
+          28,
+          25,
+          22,
+          25
+        ],
+        "burstiness_score": 0.45,
+        "hook_type": "完整时间线",
+        "emotion_curve": [
+          "好奇→忙碌→艰辛→启动→自豪"
+        ],
+        "logic_flow": "疑问→时间线→谷底→启动→成果"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "从两个人到10个人",
+          "冬至",
+          "视为正式创业的日子",
+          "现金流",
+          "饿不让孩子",
+          "成功翻身"
+        ],
+        "data_points": [
+          "10个人",
+          "100万",
+          "2023年12月21日",
+          "25年1月15日",
+          "4个小时",
+          "不到1万块钱",
+          "三十多个",
+          "80块钱",
+          "两千来块钱"
+        ],
+        "timeline": [
+          "2023年12月",
+          "25年1月"
+        ],
+        "imperfection_markers": [
+          "呢",
+          "吧"
+        ],
+        "sentence_rhythm": "编年体"
+      },
+      "content_entities": {
+        "core_topic": "完整创业史",
+        "pain_point": "资金不到1万，负债",
+        "solution": "2000块启动→30多瓶馒头→翻身",
+        "key_concept": "完整时间线"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "完整历程",
+          "时间线",
+          "团队成长"
+        ],
+        "emotion_tags": [
+          "史诗感",
+          "坚韧"
+        ],
+        "target_audience": [
+          "想了解全过程的"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "从两个人到10个人从0到100万，我们到底经历了什么？",
+        "timeline_anchor": "2023年12月21日冬至，我和我老公第一次摆摊，我把他视为正式创业的日子",
+        "startup_detail": "为了省钱，我刚开始买的全都是一些二手的，也就花了两千来块钱",
+        "philosophy": "所谓的同行互卷，我们都不想掺和。我们的目标清晰又简单"
+      }
+    },
+    {
+      "sample_id": "story_010",
+      "content_type": "讲故事",
+      "raw_topic": "学费一天赚回",
+      "performance_tags": [
+        "算账",
+        "快速回本",
+        "家庭"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "数据钩",
+            "sentences": 1,
+            "word_count": 35,
+            "content": "我儿子一个月的学费啊，3000块，我卖馒头一天就给他赚回来了。"
+          },
+          {
+            "position": 1,
+            "type": "身份立",
+            "sentences": 2,
+            "word_count": 45,
+            "content": "我叫小敏，90年，今年35岁，老家是山东的...赔了好几百万"
+          },
+          {
+            "position": 2,
+            "type": "起源述",
+            "sentences": 3,
+            "word_count": 80,
+            "content": "我们家两个孩子的早餐...像面包一样的馒头"
+          },
+          {
+            "position": 3,
+            "type": "成果晒",
+            "sentences": 4,
+            "word_count": 95,
+            "content": "刚开始呢，我就一个人做...谁挣钱谁说了算"
+          },
+          {
+            "position": 4,
+            "type": "模式晒",
+            "sentences": 5,
+            "word_count": 120,
+            "content": "我们家所有的馅料...基本上10个20个的存"
+          },
+          {
+            "position": 5,
+            "type": "转化收",
+            "sentences": 2,
+            "word_count": 35,
+            "content": "像我这种私房馒头...留下你的城市小米来教你"
+          }
+        ],
+        "sentence_length_pattern": [
+          35,
+          25,
+          20,
+          35,
+          30,
+          28,
+          32,
+          30,
+          28,
+          25,
+          30,
+          28,
+          32,
+          30,
+          28,
+          25,
+          22,
+          20,
+          25,
+          18
+        ],
+        "burstiness_score": 0.38,
+        "hook_type": "算账钩子（学费vs日入）",
+        "emotion_curve": [
+          "震撼→背景→方法→成果→模式→转化"
+        ],
+        "logic_flow": "算账→身份→起源→成果→模式→转化"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "一天就给他赚回来了",
+          "谁挣钱谁说了算",
+          "10个20个的存"
+        ],
+        "data_points": [
+          "3000块",
+          "90年",
+          "35岁",
+          "好几百万",
+          "1万多",
+          "两三千块钱",
+          "三四万块钱"
+        ],
+        "imperfection_markers": [
+          "呢",
+          "啊"
+        ],
+        "sentence_rhythm": "算账+叙述"
+      },
+      "content_entities": {
+        "core_topic": "快速回本见证",
+        "pain_point": "孩子学费压力",
+        "solution": "一天赚回学费",
+        "key_concept": "日入覆盖学费"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "回本",
+          "算账",
+          "家庭"
+        ],
+        "emotion_tags": [
+          "算账",
+          "自豪"
+        ],
+        "target_audience": [
+          "关心回本速度的"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "我儿子一个月的学费啊，3000块，我卖馒头一天就给他赚回来了",
+        "accounting": "好的时候啊，线上线下订单加起来能卖1万多",
+        "power": "谁挣钱谁说了算"
+      }
+    },
+    {
+      "sample_id": "story_011",
+      "content_type": "讲故事",
+      "raw_topic": "60分钟决策",
+      "performance_tags": [
+        "决策",
+        "算账",
+        "行动力"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "成果钩",
+            "sentences": 1,
+            "word_count": 30,
+            "content": "第一次创业成功，我只用了2000块钱。"
+          },
+          {
+            "position": 1,
+            "type": "决策述",
+            "sentences": 2,
+            "word_count": 50,
+            "content": "当时我感觉特别强烈...半年的时问，我就卖出去了30万个馒头"
+          },
+          {
+            "position": 2,
+            "type": "步骤拆",
+            "sentences": 5,
+            "word_count": 145,
+            "content": "今天呢，我就跟大家讲一讲这60分钟我到底做了些啥...第二步..."
+          },
+          {
+            "position": 3,
+            "type": "算账证",
+            "sentences": 3,
+            "word_count": 75,
+            "content": "20分钟的时间就完成了一件...一个月至少赚个3万块钱应该不成问题吧"
+          },
+          {
+            "position": 4,
+            "type": "行动收",
+            "sentences": 1,
+            "word_count": 25,
+            "content": "我毅然决然的选择了干，你们家附近也有我这样的厨房早餐店吗？"
+          }
+        ],
+        "sentence_length_pattern": [
+          30,
+          25,
+          25,
+          35,
+          32,
+          30,
+          35,
+          32,
+          30,
+          28,
+          25,
+          30,
+          28,
+          25,
+          25
+        ],
+        "burstiness_score": 0.42,
+        "hook_type": "决策过程拆解",
+        "emotion_curve": [
+          "成果→好奇→方法→算账→决心"
+        ],
+        "logic_flow": "成果→决策背景→步骤拆解→算账→行动"
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "特别强烈",
+          "毅然决然",
+          "应该不成问题吧"
+        ],
+        "data_points": [
+          "2000块钱",
+          "60分钟",
+          "30万个",
+          "50块钱",
+          "20分钟",
+          "3万块钱"
+        ],
+        "methodology": "三步决策法",
+        "imperfection_markers": [
+          "呢",
+          "吧"
+        ],
+        "sentence_rhythm": "方法论拆解"
+      },
+      "content_entities": {
+        "core_topic": "快速决策方法论",
+        "pain_point": "决策犹豫",
+        "solution": "60分钟3步决策法",
+        "key_concept": "算账决策"
+      },
+      "retrieval_tags": {
+        "theme_vector": [
+          "决策",
+          "方法论",
+          "行动力"
+        ],
+        "emotion_tags": [
+          "干货",
+          "理性"
+        ],
+        "target_audience": [
+          "犹豫不前的"
+        ]
+      },
+      "key_fragments": {
+        "golden_hook": "第一次创业成功，我只用了2000块钱",
+        "methodology": "这60分钟我到底做了些啥：第一步，蹲点观察；第二步，小成本市卖；第三步，算账",
+        "accounting": "一个月至少赚个3万块钱应该不成问题吧"
+      }
+    },
+    {
+      "sample_id": "story_012",
+      "content_type": "讲故事",
+      "raw_topic": "辛苦与价值重复",
+      "performance_tags": [
+        "重复",
+        "强调",
+        "故事_007变体"
+      ],
+      "structure_template": {
+        "paragraph_map": [
+          {
+            "position": 0,
+            "type": "质疑钩",
+            "sentences": 2,
+            "word_count": 55,
+            "content": "这就是你们最看不起的馒头...一天业绩能赶上别人两个月工资"
+          },
+          {
+            "position": 1,
+            "type": "身份立",
+            "sentences": 2,
+            "word_count": 45,
+            "content": "我是小敏...没有异于常人的经历就别来搞餐饮"
+          },
+          {
+            "position": 2,
+            "type": "忙碌证",
+            "sentences": 4,
+            "word_count": 115,
+            "content": "每天送娃上学后...连续七天才能全部做完打包发货"
+          },
+          {
+            "position": 3,
+            "type": "反思收",
+            "sentences": 3,
+            "word_count": 70,
+            "content": "忙也好...连续工作360天，这个你受得了不？"
+          }
+        ],
+        "sentence_length_pattern": [
+          35,
+          20,
+          25,
+          20,
+          25,
+          30,
+          32,
+          30,
+          28,
+          25,
+          30,
+          28,
+          25,
+          22
+        ],
+        "burstiness_score": 0.4,
+        "hook_type": "重复强调（同story_007，微调）",
+        "emotion_curve": "同story_007",
+        "variation_from": "story_007",
+        "differences": [
+          "更强调'异乎常人'",
+          "更强调'受得了不'"
+        ]
+      },
+      "style_fingerprint": {
+        "catchphrases_used": [
+          "最看不起的",
+          "异于常人的经历",
+          "受得了不"
+        ],
+        "variation_from": "story_007",
+        "data_points": [
+          "9点半",
+          "11点左右",
+          "360天"
+        ],
+        "imperfection_markers": [
+          "呢",
+          "啊"
+        ]
+      },
+      "content_entities": {
+        "core_topic": "辛苦与回报（强化版）",
+        "variation_type": "重复强调"
+      },
+      "retrieval_tags": {
+        "template": "story_007",
+        "variation": "强调版",
+        "usage": "A/B测试"
+      },
+      "key_fragments": {
+        "variation": "没有异于常人的经历就别来搞餐饮"
+      }
+    }
+  ],
+  "global_style_constraints": {
+    "sentence_level": {
+      "avg_length": 18,
+      "min_length": 8,
+      "max_length": 35,
+      "variation_coefficient": 0.45,
+      "short_sentence_ratio": 0.6,
+      "rhetorical_question_ratio": 0.15,
+      "imperfection_injection": {
+        "filler_words": [
+          "呢",
+          "啊",
+          "吧",
+          "呗",
+          "嘛",
+          "哈",
+          "哦"
+        ],
+        "filler_density": 0.05,
+        "redundancy_allowed": true,
+        "grammar_looseness": 0.1
+      }
+    },
+    "paragraph_level": {
+      "avg_sentences_per_para": 3.5,
+      "max_sentences_per_para": 5,
+      "transition_words_required": [
+        "但是",
+        "后来",
+        "说实话",
+        "所以呢",
+        "后来啊",
+        "其实"
+      ],
+      "hook_types": [
+        "反问",
+        "反差",
+        "数据",
+        "质疑",
+        "算账",
+        "见证"
+      ],
+      "closing_types": [
+        "转化",
+        "金句",
+        "使命",
+        "互动"
+      ]
+    },
+    "vocabulary_level": {
+      "mandatory_catchphrases": [
+        "姐妹们",
+        "老板娘们",
+        "听我一句实话",
+        "说实话",
+        "掏心窝子",
+        "把真金白银揣进口袋",
+        "死磕产品",
+        "在公域里捞人",
+        "轻装上阵"
+      ],
+      "banned_words": [
+        "赛道",
+        "赋能",
+        "底层逻辑",
+        "闭环",
+        "颗粒度",
+        "躺赚",
+        "爆利",
+        "零风险",
+        "带你致富",
+        "粉丝",
+        "家人们",
+        "宝宝们",
+        "宝子们",
+        "此外",
+        "综上所述",
+        "从...角度来看",
+        "综上所述"
+      ],
+      "colloquial_substitutions": {
+        "获得收入/实现盈利": "把真金白银揣进口袋里",
+        "面临困难/挑战": "最熬人的时候",
+        "短视频获客": "在公域里捞人",
+        "建立信任/转化": "掏心窝子说真话",
+        "低成本创业": "轻装上阵",
+        "开始": "上路",
+        "客户": "回头客"
+      }
+    },
+    "emotion_level": {
+      "required_curve_types": [
+        "谷底反弹型",
+        "稳步上升型",
+        "对比型"
+      ],
+      "default_curve": "谷底→反弹→高光",
+      "emotional_markers": [
+        "憋屈",
+        "踏实",
+        "满足",
+        "骄傲",
+        "感恩",
+        "坚韧"
+      ],
+      "vulnerability_allowed": true,
+      "confidence_tone": "不卑不亢",
+      "forbidden_tones": [
+        "乞求",
+        "傲慢",
+        "过度文艺"
+      ]
+    },
+    "data_level": {
+      "data_density": "每100字至少1个具体数字",
+      "data_types": [
+        "金额",
+        "数量",
+        "时间",
+        "对比",
+        "比例"
+      ],
+      "forbidden_vague_words": [
+        "很多",
+        "大量",
+        "不少",
+        "一些",
+        "非常",
+        "相当",
+        "比较"
+      ],
+      "precision_requirement": "具体数字优先（2000块>两千块）"
+    }
+  },
+  "technical_params": {
+    "extraction_algorithms": {
+      "burstiness_calculation": "coefficient_of_variation(sentence_lengths)",
+      "style_similarity": "cosine_similarity(vocab_profile, target_ip_profile)",
+      "imperfection_score": "count(colloquialisms + redundancy) / total_words",
+      "human_likeness": "weighted_sum(perplexity_score, burstiness, imperfection_score)"
+    },
+    "generation_constraints": {
+      "constrained_decoding": true,
+      "style_temperature": 0.7,
+      "repetition_penalty": 1.2,
+      "presence_penalty": 0.8,
+      "beam_search_width": 5,
+      "constraint_check_frequency": "every_token"
+    },
+    "quality_thresholds": {
+      "min_burstiness": 0.35,
+      "min_catchphrase_count": 2,
+      "max_banned_word_count": 0,
+      "min_data_point_count": 3
+    }
+  },
+  "retrieval_index": {
+    "by_content_type": {
+      "说观点": [
+        "opinion_001",
+        "opinion_002",
+        "opinion_003",
+        "opinion_004",
+        "opinion_005",
+        "opinion_006",
+        "opinion_007",
+        "opinion_008",
+        "opinion_009",
+        "opinion_010",
+        "opinion_011",
+        "opinion_012",
+        "opinion_013",
+        "opinion_014"
+      ],
+      "讲故事": [
+        "story_001",
+        "story_002",
+        "story_003",
+        "story_004",
+        "story_005",
+        "story_006",
+        "story_007",
+        "story_008",
+        "story_009",
+        "story_010",
+        "story_011",
+        "story_012"
+      ]
+    },
+    "by_story_arc": {
+      "谷底反弹型": [
+        "story_001",
+        "story_005",
+        "story_008",
+        "story_009"
+      ],
+      "稳步上升型": [
+        "story_003",
+        "story_006",
+        "story_010",
+        "story_011"
+      ],
+      "对比型": [
+        "opinion_003",
+        "opinion_004"
+      ]
+    },
+    "by_hook_type": {
+      "反问开场": [
+        "opinion_001",
+        "story_001",
+        "story_005"
+      ],
+      "数据反差": [
+        "opinion_003",
+        "story_009",
+        "story_010"
+      ],
+      "身份反差": [
+        "opinion_002",
+        "story_002",
+        "story_012"
+      ]
+    },
+    "template_variants": {
+      "opinion_002_base": [
+        "opinion_002",
+        "opinion_011"
+      ],
+      "story_001_base": [
+        "story_001",
+        "story_005"
+      ],
+      "story_007_base": [
+        "story_007",
+        "story_012"
+      ]
+    }
+  }
+}

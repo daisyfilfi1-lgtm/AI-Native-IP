@@ -1,0 +1,20 @@
+{
+  "step1_structure": {
+    "hook": "empathy",
+    "hook_text": "共情开场",
+    "structure": "problem_solution",
+    "emotion_curve": [],
+    "key_points": [
+      "Not that physical retail is hard to do. There are still many stores doing very well."
+    ],
+    "cta": "summary",
+    "word_count": 84,
+    "style_features": [
+      "短平快"
+    ],
+    "viral_elements": [],
+    "confidence": 0.7
+  },
+  "step2_elevation": "{'original_viewpoint': 'Physical retail is hard', 'elevated_viewpoint': '【升维】Physical retail is hard', 'new_angle': '从观点中找洞察', 'evidence': ['基于观点类型的规则推导'], 'action_items': ['补充数据支撑', '给出落地建议', '延伸相关话题",
+  "step3_chat": null
+}

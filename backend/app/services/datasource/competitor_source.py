@@ -361,6 +361,8 @@ class CompetitorTopicDataSource(DataSource):
             extra={
                 "competitor_author": video.author,
                 "competitor_author_id": video.author_id,
+                "competitor_name": video.author,  # V4 前端展示用
+                "competitor_platform": video.platform,  # V4 前端展示用
                 "play_count": video.play_count,
                 "like_count": video.like_count,
                 "comment_count": video.comment_count,

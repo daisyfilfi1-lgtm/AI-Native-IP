@@ -23,9 +23,24 @@ const DEV_ORIGINS = [
   "https://localhost:3000",
 ];
 
-// 根据环境判断
-const IS_PRODUCTION = !Deno.env.get("NETLIFY_DEV") && 
-                      !Deno.env.get("NODE_ENV")?.includes("dev");
+/** Edge 为 Deno、本地 next build 为 Node：避免直接引用 `Deno` 导致 TS 报错 */
+function edgeOrNodeEnv(key: string): string | undefined {
+  const g = globalThis as unknown as {
+    Deno?: { env: { get: (k: string) => string | undefined } };
+  };
+  if (g.Deno?.env) {
+    return g.Deno.env.get(key);
+  }
+  if (typeof process !== "undefined" && process.env) {
+    return process.env[key];
+  }
+  return undefined;
+}
+
+// 根据环境判断（与原先 !NETLIFY_DEV && NODE_ENV 不含 dev 一致）
+const IS_PRODUCTION =
+  !edgeOrNodeEnv("NETLIFY_DEV") &&
+  !edgeOrNodeEnv("NODE_ENV")?.includes("dev");
 
 const EFFECTIVE_ALLOWED_ORIGINS = IS_PRODUCTION 
   ? ALLOWED_ORIGINS 

@@ -78,6 +78,21 @@ npm run build
 
 ## ⚙️ 配置说明
 
+### Netlify 控制台 Build 设置（必须与仓库一致）
+
+仓库 **`daisyfilfi1-lgtm/ai-native-ip-frontend`** 里 Next.js 在**仓库根目录**（`app/`、`package.json` 在根上），**没有**用于部署的 `frontend/` 子目录；本地 `frontend/` 若在 `.gitignore` 中，也不会出现在 GitHub。
+
+在 Netlify：**Site configuration → Build & deploy → Build settings**（或新 UI 的 **Build** 区块）请设为：
+
+| 项 | 正确值 | 错误示例（会导致配置/构建失败） |
+|----|--------|--------------------------------|
+| **Base directory** | **留空**（使用仓库根） | `frontend` |
+| **Build command** | `npm run build` | — |
+| **Publish directory** | `.next`（或由 `@netlify/plugin-nextjs` 接管；以控制台说明为准） | `frontend/.next` |
+| **Package directory** | 留空 | 指到不存在的子目录 |
+
+保存后重新部署。根目录 `netlify.toml` 里已设 `[build] base = "."`，用于锁定在仓库根构建；**请勿**在控制台再填 Base = `frontend`。
+
 ### netlify.toml 与 API（重要）
 
 - **应使用** `netlify.toml` 里 `[[redirects]] from="/api/*"` **边缘代理**到 Railway（`status = 200`）。请求**不经过** Next.js Serverless 函数，可避免免费版 **约 10s 函数超时** → 轮询 `GET /memory/ingest/...`、大文件上传时出现 **502 `Application failed to respond`**。

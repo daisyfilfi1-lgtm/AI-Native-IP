@@ -1,6 +1,19 @@
-# Netlify：在仓库根目录构建（Next 应用在根目录的 app/；勿设 base = "frontend"，
-# 否则在仅含根目录前端的仓库或忽略 frontend/ 时部署会因目录不存在而解析失败）
+# =============================================================================
+# 部署约定（ai-native-ip-frontend 仓库 = Next 在仓库根目录 app/，无 frontend/ 子目录）
+#
+# Netlify 控制台（Site settings → Build & deploy → Build settings）请与下文一致，
+# 否则会与 netlify.toml 冲突，常见错误：Base directory 指向不存在的 frontend/。
+#
+#   Base directory：留空  （或依赖下方 [build].base="."，勿填 frontend）
+#   Build command：npm run build
+#   Publish directory：.next  （勿填 frontend/.next）
+#   Package directory：留空
+#
+# 若控制台仍填 Base=frontend，解析配置时会报「Base directory does not exist」。
+# =============================================================================
 [build]
+  # 显式锁定仓库根，覆盖控制台里误设的 base=frontend
+  base = "."
   command = "npm run build"
   publish = ".next"
 

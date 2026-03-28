@@ -39,10 +39,13 @@ import {
   ExternalLink
 } from 'lucide-react';
 import Link from 'next/link';
+import { useIpList } from '@/hooks/useIpList';
+import { IpSelect } from '@/components/ip/IpSelect';
+
+const CREATOR_IP_STORAGE_KEY = 'creator_dashboard_ip_id';
 
 /** 接口仍要求 style 字段；生成侧以 IP 风格画像为准 */
 const DEFAULT_WORKFLOW_STYLE: StyleType = 'angry';
-const CREATOR_IP_ID = process.env.NEXT_PUBLIC_CREATOR_IP_ID || 'xiaomin1';
 
 // Agent配置状态组件
 function AgentStatusCard({ 
@@ -274,11 +277,32 @@ function InputModeSelector({
 // 主页面组件
 export default function CreatorDashboardPage() {
   const router = useRouter();
+  const { ips, loading: ipListLoading } = useIpList();
+  /** null：首屏在客户端从 localStorage / 环境变量解析，避免与后端小敏 id 写死不一致 */
+  const [selectedIpId, setSelectedIpId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('recommended');
   const [topics, setTopics] = useState<TopicCard[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentConfigStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [generatingTopicId, setGeneratingTopicId] = useState<string | null>(null);
+
+  const persistCreatorIp = useCallback((ipId: string) => {
+    setSelectedIpId(ipId);
+    try {
+      window.localStorage.setItem(CREATOR_IP_STORAGE_KEY, ipId);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(CREATOR_IP_STORAGE_KEY);
+      setSelectedIpId(saved || process.env.NEXT_PUBLIC_CREATOR_IP_ID || 'xiaomin1');
+    } catch {
+      setSelectedIpId(process.env.NEXT_PUBLIC_CREATOR_IP_ID || 'xiaomin1');
+    }
+  }, []);
   
   // 仿写爆款相关
   const [remixUrl, setRemixUrl] = useState('');
@@ -287,9 +311,10 @@ export default function CreatorDashboardPage() {
   const [remixRecLoading, setRemixRecLoading] = useState(false);
 
   const loadRemixRecommendations = useCallback(async () => {
+    if (!selectedIpId) return;
     setRemixRecLoading(true);
     try {
-      const items = await creatorApi.getRemixRecommendations(CREATOR_IP_ID);
+      const items = await creatorApi.getRemixRecommendations(selectedIpId);
       setRemixRecs(items);
     } catch (e) {
       console.error('Remix recommendations failed:', e);
@@ -297,7 +322,7 @@ export default function CreatorDashboardPage() {
     } finally {
       setRemixRecLoading(false);
     }
-  }, []);
+  }, [selectedIpId]);
   
   // 爆款原创相关
   const [viralInputMode, setViralInputMode] = useState<'text' | 'voice' | 'file'>('text');
@@ -312,38 +337,45 @@ export default function CreatorDashboardPage() {
   });
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (!selectedIpId) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const [topicsData, statusData] = await Promise.all([
+          creatorApi.getRecommendedTopics(selectedIpId),
+          creatorApi.getAgentConfigStatus(),
+        ]);
+        if (!cancelled) {
+          setTopics(topicsData);
+          setAgentStatus(statusData);
+        }
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedIpId]);
 
   useEffect(() => {
     if (activeTab !== 'remix') return;
     void loadRemixRecommendations();
   }, [activeTab, loadRemixRecommendations]);
 
-  const loadData = async () => {
-    try {
-      const [topicsData, statusData] = await Promise.all([
-        creatorApi.getRecommendedTopics(CREATOR_IP_ID),
-        creatorApi.getAgentConfigStatus()
-      ]);
-      setTopics(topicsData);
-      setAgentStatus(statusData);
-    } catch (error) {
-      console.error('Failed to load data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // 场景一：推荐选题生成
   const handleGenerateFromTopic = async (topic: TopicCard) => {
+    if (!selectedIpId) return;
     setGeneratingTopicId(topic.id);
     try {
       const result = await creatorApi.generateFromTopic(
         topic.id,
         topic.title,
         DEFAULT_WORKFLOW_STYLE,
-        CREATOR_IP_ID
+        selectedIpId
       );
       router.push(`/creator/generate?id=${result.id}&type=topic`);
     } catch (error) {
@@ -354,10 +386,10 @@ export default function CreatorDashboardPage() {
 
   // 场景二：仿写爆款
   const handleRemix = async () => {
-    if (!remixUrl.trim()) return;
+    if (!remixUrl.trim() || !selectedIpId) return;
     setIsRemixing(true);
     try {
-      const result = await creatorApi.generateFromRemix(remixUrl, DEFAULT_WORKFLOW_STYLE, CREATOR_IP_ID);
+      const result = await creatorApi.generateFromRemix(remixUrl, DEFAULT_WORKFLOW_STYLE, selectedIpId);
       router.push(`/creator/generate?id=${result.id}&type=remix`);
     } catch (error) {
       console.error('Remix failed:', error);
@@ -367,7 +399,7 @@ export default function CreatorDashboardPage() {
 
   // 场景三：爆款原创（工业化流水线生成）
   const handleViralGenerate = async () => {
-    if (!viralText.trim()) return;
+    if (!viralText.trim() || !selectedIpId) return;
     setIsGeneratingViral(true);
     try {
       const useAutoElements =
@@ -375,7 +407,7 @@ export default function CreatorDashboardPage() {
         viralConfig.viralElements.includes('system_auto');
       // 调用工业化爆款生产流水线
       const result = await creatorApi.generateViralOriginal({
-        ipId: CREATOR_IP_ID,
+        ipId: selectedIpId,
         input: viralText,
         inputMode: viralInputMode,
         scriptTemplate: viralConfig.scriptTemplate,
@@ -413,6 +445,17 @@ export default function CreatorDashboardPage() {
         <p className="text-foreground-secondary">
           选择创作方式，AI将调用已配置的Agent为你生成内容
         </p>
+        <div className="mt-4 max-w-md">
+          <IpSelect
+            value={selectedIpId ?? ''}
+            onChange={persistCreatorIp}
+            ips={ips}
+            loading={ipListLoading}
+            label="当前创作 IP"
+            helper="推荐选题、仿写与爆款原创均按该 IP 拉取策略配置与画像；与后端小敏算法 id（xiaomin / xiaomin1）需一致。"
+            emptyLabel="暂无 IP，请先创建"
+          />
+        </div>
       </div>
 
       {/* Agent状态监控 */}

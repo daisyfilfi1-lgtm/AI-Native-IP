@@ -6,6 +6,9 @@ WORKDIR /app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 安装 Playwright 浏览器（小红书/抖音需要无头浏览器）
+RUN pip install playwright && playwright install chromium --with-deps
+
 COPY backend/ .
 RUN chmod +x worker_entrypoint.sh
 

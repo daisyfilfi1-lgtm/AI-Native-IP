@@ -80,6 +80,13 @@ class TopicRecommendationServiceV4:
     def __init__(self):
         self.datasource_manager = get_datasource_manager_v2()
         self.remixer = CompetitorContentRemixer()
+        # 内容类型分布比例（4-3-2-1矩阵）
+        self.content_matrix = {
+            "money": 0.40,  # 40% 搞钱方法论
+            "emotion": 0.30,  # 30% 情感共情
+            "skill": 0.20,  # 20% 技术展示
+            "life": 0.10,  # 10% 美好生活
+        }
 
     @staticmethod
     def _fallback_topic_url(title: str, platform: str = "douyin") -> str:
@@ -95,15 +102,7 @@ class TopicRecommendationServiceV4:
         if plat == "xiaohongshu":
             return f"https://www.xiaohongshu.com/search_result?keyword={safe_q}"
         return f"https://www.douyin.com/search/{safe_q}"
-        
-        # 内容类型分布比例（4-3-2-1矩阵）
-        self.content_matrix = {
-            "money": 0.40,    # 40% 搞钱方法论
-            "emotion": 0.30,  # 30% 情感共情
-            "skill": 0.20,    # 20% 技术展示
-            "life": 0.10,     # 10% 美好生活
-        }
-    
+
     async def recommend_topics(
         self, 
         db,

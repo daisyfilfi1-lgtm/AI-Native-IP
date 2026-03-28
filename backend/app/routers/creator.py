@@ -27,7 +27,13 @@ from app.services.content_scenario import (
     ScenarioTwoRequest,
     ScenarioThreeRequest,
 )
-from app.services import remix_recommendation_service, tikhub_client, douyin_hot_hub_client, multi_source_client
+from app.services import (
+    competitor_text_extraction,
+    remix_recommendation_service,
+    tikhub_client,
+    douyin_hot_hub_client,
+    multi_source_client,
+)
 from app.services.semantic_topic_filter import filter_topics_by_similarity
 from app.services.style_corpus_service import StyleCorpusService
 from app.services.strategy_config_service import get_merged_config
@@ -1084,14 +1090,14 @@ class RemixGenerateRequest(BaseModel):
 
 @router.post("/generate/remix")
 async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(get_db)):
-    """场景二：仿写爆款（抖音 Web 单条优先，否则 hybrid；未配置或失败时退回原始 URL 文本）"""
+    """场景二：仿写爆款（TikHub 优先；可选 yt-dlp；最后退回 URL 文本）"""
     try:
         ip_profile = get_ip_profile(db, req.ipId or "") or {}
         ip_profile["ip_id"] = req.ipId or "1"
 
-        competitor_text = req.url.strip()[:8000]
-        if tikhub_client.is_configured():
-            competitor_text = await tikhub_client.extract_competitor_text_for_remix(req.url.strip())
+        competitor_text = await competitor_text_extraction.extract_competitor_text_for_remix(
+            req.url.strip()
+        )
         ip_profile.update(
             _build_style_context_from_vector(
                 db,

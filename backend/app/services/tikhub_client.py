@@ -336,14 +336,16 @@ async def resolve_share_url_for_tikhub(url: str) -> str:
     return u
 
 
-async def extract_competitor_text_for_remix(url: str) -> str:
+async def try_extract_competitor_text_tikhub(resolved_url: str) -> Optional[str]:
     """
     仿写解构用文本：抖音分享链优先走 Web 单条作品接口，其余走 hybrid。
+    成功返回非空字符串；未配置或解析失败返回 None（由上层决定是否换源或退回 URL）。
     """
-    u = url.strip()
+    u = (resolved_url or "").strip()
     if not u:
-        return ""
-    u = await resolve_share_url_for_tikhub(u)
+        return None
+    if not is_configured():
+        return None
     if looks_like_douyin_share_url(u):
         try:
             raw = await fetch_douyin_web_one_video_by_share_url(u)
@@ -354,10 +356,11 @@ async def extract_competitor_text_for_remix(url: str) -> str:
             logger.warning("Douyin Web 单条解析失败，回退 hybrid: %s", e)
     try:
         raw = await hybrid_video_data(u)
-        return extract_video_text_for_remix(raw)
+        out = extract_video_text_for_remix(raw)
+        return out if (out or "").strip() else None
     except Exception as e:
         logger.warning("TikHub hybrid 解析失败: %s", e)
-        return u[:8000]
+        return None
 
 
 async def fetch_douyin_high_play_hot_list(

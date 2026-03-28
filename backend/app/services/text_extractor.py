@@ -748,13 +748,43 @@ _PLAYWRIGHT_EVAL_EXTRACT = """
       typeof window.__NEXT_DATA__ !== 'undefined' ? window.__NEXT_DATA__ : null,
     ];
     const candidates = [];
+    
+    // 优先从笔记正文相关的 key 提取
+    const NOTE_KEYS = ['note', 'item', 'detail', 'aweme', 'video', 'post', 'content'];
+    const COMMENT_KEYS = ['comment', 'review', 'reply', 'chat'];
+    
     for (const r of roots) {
       if (!r) continue;
+      
+      // 先尝试找笔记详情
+      for (const key of Object.keys(r)) {
+        if (NOTE_KEYS.some(nk => key.toLowerCase().includes(nk))) {
+          const item = r[key];
+          if (item && typeof item === 'object') {
+            // 优先提取 desc/content/text
+            for (const k of ['desc', 'content', 'text', 'share_title', 'title']) {
+              if (item[k] && typeof item[k] === 'string' && item[k].length > 15) {
+                const t = item[k].trim();
+                if (!isGarbage(t)) return t;
+              }
+            }
+          }
+        }
+      }
+      
+      // 然后再遍历所有
       walk(r, '', 0, candidates);
     }
+    
+    // 过滤掉评论内容
+    const filtered = candidates.filter(c => {
+      const lower = c.toLowerCase();
+      return !COMMENT_KEYS.some(ck => lower.includes(ck));
+    });
+    
     let best = '';
     let bestSc = -1;
-    for (const p of candidates) {
+    for (const p of filtered.length > 0 ? filtered : candidates) {
       const sc = score(p);
       if (sc > bestSc || (sc === bestSc && p.length > best.length)) {
         bestSc = sc;

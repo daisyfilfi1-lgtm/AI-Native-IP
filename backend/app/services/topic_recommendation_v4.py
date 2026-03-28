@@ -60,6 +60,13 @@ class RecommendedTopicV4:
     tags: List[str] = field(default_factory=list)
     url: str = ""
     extra: Dict[str, Any] = field(default_factory=dict)
+    
+    # V4 前端展示字段
+    competitor_name: Optional[str] = None  # 竞品账号名称
+    competitor_platform: Optional[str] = None  # 竞品平台
+    remix_potential: Optional[str] = None  # high/medium/low
+    viral_score: Optional[int] = None  # 爆款分数 0-100
+    original_plays: Optional[str] = None  # 原视频播放量显示
 
 
 class TopicRecommendationServiceV4:
@@ -266,6 +273,16 @@ class TopicRecommendationServiceV4:
         remix: RemixResult
     ) -> RecommendedTopicV4:
         """创建重构后的选题"""
+        # 计算仿写潜力
+        play_count = original.extra.get("play_count", 0)
+        remix_potential = self._calculate_remix_potential(play_count, remix.confidence)
+        
+        # 计算爆款分数
+        viral_score = self._calculate_viral_score(play_count, original.extra.get("like_count", 0))
+        
+        # 格式化播放量显示
+        original_plays = self._format_play_count(play_count)
+        
         return RecommendedTopicV4(
             topic_id=original.id,
             title=remix.remixed_title,  # 使用重构后的标题
@@ -273,7 +290,7 @@ class TopicRecommendationServiceV4:
             source=original.source,
             source_type="competitor",
             competitor_author=original.extra.get("competitor_author"),
-            competitor_play_count=original.extra.get("play_count", 0),
+            competitor_play_count=play_count,
             competitor_like_count=original.extra.get("like_count", 0),
             content_type=remix.structure.content_type,
             content_angle=remix.structure.angle.value,
@@ -285,22 +302,93 @@ class TopicRecommendationServiceV4:
             extra={
                 "content_structure": remix.structure,
                 **original.extra
-            }
+            },
+            # V4 前端展示字段
+            competitor_name=original.extra.get("competitor_name"),
+            competitor_platform=original.extra.get("competitor_platform", "douyin"),
+            remix_potential=remix_potential,
+            viral_score=viral_score,
+            original_plays=original_plays
         )
     
     def _create_topic_from_data(self, topic: TopicData) -> RecommendedTopicV4:
         """从TopicData创建RecommendedTopicV4"""
+        play_count = topic.extra.get("play_count", 0)
+        like_count = topic.extra.get("like_count", 0)
+        is_competitor = topic.extra.get("is_competitor_topic", False)
+        
         return RecommendedTopicV4(
             topic_id=topic.id,
             title=topic.title,
             original_title=topic.original_title,
             source=topic.source,
-            source_type="other",
+            source_type="competitor" if is_competitor else "other",
+            competitor_author=topic.extra.get("competitor_author"),
+            competitor_play_count=play_count,
+            competitor_like_count=like_count,
             content_type=topic.extra.get("content_type", "unknown"),
             tags=topic.tags,
             url=topic.url,
-            extra=topic.extra
+            extra=topic.extra,
+            # V4 前端展示字段（如果是竞品选题）
+            competitor_name=topic.extra.get("competitor_name") if is_competitor else None,
+            competitor_platform=topic.extra.get("competitor_platform", "douyin") if is_competitor else None,
+            remix_potential=self._calculate_remix_potential(play_count, 0.5) if is_competitor else None,
+            viral_score=self._calculate_viral_score(play_count, like_count) if is_competitor else None,
+            original_plays=self._format_play_count(play_count) if is_competitor else None
         )
+    
+    def _calculate_remix_potential(self, play_count: int, confidence: float) -> str:
+        """计算仿写潜力"""
+        if play_count > 100000 and confidence > 0.7:
+            return "high"
+        elif play_count > 50000 and confidence > 0.5:
+            return "medium"
+        else:
+            return "low"
+    
+    def _calculate_viral_score(self, play_count: int, like_count: int) -> int:
+        """计算爆款分数 0-100"""
+        score = 0
+        
+        # 播放量分数 (最高60分)
+        if play_count > 500000:
+            score += 60
+        elif play_count > 100000:
+            score += 50
+        elif play_count > 50000:
+            score += 40
+        elif play_count > 10000:
+            score += 30
+        elif play_count > 5000:
+            score += 20
+        else:
+            score += 10
+        
+        # 互动率分数 (最高40分)
+        if play_count > 0:
+            engagement_rate = like_count / play_count
+            if engagement_rate > 0.1:
+                score += 40
+            elif engagement_rate > 0.05:
+                score += 30
+            elif engagement_rate > 0.02:
+                score += 20
+            else:
+                score += 10
+        
+        return min(100, score)
+    
+    def _format_play_count(self, play_count: int) -> str:
+        """格式化播放量显示"""
+        if play_count >= 1000000:
+            return f"{play_count / 10000:.0f}万+"
+        elif play_count >= 10000:
+            return f"{play_count / 10000:.1f}万"
+        elif play_count >= 1000:
+            return f"{play_count / 1000:.1f}千"
+        else:
+            return str(play_count)
     
     def _score_topics(
         self, 

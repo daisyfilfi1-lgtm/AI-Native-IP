@@ -443,6 +443,12 @@ class TopicStrategyAgent:
                 "reason": reason,
                 "trend": "up" if topic.competitor_play_count > 50000 else "stable",
                 "viral_elements": viral_elements[:3],
+                # V4 竞品系统字段（前端 TopicCard 直接展示）
+                "competitor_name": topic.competitor_name,
+                "competitor_platform": topic.competitor_platform,
+                "remix_potential": topic.remix_potential,
+                "viral_score": topic.viral_score,
+                "original_plays": topic.original_plays,
                 # 保留V4特有的字段供前端使用
                 "_v4_data": {
                     "original_title": topic.original_title,
@@ -452,6 +458,11 @@ class TopicStrategyAgent:
                     "competitor_play_count": topic.competitor_play_count,
                     "content_type": topic.content_type,
                     "content_angle": topic.content_angle,
+                    "competitor_name": topic.competitor_name,
+                    "competitor_platform": topic.competitor_platform,
+                    "remix_potential": topic.remix_potential,
+                    "viral_score": topic.viral_score,
+                    "original_plays": topic.original_plays,
                 }
             }
             result.append(item)

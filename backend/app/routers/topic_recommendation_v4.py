@@ -104,6 +104,12 @@ async def recommend_topics_v4(
                 "total_score": round(topic.total_score, 2),
                 "tags": topic.tags,
                 "url": topic.url,
+                # V4 前端展示字段
+                "competitor_name": topic.competitor_name,
+                "competitor_platform": topic.competitor_platform,
+                "remix_potential": topic.remix_potential,
+                "viral_score": topic.viral_score,
+                "original_plays": topic.original_plays,
             })
         
         return {

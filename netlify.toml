@@ -1,6 +1,6 @@
-# Netlify 根配置 - 指向 frontend 目录
+# Netlify：在仓库根目录构建（Next 应用在根目录的 app/；勿设 base = "frontend"，
+# 否则在仅含根目录前端的仓库或忽略 frontend/ 时部署会因目录不存在而解析失败）
 [build]
-  base = "frontend"
   command = "npm run build"
   publish = ".next"
 

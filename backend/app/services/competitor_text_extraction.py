@@ -102,6 +102,15 @@ async def extract_competitor_text_for_remix(url: str) -> str:
     # 1. 短链解析（抖音 v.douyin.com + 小红书 xhslink.com）
     resolved = await resolve_short_url(u)
     logger.info(f"短链解析: {u[:50]}... → {resolved[:50]}...")
+    
+    # 检测短链是否解析失败
+    if "xiaohongshu.com/404" in resolved.lower():
+        logger.error("小红书短链已过期或无效")
+        return "【链接已失效】该小红书链接已过期，请获取最新的分享链接"
+    
+    if "iesdouyin.com/share/user" in resolved:
+        logger.error("抖音短链解析为用户主页，无法获取视频内容")
+        return "【链接类型错误】该链接是用户主页，请复制具体视频的分享链接（包含 /video/ 的链接）"
 
     # 2. TikHub 提取（主方案）
     if tikhub_client.is_configured():
@@ -114,6 +123,10 @@ async def extract_competitor_text_for_remix(url: str) -> str:
             else:
                 logger.warning("TikHub 返回空")
         except Exception as e:
+            err_msg = str(e)
+            if "403" in err_msg and "permissions" in err_msg.lower():
+                logger.error("TikHub API 权限不足：请前往 https://user.tikhub.io/dashboard/api 开启 hybrid/video_data 权限")
+                return "【API权限不足】请在 TikHub 后台开启 API 权限：https://user.tikhub.io/dashboard/api"
             logger.error(f"TikHub 提取异常: {type(e).__name__}: {e}")
 
     # 3. yt-dlp 备选

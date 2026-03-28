@@ -5,11 +5,11 @@ alwaysApply: true
 
 # Repo and Deploy Source of Truth
 
-- Before any commit/push, identify whether the target is the root repo or a nested repo (for this project: `frontend` is a separate Git repo).
+- Before any commit/push, identify whether the target is the root monorepo (`origin`) or the standalone frontend mirror (`frontend` remote → `ai-native-ip-frontend`). The Next.js app lives at **`frontend/`** in the monorepo and is synced to the mirror with **`git subtree split --prefix=frontend`** then **`git push frontend split-frontend:main`** (see team workflow).
 - Never assume deploy source by filename only; verify actual tracked files with Git in the active repo.
 - When user says "push/deploy", confirm and state explicitly:
   - which repository remote will receive the push
   - which branch will be pushed
   - which directory/repo is the deploy source (`frontend` for frontend deploys).
-- Do not mix commits across root repo and `frontend` repo in one operation.
+- Do not mix unrelated commits: push **`master`** to **`origin`** for the monorepo; push the subtree branch to **`frontend`** for Netlify when the site is wired to `ai-native-ip-frontend`.
 - After push, report the exact commit SHA and repo/branch so user can verify deployment source.

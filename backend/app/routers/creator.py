@@ -273,7 +273,11 @@ def _rerank_tikhub_candidates(
         tags = [str(x) for x in (card.get("tags") or []) if str(x).strip()]
         source_reason = str(card.get("reason") or "").strip()
         base_score = float(card.get("score") or 0.0)
-        hotness = max(0.0, min(1.0, base_score / 5.0))
+        # 数据源可能给 0–1 归一化分或 0–5 热度分；统一映射到 [0,1] 作为 hotness
+        if base_score <= 1.0:
+            hotness = max(0.0, min(1.0, base_score))
+        else:
+            hotness = max(0.0, min(1.0, base_score / 5.0))
         relevance = _calc_relevance_for_candidate(title=title, tags=tags, ip_profile=ip_profile)
         competition = max(0.0, min(1.0, 1.0 - hotness * 0.5))
         conversion = _calc_conversion_for_candidate(title, tags)
@@ -492,6 +496,10 @@ _IP_TOPIC_BLOCKLIST = {
         "汽车", "房产", "股票", "基金", "投资", "理财", "保险",
     ],
 }
+# 与数据库中历史 id「xiaomin」对齐，策略/话题算法与 xiaomin1（小敏）一致
+_IP_TOPIC_WHITELIST["xiaomin"] = _IP_TOPIC_WHITELIST["xiaomin1"]
+_IP_TOPIC_BLOCKLIST["xiaomin"] = _IP_TOPIC_BLOCKLIST["xiaomin1"]
+
 # 可选语义过滤数据缓存（若未加载则为空，不影响主流程）
 _IP_DATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
@@ -607,8 +615,8 @@ def _adapt_topics_to_ip_angle(
     expertise = ip_profile.get("expertise", "") if ip_profile else ""
     content_dir = ip_profile.get("content_direction", "") if ip_profile else ""
     
-    # 针对小敏IP的特殊处理
-    is_xiaomin = ip_id == "xiaomin1"
+    # 针对小敏IP的特殊处理（xiaomin / xiaomin1 均视为小敏）
+    is_xiaomin = ip_id in ("xiaomin", "xiaomin1")
     
     # 选择最有代表性的关键词
     priority_keywords = [kw for kw in keywords if kw in ["宝妈", "创业", "女性", "赚钱", "独立", "翻身"]]
@@ -746,15 +754,15 @@ def _apply_topic_whitelist(db: Session, ip_id: str, topics: List[Dict[str, Any]]
             )
 
     # 小敏IP：强制使用严格核心词模式，跳过宽松白名单
-    if ip_id == "xiaomin1":
-        logger.info("xiaomin1: Using strict core keyword filter")
+    if ip_id in ("xiaomin", "xiaomin1"):
+        logger.info("xiaomin: Using strict core keyword filter")
         filtered = [t for t in topics if _topic_hit_core_keywords(t)]
         if filtered:
-            logger.info(f"xiaomin1: Core keyword matched {len(filtered)} topics")
+            logger.info(f"xiaomin: Core keyword matched {len(filtered)} topics")
             for t in filtered:
                 t['filter_method'] = 'core_matched'
             return filtered
-        logger.warning("xiaomin1: No topics hit core keywords, returning empty")
+        logger.warning("xiaomin: No topics hit core keywords, returning empty")
         return []
 
     # 其他IP：使用宽松白名单
@@ -795,16 +803,16 @@ def _apply_topic_whitelist(db: Session, ip_id: str, topics: List[Dict[str, Any]]
             logger.warning("Semantic filter failed, fallback to IP angle adaptation: %s", e)
 
     # === 严格模式：小敏IP必须命中核心词，否则直接丢弃 ===
-    if ip_id == "xiaomin1":
-        logger.warning("xiaomin1: No whitelist match, applying strict core keyword filter")
+    if ip_id in ("xiaomin", "xiaomin1"):
+        logger.warning("xiaomin: No whitelist match, applying strict core keyword filter")
         strict_filtered = [t for t in topics if _topic_hit_core_keywords(t)]
         if strict_filtered:
-            logger.info(f"xiaomin1: Core keyword matched {len(strict_filtered)} topics")
+            logger.info(f"xiaomin: Core keyword matched {len(strict_filtered)} topics")
             for t in strict_filtered:
                 t['filter_method'] = 'strict_core'
             return strict_filtered
         # 严格模式下，没有命中核心词的直接丢弃（宁可少而精）
-        logger.warning("xiaomin1: No topics hit core keywords, returning empty")
+        logger.warning("xiaomin: No topics hit core keywords, returning empty")
         return []
 
     # 其他IP：执行「热点 x IP」角度改写
@@ -1501,7 +1509,7 @@ async def _topics_from_algorithm_or_fallback(
                 filtered = list(ranked_cards)
             
             # === 小敏IP：强制核心词过滤，宁可少而精 ===
-            if ip_id == "xiaomin1":
+            if ip_id in ("xiaomin", "xiaomin1"):
                 logger.info(f"xiaomin1: Applying strict core keyword filter, filtered count: {len(filtered)}")
                 # 调试：检查第一条数据的原始标题
                 if filtered:
@@ -1545,7 +1553,7 @@ async def get_recommended_topics(
     topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
 
     # 小敏IP：严格模式，不相关热点直接丢弃，不兜底
-    if ipId == "xiaomin1":
+    if ipId in ("xiaomin", "xiaomin1"):
         if not topics:
             logger.info("xiaomin1: No matching topics from TikHub, returning empty")
         return {"topics": topics}

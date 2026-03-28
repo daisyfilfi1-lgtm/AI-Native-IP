@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any
+import uuid
 
 from sqlalchemy import (
     BigInteger,
@@ -245,3 +246,18 @@ class ContentDraft(Base):
     compliance_status = Column(String(32), nullable=False, default="pending")
     created_at = Column(DateTime, nullable=False, default=now_utc)
     updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
+
+
+class RewriteFeedback(Base):
+    """用户重写反馈（用于自进化分析）"""
+    __tablename__ = "rewrite_feedback"
+
+    feedback_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    draft_id = Column(String(64), ForeignKey("content_drafts.draft_id"), nullable=False, index=True)
+    ip_id = Column(String(64), ForeignKey("ip.ip_id"), nullable=False, index=True)
+    user_id = Column(String(64), nullable=True)  # 可选，匿名用户也能反馈
+    
+    rewrite_reason = Column(String(32), nullable=False)  # 重写原因
+    user_comment = Column(Text, nullable=True)  # 用户补充说明
+    
+    created_at = Column(DateTime, nullable=False, default=now_utc)

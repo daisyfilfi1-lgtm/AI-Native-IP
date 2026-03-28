@@ -21,6 +21,7 @@ from app.routers import (
     config_memory,
     content,
     creator,
+    creator_feedback,
     debug,
     feishu_sync,
     graph,
@@ -176,6 +177,7 @@ def create_app() -> FastAPI:
     app.include_router(debug.router, prefix="/api/v1", tags=["debug"], dependencies=api_key_dep)
     # Creator 路由 - 推荐选题等接口公开访问
     app.include_router(creator.router, prefix="/api/v1", tags=["creator"])
+    app.include_router(creator_feedback.router, prefix="/api/v1", tags=["creator"])
 
     return app
 

@@ -156,6 +156,34 @@ function TopicCardComponent({
             </a>
           )}
 
+          {/* Competitor Source - V4 竞品来源 */}
+          {topic.competitorName && (
+            <div className="mb-3 p-2.5 bg-accent-pink/5 border border-accent-pink/20 rounded-lg">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Target className="w-3.5 h-3.5 text-accent-pink" />
+                  <span className="text-xs font-medium text-accent-pink">竞品来源</span>
+                </div>
+                {topic.remixPotential === 'high' && (
+                  <Badge variant="success" size="sm">高仿写价值</Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-foreground">{topic.competitorName}</span>
+                {topic.competitorPlatform && (
+                  <Badge variant={topic.competitorPlatform === 'douyin' ? 'primary' : 'secondary'} size="sm">
+                    {topic.competitorPlatform === 'douyin' ? '抖音' : '小红书'}
+                  </Badge>
+                )}
+              </div>
+              {topic.originalPlays && (
+                <div className="mt-1 text-xs text-foreground-tertiary">
+                  原视频播放量: <span className="text-accent-pink font-medium">{topic.originalPlays}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Match Reason */}
           <div className="flex items-center gap-2 mb-3 text-xs">
             <Brain className="w-3.5 h-3.5 text-primary-400" />

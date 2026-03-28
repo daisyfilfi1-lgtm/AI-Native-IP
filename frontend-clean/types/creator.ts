@@ -33,6 +33,13 @@ export interface TopicCard {
   // Strategy Agent配置相关
   source?: string;                  // 来源竞品ID
   matchScore?: number;              // 团队素材匹配分（Memory Agent）
+  
+  // V4 竞品驱动推荐字段
+  competitorName?: string;          // 竞品账号名称
+  competitorPlatform?: string;      // 竞品平台（douyin/xiaohongshu）
+  remixPotential?: string;          // 仿写潜力（high/medium/low）
+  viralScore?: number;              // 爆款分数 0-100
+  originalPlays?: string;           // 原视频播放量（如"10万+"）
 }
 
 // ===== 生成内容 =====

@@ -217,7 +217,7 @@ async def extract_with_web_scrape(resolved_url: str, platform: Optional[str]) ->
 
 
 async def _extract_douyin_web(url: str) -> str:
-    """爬取抖音移动端页面"""
+    """爬取抖音移动端页面 - 增强版"""
     # 提取视频ID
     video_id_match = re.search(r"/video/(\d+)", url)
     if not video_id_match:
@@ -225,74 +225,116 @@ async def _extract_douyin_web(url: str) -> str:
     
     video_id = video_id_match.group(1)
     
-    # 尝试多个端点
-    endpoints = [
-        f"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id={video_id}",
-        f"https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/?item_ids={video_id}",
-    ]
+    # 方法1: 尝试 embed 页面
+    embed_url = f"https://www.douyin.com/embed/{video_id}"
     
-    for endpoint in endpoints:
-        try:
-            timeout = httpx.Timeout(15.0, connect=10.0)
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                r = await client.get(endpoint, headers=MOBILE_HEADERS)
-                
-                if r.status_code != 200:
-                    continue
-                
-                try:
-                    data = r.json()
-                except:
-                    continue
-                
-                # 解析响应
-                aweme_detail = data.get("aweme_detail") or {}
-                if not aweme_detail:
-                    # 尝试其他结构
-                    item_list = data.get("item_list") or []
-                    if item_list:
-                        aweme_detail = item_list[0]
-                
-                if aweme_detail:
-                    desc = aweme_detail.get("desc", "")
-                    if desc:
-                        return desc.strip()
-                    
-                    # 尝试从 share_info 获取
-                    share_info = aweme_detail.get("share_info", {})
-                    share_title = share_info.get("share_title", "")
-                    if share_title:
-                        return share_title.strip()
-                    
-        except Exception as e:
-            logger.debug(f"抖音端点 {endpoint} 失败: {e}")
-            continue
-    
-    # 回退到网页爬取
     try:
         timeout = httpx.Timeout(15.0, connect=10.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            r = await client.get(url, headers=MOBILE_HEADERS)
-            html = r.text
+            r = await client.get(embed_url, headers=MOBILE_HEADERS)
             
-            # 多种提取模式
-            patterns = [
-                r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']',
-                r'<meta[^>]*property=["\']og:description["\'][^>]*content=["\']([^"\']+)["\']',
-                r'<meta[^>]*property=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']',
-                r'<title>([^<]+)</title>',
-            ]
-            
-            for pattern in patterns:
-                match = re.search(pattern, html, re.IGNORECASE)
-                if match:
-                    text = match.group(1).strip()
-                    if text and text != "抖音":
-                        return text[:2000]
+            if r.status_code == 200 and len(r.text) > 1000:
+                html = r.text
+                
+                # 尝试从 embed 页面提取
+                # 查找 JSON 数据
+                patterns = [
+                    r'window\.__INITIAL_STATE__\s*=\s*({.+?});',
+                    r'window\.__UNIVERSAL_DATA__\s*=\s*({.+?});',
+                    r'"desc"\s*:\s*"([^"]*)"',
+                    r'<title>([^<]+)</title>',
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, html)
+                    if match:
+                        if "INITIAL_STATE" in pattern or "UNIVERSAL_DATA" in pattern:
+                            try:
+                                import json
+                                data = json.loads(match.group(1))
+                                # 递归找 desc
+                                desc = _find_value_recursive(data, ['desc', 'title', 'share_title'])
+                                if desc:
+                                    return desc[:2000]
+                            except:
+                                pass
+                        else:
+                            text = match.group(1).strip()
+                            if text and len(text) > 5 and "抖音" not in text:
+                                return text[:2000]
     except Exception as e:
-        logger.warning(f"抖音网页爬取失败: {e}")
+        logger.debug(f"抖音 embed 失败: {e}")
+    
+    # 方法2: PC 页面 + 从 script 提取
+    try:
+        timeout = httpx.Timeout(15.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            r = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            
+            if r.status_code == 200:
+                html = r.text
+                
+                # 尝试从 script 中提取 JSON
+                # 抖音 PC 页面有 __NEXT_DATA__ 或 __UNIVERSAL_DATA__
+                patterns = [
+                    r'window\.__UNIVERSAL_DATA__\s*=\s*({.+?});',
+                    r'window\.__NEXT_DATA__\s*=\s*({.+?});',
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, html)
+                    if match:
+                        try:
+                            import json
+                            data = json.loads(match.group(1))
+                            desc = _find_value_recursive(data, ['desc', 'title', 'share_title', 'video_title'])
+                            if desc:
+                                return desc[:2000]
+                        except:
+                            pass
+                
+                # 从 meta 标签提取
+                for meta_pattern in [
+                    r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']',
+                    r'<meta[^>]*property=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']',
+                ]:
+                    match = re.search(meta_pattern, html, re.I)
+                    if match:
+                        text = match.group(1).strip()
+                        if text and len(text) > 10:
+                            return text[:2000]
+                
+                # 从 title 提取
+                title_match = re.search(r'<title>([^<]+)</title>', html)
+                if title_match:
+                    title = title_match.group(1).strip()
+                    if title and "抖音" not in title:
+                        return title[:2000]
+    except Exception as e:
+        logger.warning(f"抖音 PC 页面爬取失败: {e}")
     
     return ""
+
+
+def _find_value_recursive(obj, keys, depth=0):
+    """递归查找包含指定 key 的值"""
+    if depth > 5:
+        return None
+    
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in keys and isinstance(v, str) and v.strip():
+                return v.strip()
+            if isinstance(v, (dict, list)):
+                result = _find_value_recursive(v, keys, depth + 1)
+                if result:
+                    return result
+    elif isinstance(obj, list) and obj:
+        return _find_value_recursive(obj[0], keys, depth + 1)
+    
+    return None
 
 
 async def _extract_xiaohongshu_web(url: str) -> str:

@@ -21,8 +21,8 @@
  *    - 解决CORS预检问题
  * 
  * 使用方法：
- * - 生产环境：设置 NEXT_PUBLIC_API_MODE=edge
- * - 或在 netlify.toml 中配置 Edge Function 路由
+ * - 默认（托管站点）：浏览器直连 Railway，避免 Netlify Edge 代理约 30s 上限导致仿写/长生成 504。
+ * - 若需强制走同源 Edge 代理：设置 NEXT_PUBLIC_API_MODE=edge
  */
 
 const DEFAULT_PRODUCTION_API_ORIGIN = 'https://ai-native-ip-production.up.railway.app';
@@ -31,17 +31,25 @@ const DEFAULT_PRODUCTION_API_ORIGIN = 'https://ai-native-ip-production.up.railwa
 type ApiMode = 'direct' | 'edge' | 'proxy';
 
 function getApiMode(): ApiMode {
-  if (typeof window === 'undefined') return 'edge';
-  
+  if (typeof window === 'undefined') {
+    return 'edge';
+  }
+
   const mode = process.env.NEXT_PUBLIC_API_MODE?.trim()?.toLowerCase();
-  
-  // 显式设置 edge 模式
   if (mode === 'edge') return 'edge';
-  
-  // 显式设置 direct 模式
   if (mode === 'direct') return 'direct';
-  
-  // 默认使用 Edge 模式
+
+  const host = window.location.hostname;
+  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  const isHosted =
+    host.endsWith('.netlify.app') ||
+    host.endsWith('.vercel.app');
+
+  // 非本机访问：默认直连 Railway（Edge 代理 fetch 超时过短，仿写易 504）
+  if (!isLocal && (isHosted || process.env.NODE_ENV === 'production')) {
+    return 'direct';
+  }
+
   return 'edge';
 }
 

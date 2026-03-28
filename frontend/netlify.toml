@@ -5,6 +5,8 @@
 [build.environment]
   NODE_VERSION = "20"
   NEXT_TELEMETRY_DISABLED = "1"
+  # 仿写/长生成易超过 Edge 代理 30s；默认在代码中已直连 Railway，无需设置。
+  # 若强制走 Edge：NEXT_PUBLIC_API_MODE=edge（仍可能被平台限时）
   # ⚠️ API 密钥：不要在代码库中设置真实值！
   # 请在 Netlify Dashboard → Site settings → Environment variables 中设置:
   # NEXT_PUBLIC_API_KEY = your-secret-key-here

@@ -50,8 +50,17 @@ function isOriginAllowed(origin: string): boolean {
 // 上传文件大小限制 (10MB，与后端一致)
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
 
-// 请求超时时间 (30秒，匹配 Railway 限制)
-const REQUEST_TIMEOUT = 30000;
+/** 普通 API 请求超时（毫秒） */
+const REQUEST_TIMEOUT_DEFAULT = 30000;
+/** 创作生成类接口（仿写/爆款等）可能超过 Edge 默认 30s，仍可能被平台截断；优先使用直连 Railway（见 apiBaseUrl） */
+const REQUEST_TIMEOUT_LONG_MS = 120000;
+
+function requestTimeoutMs(path: string, method: string): number {
+  if (method.toUpperCase() === "POST" && path.includes("/creator/generate")) {
+    return REQUEST_TIMEOUT_LONG_MS;
+  }
+  return REQUEST_TIMEOUT_DEFAULT;
+}
 
 // Edge Function 主入口
 export default async (request: Request): Promise<Response> => {
@@ -177,9 +186,9 @@ async function proxyToRailway(
   headers.set("X-Forwarded-By", "netlify-edge-function");
   headers.set("X-Forwarded-Proto", "https");
 
-  // 设置超时
+  const timeoutMs = requestTimeoutMs(path, request.method);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(targetUrl, {

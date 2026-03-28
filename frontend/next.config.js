@@ -14,7 +14,7 @@ const nextConfig = {
   },
   
   // 本地开发时重写 API 请求到 Railway
-  // 生产环境使用 Edge Functions，此配置不生效
+  // 生产环境默认浏览器直连 Railway（见 lib/apiBaseUrl）；此配置仅 dev 生效
   async rewrites() {
     if (process.env.NODE_ENV === 'production') {
       return [];

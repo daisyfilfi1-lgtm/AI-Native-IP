@@ -32,6 +32,7 @@ from .manager_v2 import DataSourceManagerV2, get_datasource_manager_v2, fetch_to
 from .cache import TopicCache
 from .builtin_source import BuiltinDataSource
 from .tikhub_source import TikHubDataSource
+from .competitor_source import CompetitorTopicDataSource
 
 __all__ = [
     # 基类
@@ -54,4 +55,5 @@ __all__ = [
     # 具体实现
     "BuiltinDataSource",
     "TikHubDataSource",
+    "CompetitorTopicDataSource",
 ]

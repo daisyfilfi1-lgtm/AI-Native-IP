@@ -350,7 +350,18 @@ class ScenarioTwoGenerator:
         rewrite_level: str = "medium",
     ) -> ContentResult:
         """执行场景二"""
+        # 输入校验
+        if not competitor_content or not competitor_content.strip():
+            raise ValueError("竞品内容不能为空，请检查链接是否有效")
+        
+        if len(competitor_content.strip()) < 20:
+            raise ValueError(f"竞品内容过短（仅{len(competitor_content.strip())}字符），无法有效仿写。请提供更完整的内容")
+        
         normalized = self._normalize_input(competitor_content, platform)
+        
+        # 再次检查归一化后的文本
+        if not normalized["normalized_text"]:
+            raise ValueError("竞品内容处理后为空，请检查输入内容")
 
         # Step 1: 分析竞品爆款结构
         structure = await self._analyze_structure(normalized["normalized_text"], platform)

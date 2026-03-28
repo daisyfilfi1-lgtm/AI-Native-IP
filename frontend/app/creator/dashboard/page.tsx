@@ -41,6 +41,7 @@ import {
 import Link from 'next/link';
 
 import { useCreatorIp } from '@/contexts/CreatorIpContext';
+import { ThirdPartyExtractor } from '@/components/creator/ThirdPartyExtractor';
 
 /** 接口仍要求 style 字段；生成侧以 IP 风格画像为准 */
 const DEFAULT_WORKFLOW_STYLE: StyleType = 'angry';
@@ -301,6 +302,11 @@ export default function CreatorDashboardPage() {
   const [remixError, setRemixError] = useState<string | null>(null);
   const [remixRecs, setRemixRecs] = useState<RemixRecommendationItem[]>([]);
   const [remixRecLoading, setRemixRecLoading] = useState(false);
+  // 手动输入模式（当自动提取失败时使用）
+  const [remixManualMode, setRemixManualMode] = useState(false);
+  const [remixManualText, setRemixManualText] = useState('');
+  // 显示第三方工具提取器
+  const [showThirdPartyExtractor, setShowThirdPartyExtractor] = useState(false);
 
   const loadRemixRecommendations = useCallback(async () => {
     if (!ipId) return;
@@ -393,16 +399,38 @@ export default function CreatorDashboardPage() {
 
   // 场景二：仿写爆款
   const handleRemix = async () => {
-    if (!ipId || !remixUrl.trim()) return;
+    if (!ipId || !remixUrl.trim()) {
+      setRemixError('请输入有效的竞品链接');
+      return;
+    }
+    
+    // 基础链接格式校验（允许手动输入模式）
+    const url = remixUrl.trim();
+    const isManualMode = url.startsWith('[MANUAL_TEXT]');
+    if (!isManualMode && !url.startsWith('http://') && !url.startsWith('https://')) {
+      setRemixError('链接格式不正确，必须以 http:// 或 https:// 开头');
+      return;
+    }
+    
     setRemixError(null);
+    setShowThirdPartyExtractor(false);
     setIsRemixing(true);
+    
     try {
-      const result = await creatorApi.generateFromRemix(remixUrl, DEFAULT_WORKFLOW_STYLE, ipId);
+      const result = await creatorApi.generateFromRemix(url, DEFAULT_WORKFLOW_STYLE, ipId);
+      
+      // 双重检查：即使API调用成功，也要确认状态
+      if (result.status === 'failed') {
+        throw new Error(result.error || '仿写生成失败');
+      }
+      
+      // 成功，跳转到生成结果页
       router.push(`/creator/generate?id=${result.id}&type=remix`);
     } catch (error) {
       console.error('Remix failed:', error);
-      const msg =
-        error instanceof Error ? error.message : '仿写请求失败，请检查网络或稍后重试';
+      const msg = error instanceof Error 
+        ? error.message 
+        : '仿写请求失败，请检查网络或稍后重试';
       setRemixError(msg);
       setIsRemixing(false);
     }
@@ -741,9 +769,125 @@ export default function CreatorDashboardPage() {
                 </div>
 
                 {remixError && (
-                  <div className="p-3 rounded-xl bg-accent-red/10 border border-accent-red/25 text-sm text-accent-red">
-                    {remixError}
+                  <div className="p-4 rounded-xl bg-accent-red/10 border border-accent-red/25">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-accent-red flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-accent-red mb-2">仿写失败</p>
+                        <p className="text-sm text-accent-red/80 whitespace-pre-wrap">{remixError}</p>
+                        
+                        {/* 根据错误类型显示解决建议 */}
+                        {remixError.includes('TIKHUB_API_KEY') && (
+                          <div className="mt-3 p-3 rounded-lg bg-background-tertiary/50 text-xs text-foreground-secondary">
+                            <p className="font-medium text-foreground mb-1">💡 解决方案：</p>
+                            <p>请确保后端已配置 TIKHUB_API_KEY 环境变量，或联系管理员开通 TikHub 服务。</p>
+                          </div>
+                        )}
+                        {remixError.includes('链接') && (remixError.includes('格式') || remixError.includes('空')) && (
+                          <div className="mt-3 p-3 rounded-lg bg-background-tertiary/50 text-xs text-foreground-secondary">
+                            <p className="font-medium text-foreground mb-1">💡 正确格式示例：</p>
+                            <ul className="space-y-1">
+                              <li>• 抖音: https://v.douyin.com/xxxxx 或 https://www.douyin.com/video/xxxxx</li>
+                              <li>• 小红书: https://xhslink.com/xxxxx</li>
+                            </ul>
+                          </div>
+                        )}
+                        {remixError.includes('提取') && (
+                          <>
+                            <div className="mt-3 p-3 rounded-lg bg-background-tertiary/50 text-xs text-foreground-secondary">
+                              <p className="font-medium text-foreground mb-1">💡 可能原因：</p>
+                              <ul className="space-y-1">
+                                <li>• 视频链接已失效或被删除</li>
+                                <li>• 视频设置了隐私权限</li>
+                                <li>• 平台接口暂时不可用</li>
+                              </ul>
+                            </div>
+                            
+                            {/* 使用第三方工具按钮 */}
+                            <button
+                              type="button"
+                              onClick={() => setShowThirdPartyExtractor(true)}
+                              className="mt-3 flex items-center gap-2 px-3 py-2 bg-primary-500/10 text-primary-400 rounded-lg text-xs hover:bg-primary-500/20 transition-colors"
+                            >
+                              <span>🔍</span>
+                              <span>使用第三方工具提取文案</span>
+                            </button>
+                          </>
+                        )}
+                        
+                        {/* 手动输入模式切换 */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRemixManualMode(!remixManualMode);
+                            setShowThirdPartyExtractor(false);
+                          }}
+                          className="mt-3 text-xs text-primary-400 hover:text-primary-300 underline"
+                        >
+                          {remixManualMode ? '← 返回链接提取模式' : '直接粘贴文案 →'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
+                )}
+                
+                {/* 手动输入模式 */}
+                {remixManualMode && (
+                  <div className="p-4 rounded-xl bg-background-tertiary border border-border">
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                      手动粘贴竞品文案
+                    </label>
+                    <p className="text-xs text-foreground-secondary mb-3">
+                      当自动提取失败时，你可以直接复制视频的标题和文案粘贴到这里。
+                    </p>
+                    <textarea
+                      value={remixManualText}
+                      onChange={(e) => setRemixManualText(e.target.value)}
+                      placeholder="粘贴视频标题和文案..."
+                      rows={6}
+                      className="w-full p-3 bg-background-elevated border border-border rounded-lg text-foreground placeholder:text-foreground-muted resize-none focus:outline-none focus:border-primary-500/50"
+                    />
+                    <div className="flex justify-between items-center mt-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRemixManualMode(false);
+                          setRemixManualText('');
+                        }}
+                        className="text-xs text-foreground-secondary hover:text-foreground"
+                      >
+                        取消
+                      </button>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          // 使用手动文本作为 "链接" 传递给后端
+                          // 这里我们会在后端添加特殊处理
+                          setRemixUrl(`[MANUAL_TEXT]${remixManualText}`);
+                          setRemixManualMode(false);
+                        }}
+                        disabled={!remixManualText.trim()}
+                      >
+                        使用此文案
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                
+                {/* 第三方工具提取器 */}
+                {showThirdPartyExtractor && (
+                  <ThirdPartyExtractor
+                    videoUrl={remixUrl}
+                    onTextExtracted={(text) => {
+                      // 使用提取的文案
+                      setRemixUrl(`[MANUAL_TEXT]${text}`);
+                      setShowThirdPartyExtractor(false);
+                      // 自动触发仿写
+                      setTimeout(() => {
+                        handleRemix();
+                      }, 100);
+                    }}
+                  />
                 )}
 
                 {/* 生成按钮 */}

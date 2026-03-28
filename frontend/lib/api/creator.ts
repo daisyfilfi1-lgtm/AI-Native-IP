@@ -393,9 +393,21 @@ export const creatorApi = {
       method: 'POST',
       body: JSON.stringify({ url, style, ipId }),
     });
+    
+    // 检查后端返回的状态
     if (result.status === 'failed') {
-      throw new Error(result.error?.trim() || '仿写生成失败，请稍后重试或检查链接是否有效');
+      // 优先使用后端返回的具体错误信息
+      const errorMsg = result.error?.trim() || '仿写生成失败，请稍后重试或检查链接是否有效';
+      console.error('[API] Remix failed:', errorMsg, result);
+      throw new Error(errorMsg);
     }
+    
+    // 额外检查：如果状态不是 completed 也不是 failed，视为异常
+    if (result.status !== 'completed' && result.status !== 'processing') {
+      console.error('[API] Remix returned unexpected status:', result.status);
+      throw new Error('仿写请求返回异常状态，请重试');
+    }
+    
     return result;
   },
 

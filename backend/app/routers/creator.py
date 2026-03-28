@@ -1090,25 +1090,99 @@ class RemixGenerateRequest(BaseModel):
 
 @router.post("/generate/remix")
 async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(get_db)):
-    """场景二：仿写爆款（TikHub 优先；可选 yt-dlp；最后退回 URL 文本）"""
+    """场景二：仿写爆款（TikHub 优先；可选 yt-dlp；失败时返回明确错误）"""
+    
+    # 参数校验
+    url = (req.url or "").strip()
+    if not url:
+        return {
+            "id": "gen_remix_invalid",
+            "status": "failed",
+            "error": "链接不能为空",
+        }
+    
+    # 检查链接格式（允许手动输入模式）
+    MANUAL_PREFIX = "[MANUAL_TEXT]"
+    if not url.startswith(("http://", "https://", MANUAL_PREFIX)):
+        return {
+            "id": "gen_remix_invalid",
+            "status": "failed", 
+            "error": "链接格式不正确，必须以 http:// 或 https:// 开头",
+        }
+    
     try:
         ip_profile = get_ip_profile(db, req.ipId or "") or {}
         ip_profile["ip_id"] = req.ipId or "1"
 
-        competitor_text = await competitor_text_extraction.extract_competitor_text_for_remix(
-            req.url.strip()
-        )
+        # 检查是否为手动输入模式
+        MANUAL_PREFIX = "[MANUAL_TEXT]"
+        if url.startswith(MANUAL_PREFIX):
+            # 手动输入模式：直接提取文本，跳过链接解析
+            competitor_text = url[len(MANUAL_PREFIX):].strip()
+            extraction_result = {
+                "success": True,
+                "text": competitor_text,
+                "error": "",
+                "method": "manual_input",
+                "metadata": {
+                    "platform": "manual",
+                    "original_url": "manual_input",
+                    "resolved_url": "manual_input",
+                }
+            }
+            logger.info(f"使用手动输入模式，文本长度: {len(competitor_text)}")
+        else:
+            # 步骤1: 提取竞品文本（使用新版统一提取服务）
+            extraction_result = await competitor_text_extraction.extract_competitor_text_with_fallback(url)
+        
+        if not extraction_result["success"]:
+            logger.warning(f"竞品文本提取失败: {extraction_result['error']}")
+            # 提供更友好的错误信息
+            error_msg = extraction_result["error"]
+            
+            # 分类错误信息
+            if "TIKHUB_API_KEY" in error_msg:
+                user_error = "文本提取服务未配置（TIKHUB_API_KEY），请联系管理员配置或使用手动输入模式"
+            elif "403" in error_msg or "权限" in error_msg:
+                user_error = "API 权限不足，请联系管理员检查 TikHub 权限配置"
+            elif "404" in error_msg or "不存在" in error_msg:
+                user_error = "视频不存在或已被删除，请检查链接是否有效"
+            elif "超时" in error_msg:
+                user_error = "提取超时，请稍后重试或更换链接"
+            elif "Web 爬取" in error_msg and "失败" in error_msg:
+                user_error = "无法自动提取该链接内容。建议：\n1. 检查链接是否有效\n2. 尝试复制视频文案手动粘贴\n3. 更换其他视频链接"
+            else:
+                user_error = f"无法提取链接内容: {error_msg[:200]}"
+            
+            return {
+                "id": "gen_remix_extract_failed",
+                "status": "failed",
+                "error": user_error,
+                "details": {
+                    "stage": "text_extraction",
+                    "url": url[:100],
+                    "raw_error": error_msg,
+                    "metadata": extraction_result.get("metadata", {}),
+                }
+            }
+        
+        competitor_text = extraction_result["text"]
+        metadata = extraction_result.get("metadata", {})
+        logger.info(f"竞品文本提取成功，方法: {extraction_result['method']}, 平台: {metadata.get('platform')}, 长度: {len(competitor_text)}")
+
+        # 步骤2: 构建风格上下文
         ip_profile.update(
             _build_style_context_from_vector(
                 db,
                 ip_id=req.ipId or "1",
-                topic=(competitor_text or req.url or "")[:200],
+                topic=competitor_text[:200],
                 emotion=str(ip_profile.get("content_direction") or ""),
                 audience=str(ip_profile.get("target_audience") or ""),
                 top_k=3,
             )
         )
 
+        # 步骤3: 构建生成请求
         request = ScenarioTwoRequest(
             ip_id=req.ipId or "1",
             competitor_content=competitor_text,
@@ -1117,12 +1191,16 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
             rewrite_level="medium",
         )
 
+        # 步骤4: 执行生成
         result = await ContentGenerator.scenario_two(request)
+        
+        # 步骤5: 保存结果
         draft_id = f"gen_remix_{uuid.uuid4().hex[:10]}"
         raw_score = float(result.score or 0.0)
         if not math.isfinite(raw_score):
             raw_score = 0.0
         safe_content = (result.content if isinstance(result.content, str) else "") or ""
+        
         _save_generated_draft(
             db,
             draft_id=draft_id,
@@ -1134,7 +1212,12 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
             generation_source="remix",
             score=raw_score,
             extra_workflow={
-                "source_url": req.url,
+                "source_url": url,
+                "text_extraction_method": extraction_result["method"],
+                "text_extraction_platform": metadata.get("platform"),
+                "text_extraction_resolved_url": metadata.get("resolved_url"),
+                "text_extraction_length": len(competitor_text),
+                "original_competitor_text": competitor_text[:500],  # 保存前500字符用于调试
                 "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
                 "structureSnapshot": (result.metadata or {}).get("structure_snapshot"),
                 "retrievalTrace": (result.metadata or {}).get("retrieval_trace"),
@@ -1151,12 +1234,13 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
             "content": safe_content,
             "score": raw_score,
         }
+        
     except Exception as e:
         logger.exception("generate_from_remix failed: %s", e)
         return {
-            "id": "gen_remix_001",
+            "id": "gen_remix_error",
             "status": "failed",
-            "error": str(e),
+            "error": f"仿写生成失败: {str(e)}",
         }
 
 

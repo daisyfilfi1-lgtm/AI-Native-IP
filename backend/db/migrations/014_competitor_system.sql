@@ -28,8 +28,8 @@ CREATE INDEX IF NOT EXISTS idx_competitor_accounts_ip_id ON competitor_accounts(
 -- ============================================================
 -- 1.5 确保 xiaomin IP 存在（外键依赖）
 -- ============================================================
-INSERT INTO ip (ip_id, name, platform, created_at, updated_at)
-VALUES ('xiaomin', '晓敏', 'xiaohongshu', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+INSERT INTO ip (ip_id, name, owner_user_id, status, created_at, updated_at)
+VALUES ('xiaomin', '晓敏', 'system', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT (ip_id) DO NOTHING;
 
 -- ============================================================

@@ -348,9 +348,119 @@ class TopicStrategyAgent:
 
     def recommend_topics(self, count: int = 5) -> Dict[str, Any]:
         """
-        基于 IP 画像直接推荐选题（不依赖外部热点 API）。
+        基于 IP 画像推荐选题。
+        
+        优先使用V4竞品爆款系统，如果失败则回退到LLM生成。
         """
         n = max(1, min(20, int(count)))
+        
+        # 尝试使用V4竞品爆款系统
+        try:
+            import asyncio
+            from app.services.topic_recommendation_v4 import get_recommendation_service_v4
+            
+            # 获取数据库会话（从当前上下文中）
+            # 注意：这里使用同步方式调用异步代码
+            service = get_recommendation_service_v4()
+            
+            # 由于recommend_topics是异步的，我们需要创建一个新的事件循环
+            # 或者使用已存在的事件循环
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # 如果在已有事件循环中，使用run_coroutine_threadsafe
+                    import concurrent.futures
+                    executor = concurrent.futures.ThreadPoolExecutor()
+                    future = executor.submit(
+                        asyncio.run,
+                        self._fetch_v4_topics(service, n)
+                    )
+                    v4_result = future.result(timeout=30)
+                else:
+                    v4_result = loop.run_until_complete(
+                        self._fetch_v4_topics(service, n)
+                    )
+            except RuntimeError:
+                # 没有事件循环，创建新的
+                v4_result = asyncio.run(self._fetch_v4_topics(service, n))
+            
+            if v4_result and len(v4_result) > 0:
+                # 转换V4结果为前端兼容格式
+                normalized = self._convert_v4_to_legacy(v4_result)
+                return {
+                    "recommended_topics": normalized[:n],
+                    "analysis": f"基于{len(v4_result)}个竞品爆款生成的推荐（V4系统）",
+                }
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"[V4] Failed to use competitor topics: {e}")
+        
+        # 回退到LLM生成
+        return self._recommend_topics_llm(n)
+    
+    async def _fetch_v4_topics(self, service, count: int):
+        """异步获取V4选题"""
+        # 这里需要数据库会话，我们通过依赖注入方式获取
+        from app.db.session import SessionLocal
+        db = SessionLocal()
+        try:
+            return await service.recommend_topics(
+                db=db,
+                ip_id=self.ip_id,
+                limit=count,
+                strategy="competitor_first"
+            )
+        finally:
+            db.close()
+    
+    def _convert_v4_to_legacy(self, v4_topics: List[Any]) -> List[Dict[str, Any]]:
+        """将V4选题转换为前端兼容格式"""
+        result = []
+        for topic in v4_topics:
+            # 提取爆款元素标签
+            viral_elements = ["crowd", "contrast"]  # 默认元素
+            if topic.content_type == "money":
+                viral_elements = ["cost", "crowd"]
+            elif topic.content_type == "emotion":
+                viral_elements = ["nostalgia", "hormone"]
+            elif topic.content_type == "skill":
+                viral_elements = ["top", "contrast"]
+            
+            # 构建reason字段
+            reason_parts = []
+            if topic.is_remixed:
+                reason_parts.append(f"[竞品重构] {topic.remix_reason}")
+            if topic.competitor_author:
+                reason_parts.append(f"参考: {topic.competitor_author}")
+            if topic.competitor_play_count > 0:
+                reason_parts.append(f"播放量: {topic.competitor_play_count/10000:.1f}万")
+            
+            reason = " | ".join(reason_parts) if reason_parts else topic.remix_reason or "—"
+            
+            item = {
+                "title": topic.title,
+                "score": int(topic.total_score * 20),  # 0-5分转换为0-100分
+                "reason": reason,
+                "trend": "up" if topic.competitor_play_count > 50000 else "stable",
+                "viral_elements": viral_elements[:3],
+                # 保留V4特有的字段供前端使用
+                "_v4_data": {
+                    "original_title": topic.original_title,
+                    "is_remixed": topic.is_remixed,
+                    "remix_confidence": topic.remix_confidence,
+                    "competitor_author": topic.competitor_author,
+                    "competitor_play_count": topic.competitor_play_count,
+                    "content_type": topic.content_type,
+                    "content_angle": topic.content_angle,
+                }
+            }
+            result.append(item)
+        return result
+    
+    def _recommend_topics_llm(self, n: int) -> Dict[str, Any]:
+        """
+        使用LLM生成选题（回退方案）
+        """
         prompt = ChatPromptTemplate.from_template(STRATEGY_RECOMMEND_JSON_PROMPT)
         chain = prompt | self.llm | self.json_parser
         try:

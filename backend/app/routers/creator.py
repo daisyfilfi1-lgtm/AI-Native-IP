@@ -273,7 +273,11 @@ def _rerank_tikhub_candidates(
         tags = [str(x) for x in (card.get("tags") or []) if str(x).strip()]
         source_reason = str(card.get("reason") or "").strip()
         base_score = float(card.get("score") or 0.0)
-        hotness = max(0.0, min(1.0, base_score / 5.0))
+        # 数据源可能给 0–1 归一化分或 0–5 热度分；统一映射到 [0,1] 作为 hotness
+        if base_score <= 1.0:
+            hotness = max(0.0, min(1.0, base_score))
+        else:
+            hotness = max(0.0, min(1.0, base_score / 5.0))
         relevance = _calc_relevance_for_candidate(title=title, tags=tags, ip_profile=ip_profile)
         competition = max(0.0, min(1.0, 1.0 - hotness * 0.5))
         conversion = _calc_conversion_for_candidate(title, tags)
@@ -288,9 +292,19 @@ def _rerank_tikhub_candidates(
                 "originalTitle": original_title,  # 添加原标题
                 "score": round(total * 5.0, 2),
                 "tags": tags,
-                "estimatedViews": str(card.get("estimatedViews") or "-"),
-                "estimatedCompletion": int(card.get("estimatedCompletion") or 0),
-                "sourceUrl": str(card.get("sourceUrl") or ""),
+                "estimatedViews": str(
+                    card.get("estimatedViews")
+                    or card.get("estimated_views")
+                    or "—"
+                ),
+                "estimatedCompletion": int(
+                    card.get("estimatedCompletion")
+                    or card.get("estimated_completion")
+                    or 0
+                ),
+                "sourceUrl": str(
+                    card.get("sourceUrl") or card.get("source_url") or ""
+                ),
                 "reason": (
                     f"{(source_reason or '大数据候选')} + 四维重排 R/H/CV="
                     f"{round(relevance, 2)}/{round(hotness, 2)}/"
@@ -492,6 +506,10 @@ _IP_TOPIC_BLOCKLIST = {
         "汽车", "房产", "股票", "基金", "投资", "理财", "保险",
     ],
 }
+# 与数据库中历史 id「xiaomin」对齐，策略/话题算法与 xiaomin1（小敏）一致
+_IP_TOPIC_WHITELIST["xiaomin"] = _IP_TOPIC_WHITELIST["xiaomin1"]
+_IP_TOPIC_BLOCKLIST["xiaomin"] = _IP_TOPIC_BLOCKLIST["xiaomin1"]
+
 # 可选语义过滤数据缓存（若未加载则为空，不影响主流程）
 _IP_DATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
@@ -607,8 +625,8 @@ def _adapt_topics_to_ip_angle(
     expertise = ip_profile.get("expertise", "") if ip_profile else ""
     content_dir = ip_profile.get("content_direction", "") if ip_profile else ""
     
-    # 针对小敏IP的特殊处理
-    is_xiaomin = ip_id == "xiaomin1"
+    # 针对小敏IP的特殊处理（xiaomin / xiaomin1 均视为小敏）
+    is_xiaomin = ip_id in ("xiaomin", "xiaomin1")
     
     # 选择最有代表性的关键词
     priority_keywords = [kw for kw in keywords if kw in ["宝妈", "创业", "女性", "赚钱", "独立", "翻身"]]
@@ -746,15 +764,15 @@ def _apply_topic_whitelist(db: Session, ip_id: str, topics: List[Dict[str, Any]]
             )
 
     # 小敏IP：强制使用严格核心词模式，跳过宽松白名单
-    if ip_id == "xiaomin1":
-        logger.info("xiaomin1: Using strict core keyword filter")
+    if ip_id in ("xiaomin", "xiaomin1"):
+        logger.info("xiaomin: Using strict core keyword filter")
         filtered = [t for t in topics if _topic_hit_core_keywords(t)]
         if filtered:
-            logger.info(f"xiaomin1: Core keyword matched {len(filtered)} topics")
+            logger.info(f"xiaomin: Core keyword matched {len(filtered)} topics")
             for t in filtered:
                 t['filter_method'] = 'core_matched'
             return filtered
-        logger.warning("xiaomin1: No topics hit core keywords, returning empty")
+        logger.warning("xiaomin: No topics hit core keywords, returning empty")
         return []
 
     # 其他IP：使用宽松白名单
@@ -795,16 +813,16 @@ def _apply_topic_whitelist(db: Session, ip_id: str, topics: List[Dict[str, Any]]
             logger.warning("Semantic filter failed, fallback to IP angle adaptation: %s", e)
 
     # === 严格模式：小敏IP必须命中核心词，否则直接丢弃 ===
-    if ip_id == "xiaomin1":
-        logger.warning("xiaomin1: No whitelist match, applying strict core keyword filter")
+    if ip_id in ("xiaomin", "xiaomin1"):
+        logger.warning("xiaomin: No whitelist match, applying strict core keyword filter")
         strict_filtered = [t for t in topics if _topic_hit_core_keywords(t)]
         if strict_filtered:
-            logger.info(f"xiaomin1: Core keyword matched {len(strict_filtered)} topics")
+            logger.info(f"xiaomin: Core keyword matched {len(strict_filtered)} topics")
             for t in strict_filtered:
                 t['filter_method'] = 'strict_core'
             return strict_filtered
         # 严格模式下，没有命中核心词的直接丢弃（宁可少而精）
-        logger.warning("xiaomin1: No topics hit core keywords, returning empty")
+        logger.warning("xiaomin: No topics hit core keywords, returning empty")
         return []
 
     # 其他IP：执行「热点 x IP」角度改写
@@ -1434,6 +1452,73 @@ async def get_generate_progress(id: str):
 
 
 # === 推荐选题 / 刷新 ===
+def _dedupe_merge_topic_cards(
+    priority: List[Dict[str, Any]],
+    rest: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """优先保留 priority（同标题去重），再拼 rest。"""
+    if not priority:
+        return list(rest)
+    if not rest:
+        return list(priority)
+    seen: set = set()
+    merged: List[Dict[str, Any]] = []
+    for c in priority + rest:
+        key = str(c.get("title") or "").lower().strip()[:48]
+        if not key:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(c)
+    return merged
+
+
+async def _fetch_ip_competitor_topic_cards(
+    db: Session,
+    ip_id: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """
+    从该 IP 在 competitor_accounts 中配置的竞品账号拉选题（与全站 TIKHUB_COMPETITOR_SEC_UIDS 无关）。
+    返回与 _rerank_tikhub_candidates 兼容的卡片结构。
+    """
+    try:
+        from app.services.datasource.competitor_source import CompetitorTopicDataSource
+
+        ip_profile = dict(get_ip_profile(db, ip_id) or {})
+        ip_profile["ip_id"] = ip_id
+        ds = CompetitorTopicDataSource(db_session=db)
+        raw_topics = await ds.fetch(ip_profile, limit=max(1, min(limit, 12)))
+        out: List[Dict[str, Any]] = []
+        for t in raw_topics:
+            extra = getattr(t, "extra", None) or {}
+            play = extra.get("play_count")
+            est = "—"
+            if isinstance(play, int) and play > 0:
+                est = f"{play // 10000}万+" if play >= 10000 else str(play)
+            out.append(
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "originalTitle": getattr(t, "original_title", None) or t.title,
+                    "score": float(t.score or 4.65),
+                    "tags": list(t.tags or ["抖音", "竞品爆款", "IP监控"]),
+                    "reason": "IP 竞品监控（按该 IP 配置的竞品账号）",
+                    "estimatedViews": est,
+                    "estimatedCompletion": 35,
+                    "sourceUrl": getattr(t, "url", None) or "",
+                    "filter_method": "ip_competitor",
+                }
+            )
+        if out:
+            logger.info("ip_id=%s: %s topic cards from IP-bound competitors", ip_id, len(out))
+        return out
+    except Exception as e:
+        logger.warning("IP competitor topic cards failed ip_id=%s: %s", ip_id, e)
+        return []
+
+
 async def _topics_from_algorithm_or_fallback(
     db: Session,
     *,
@@ -1455,6 +1540,9 @@ async def _topics_from_algorithm_or_fallback(
     _ensure_ip_data_cache(db, ip_id)
     
     weights = _resolve_topic_weights(db, ip_id)
+
+    # 0. 本 IP 在库中配置的竞品账号（优先于泛热榜）
+    comp_cards = await _fetch_ip_competitor_topic_cards(db, ip_id, min(12, max(limit, 8)))
 
     cards: List[Dict[str, Any]] = []
     
@@ -1485,6 +1573,10 @@ async def _topics_from_algorithm_or_fallback(
         except Exception as e:
             logger.warning("douyin-hot-hub 拉取失败: %s", e)
 
+    if comp_cards:
+        cards = _dedupe_merge_topic_cards(comp_cards, cards)
+        logger.info("After merge with IP competitors: total=%s cards", len(cards))
+
     try:
         if cards:
             try:
@@ -1501,18 +1593,23 @@ async def _topics_from_algorithm_or_fallback(
                 filtered = list(ranked_cards)
             
             # === 小敏IP：强制核心词过滤，宁可少而精 ===
-            if ip_id == "xiaomin1":
+            if ip_id in ("xiaomin", "xiaomin1"):
                 logger.info(f"xiaomin1: Applying strict core keyword filter, filtered count: {len(filtered)}")
                 # 调试：检查第一条数据的原始标题
                 if filtered:
                     first_original = filtered[0].get("originalTitle", "N/A")
                     logger.info(f"xiaomin1: First card originalTitle: {first_original[:50]}")
-                strict_filtered = [c for c in filtered if _topic_hit_core_keywords(c)]
+                strict_filtered = [
+                    c
+                    for c in filtered
+                    if c.get("filter_method") == "ip_competitor" or _topic_hit_core_keywords(c)
+                ]
                 logger.info(f"xiaomin1: Core keyword matched {len(strict_filtered)} topics")
                 if strict_filtered:
                     for c in strict_filtered:
                         c.pop("_relevance", None)
-                        c['filter_method'] = 'core_matched'
+                        if c.get("filter_method") != "ip_competitor":
+                            c["filter_method"] = "core_matched"
                     return strict_filtered
                 logger.warning("xiaomin1: No topics hit core keywords, returning empty")
                 return []
@@ -1537,7 +1634,7 @@ async def _topics_from_algorithm_or_fallback(
 
 @router.get("/topics/recommended")
 async def get_recommended_topics(
-    ipId: str = Query("1", description="IP 画像 id"),
+    ipId: str = Query("xiaomin1", description="IP 画像 id（须与 ip.ip_id 一致）"),
     limit: int = Query(12, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
@@ -1545,7 +1642,7 @@ async def get_recommended_topics(
     topics = await _topics_from_algorithm_or_fallback(db, ip_id=ipId, limit=limit)
 
     # 小敏IP：严格模式，不相关热点直接丢弃，不兜底
-    if ipId == "xiaomin1":
+    if ipId in ("xiaomin", "xiaomin1"):
         if not topics:
             logger.info("xiaomin1: No matching topics from TikHub, returning empty")
         return {"topics": topics}
@@ -1561,7 +1658,7 @@ async def get_recommended_topics(
 
 @router.get("/topics/refresh")
 async def refresh_topics(
-    ipId: str = Query("1", description="IP 画像 id"),
+    ipId: str = Query("xiaomin1", description="IP 画像 id"),
     limit: int = Query(12, ge=1, le=50),
     db: Session = Depends(get_db),
 ):

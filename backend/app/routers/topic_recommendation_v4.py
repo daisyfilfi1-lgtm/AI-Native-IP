@@ -7,7 +7,7 @@
 - 已被同类IP验证过的选题
 """
 
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -305,6 +305,305 @@ async def sync_competitors(
     }
 
 
+# ============== 环节2：爆款链接 → 提取标题/内容 ==============
+
+class ExtractContentRequest(BaseModel):
+    """内容提取请求"""
+    url: str = Field(..., description="视频链接")
+    use_cache: bool = Field(True, description="是否使用缓存")
+
+
+class ExtractContentBatchRequest(BaseModel):
+    """批量内容提取请求"""
+    urls: List[str] = Field(..., description="视频链接列表", max_length=10)
+    use_cache: bool = Field(True, description="是否使用缓存")
+
+
+class ExtractedContentResponse(BaseModel):
+    """提取内容响应 - 方案A：简化版（标题+标签）"""
+    success: bool
+    error: str = ""
+    url: str
+    platform: str
+    video_id: str = ""
+    author: str = ""
+    
+    # 核心内容
+    original_title: str = ""      # 原始标题（含标签）
+    title_clean: str = ""         # 纯净标题
+    hook: str = ""                # 钩子（黄金3秒）
+    body: str = ""                # 正文/角度
+    tags: List[str] = []          # 话题标签
+    
+    # 分类
+    content_type: str = ""        # money/emotion/skill/life
+    
+    # 数据
+    stats: Dict[str, int] = {}    # 播放量/点赞数等
+    
+    # 提取信息
+    extract_method: str = ""
+
+
+@router.post(
+    "/strategy/v4/extract-content",
+    response_model=ExtractedContentResponse,
+    summary="环节2：提取爆款链接内容（单条）"
+)
+async def extract_content_api(
+    request: ExtractContentRequest
+):
+    """
+    环节2核心API：从爆款链接提取结构化内容
+    
+    输入：抖音/小红书等平台视频链接
+    输出：结构化内容（标题、钩子、正文、标签、爆款元素等）
+    
+    示例：
+    ```json
+    {
+      "url": "https://www.douyin.com/video/xxxxx",
+      "use_cache": true
+    }
+    ```
+    
+    返回：
+    ```json
+    {
+      "success": true,
+      "url": "https://www.douyin.com/video/xxxxx",
+      "platform": "douyin",
+      "video_id": "xxxxx",
+      "author": "username",
+      "original_title": "32岁，我终于活成了别人羡慕的样子#宝妈逆袭 #成长",
+      "title_clean": "32岁，我终于活成了别人羡慕的样子",
+      "hook": "32岁，我终于活成了别人羡慕的样子",
+      "body": "",
+      "tags": ["宝妈逆袭", "成长"],
+      "content_type": "emotion",
+      "stats": {
+        "play_count": 150000,
+        "like_count": 8500,
+        "share_count": 1200
+      },
+      "extract_method": "tikhub_douyin"
+    }
+    ```
+    """
+    from app.services.smart_content_extractor import extract_content_for_remix, SmartContentExtractor
+    from app.services.link_resolver import resolve_any_url, detect_platform
+    
+    # 首先尝试实时提取
+    result = await extract_content_for_remix(request.url)
+    
+    # 如果实时提取失败，尝试从数据库查找
+    if not result["success"]:
+        try:
+            # 解析URL获取video_id
+            resolved = await resolve_any_url(request.url)
+            resolved_url = resolved.get("resolved_url", request.url) if isinstance(resolved, dict) else resolved
+            platform = detect_platform(resolved_url)
+            
+            # 从URL中提取video_id
+            import re
+            video_id = None
+            if platform == "douyin":
+                match = re.search(r'/video/(\d+)', resolved_url)
+                if match:
+                    video_id = match.group(1)
+            
+            if video_id:
+                from app.db.session import SessionLocal
+                from app.models.competitor_video import CompetitorVideo
+                
+                db = SessionLocal()
+                try:
+                    video = db.query(CompetitorVideo).filter(
+                        CompetitorVideo.video_id == video_id
+                    ).first()
+                    
+                    if video and video.original_title:
+                        # 使用数据库数据构建结果
+                        extractor = SmartContentExtractor()
+                        result = {
+                            "success": True,
+                            "url": request.url,
+                            "platform": platform or "unknown",
+                            "video_id": video_id,
+                            "author": video.author_name or "",
+                            "original_title": video.original_title,
+                            "title_clean": extractor._clean_title(video.original_title),
+                            "hook": "",
+                            "angle": "",
+                            "tags": video.tags or [],
+                            "content_type": video.content_type or "life",
+                            "target_audience": "",
+                            "viral_elements": [],
+                            "stats": {
+                                "play_count": video.play_count or 0,
+                                "like_count": video.like_count or 0,
+                                "share_count": 0
+                            },
+                            "rewrite_material": None,
+                            "extract_method": "database_fallback"
+                        }
+                        
+                        # 重新分析内容
+                        hook, angle = extractor._split_title_structure(result["title_clean"])
+                        result["hook"] = hook
+                        result["angle"] = angle
+                        result["target_audience"] = extractor._detect_audience(result["title_clean"], result["tags"])
+                        result["viral_elements"] = extractor._analyze_viral_elements(result["title_clean"], result["tags"])
+                        
+                        # 构建改写素材
+                        from app.services.smart_content_extractor import ContentAnalysis
+                        analysis = ContentAnalysis(
+                            original_title=video.original_title,
+                            title_clean=result["title_clean"],
+                            hook=hook,
+                            angle=angle,
+                            tags=result["tags"],
+                            content_type=result["content_type"],
+                            target_audience=result["target_audience"],
+                            viral_elements=result["viral_elements"]
+                        )
+                        result["rewrite_material"] = analysis.to_rewrite_material()
+                        
+                finally:
+                    db.close()
+        except Exception as e:
+            # 数据库回退也失败，保留原始错误
+            pass
+    
+    return ExtractedContentResponse(
+        success=result["success"],
+        url=request.url,
+        error=result.get("error", ""),
+        **{k: v for k, v in result.items() if k not in ["success", "error", "original_text"]}
+    )
+
+
+@router.post(
+    "/strategy/v4/extract-content/batch",
+    summary="环节2：批量提取爆款链接内容"
+)
+async def extract_content_batch_api(
+    request: ExtractContentBatchRequest
+):
+    """
+    批量提取多个链接的内容
+    
+    适合从环节1获取多个链接后批量处理
+    """
+    from app.services.smart_content_extractor import extract_content_for_remix
+    
+    results = []
+    
+    # 并发提取（限制并发数）
+    semaphore = asyncio.Semaphore(3)  # 最多3个并发
+    
+    async def extract_with_limit(url: str):
+        async with semaphore:
+            return await extract_content_for_remix(url)
+    
+    # 批量执行
+    tasks = [extract_with_limit(url) for url in request.urls]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # 处理结果
+    processed = []
+    for url, result in zip(request.urls, results):
+        if isinstance(result, Exception):
+            processed.append({
+                "url": url,
+                "success": False,
+                "error": str(result)
+            })
+        else:
+            processed.append(result)
+    
+    return {
+        "total": len(request.urls),
+        "successful": sum(1 for r in processed if r.get("success")),
+        "failed": sum(1 for r in processed if not r.get("success")),
+        "results": processed
+    }
+
+
+@router.get(
+    "/strategy/v4/extract-content/test",
+    summary="测试内容提取（GET方式，便于浏览器测试）"
+)
+async def extract_content_test(
+    url: str = Query(..., description="视频链接")
+):
+    """
+    测试用的GET接口，方便直接在浏览器测试
+    
+    示例：
+    /strategy/v4/extract-content/test?url=https://www.douyin.com/video/xxxxx
+    """
+    from app.services.smart_content_extractor import extract_content_for_remix
+    
+    result = await extract_content_for_remix(url)
+    
+    return result
+
+
+# ============== 完整流程：环节1 → 环节2 组合 ==============
+
+@router.post(
+    "/strategy/v4/competitor-full-pipeline",
+    summary="完整流程：获取竞品 + 提取内容（环节1+2组合）"
+)
+async def competitor_full_pipeline(
+    ip_id: str = Query(..., description="IP ID"),
+    limit: int = Query(5, ge=1, le=10, description="获取数量"),
+    extract_content: bool = Query(True, description="是否提取详细内容"),
+    db: Session = Depends(get_db)
+):
+    """
+    完整流程API：先获取竞品爆款，再提取详细内容
+    
+    一站式完成环节1+环节2
+    """
+    from app.services.competitor_sync_service import get_competitor_videos_by_four_dim
+    from app.services.smart_content_extractor import extract_content_for_remix
+    
+    # 环节1：获取竞品视频（带链接）
+    videos = get_competitor_videos_by_four_dim(
+        db_session=db,
+        ip_id=ip_id,
+        limit=limit,
+        use_content_matrix=True
+    )
+    
+    if not extract_content:
+        # 只返回链接，不提取内容
+        return {
+            "ip_id": ip_id,
+            "stage": "1_only",
+            "videos": videos
+        }
+    
+    # 环节2：提取每个视频的内容
+    results = []
+    for video in videos:
+        if video.get("url"):
+            content = await extract_content_for_remix(video["url"])
+            results.append({
+                "video_info": video,
+                "extracted_content": content
+            })
+    
+    return {
+        "ip_id": ip_id,
+        "stage": "1_and_2",
+        "total": len(results),
+        "videos": results
+    }
+
+
 @router.get(
     "/strategy/v4/multi-source-test",
     summary="测试多源热榜（调试用）"
@@ -451,4 +750,418 @@ async def get_builtin_topics_api(
         },
         "topics_count": len(topics),
         "topics": analysis,
+    }
+
+
+# ============== 环节3：标题改写 ==============
+
+class TitleRewriteRequest(BaseModel):
+    """标题改写请求"""
+    ip_id: str = Field(..., description="IP ID")
+    original_title: str = Field(..., description="原始爆款标题")
+    original_hook: str = Field(default="", description="原始hook（可选，为空则自动拆分）")
+    original_body: str = Field(default="", description="原始body（可选）")
+    tags: List[str] = Field(default_factory=list, description="标签列表")
+    content_type: str = Field(default="life", description="内容类型")
+    strategy: str = Field(default="structure_keep", description="改写策略: structure_keep/emotion_shift/angle_flip")
+
+
+class TitleRewriteResponse(BaseModel):
+    """标题改写响应"""
+    success: bool
+    error: str = ""
+    original: Dict[str, str] = {}
+    rewritten: Dict[str, str] = {}
+    strategy: str = ""
+    ip_id: str = ""
+    ip_name: str = ""
+    content_type: str = ""
+
+
+@router.post(
+    "/strategy/v3/title-rewrite",
+    response_model=TitleRewriteResponse,
+    summary="环节3：爆款标题 + IP → 改写标题"
+)
+async def rewrite_title_api(
+    request: TitleRewriteRequest
+):
+    """
+    环节3核心API：基于爆款标题和IP人设生成改写标题
+    
+    输入：
+    - ip_id: IP ID
+    - original_title: 原始爆款标题
+    - original_hook: 原始hook（可选）
+    - original_body: 原始body（可选）
+    - tags: 标签列表
+    - content_type: 内容类型
+    - strategy: 改写策略
+    
+    输出：
+    - 改写后的标题（保留爆款结构，IP化内容）
+    
+    示例：
+    ```json
+    {
+      "ip_id": "xiaomin",
+      "original_title": "90后宝妈靠副业月入过万，分享3个真实方法",
+      "original_hook": "90后宝妈靠副业月入过万",
+      "original_body": "分享3个真实方法",
+      "tags": ["宝妈副业", "赚钱技巧"],
+      "content_type": "money",
+      "strategy": "structure_keep"
+    }
+    ```
+    
+    返回：
+    ```json
+    {
+      "success": true,
+      "original": {
+        "title": "90后宝妈靠副业月入过万，分享3个真实方法",
+        "hook": "90后宝妈靠副业月入过万",
+        "body": "分享3个真实方法"
+      },
+      "rewritten": {
+        "title": "设计师靠AI副业月入3万，分享我的3个接单渠道",
+        "hook": "设计师靠AI副业月入3万",
+        "body": "分享我的3个接单渠道"
+      },
+      "strategy": "structure_keep",
+      "ip_id": "xiaomin",
+      "ip_name": "小敏设计师"
+    }
+    ```
+    """
+    from app.services.title_rewrite_service import rewrite_title
+    
+    # 如果没有提供hook/body，自动拆分
+    hook = request.original_hook
+    body = request.original_body
+    
+    if not hook and not body:
+        from app.services.smart_content_extractor import SmartContentExtractor
+        extractor = SmartContentExtractor()
+        hook, body = extractor._split_title_structure(request.original_title)
+    
+    result = await rewrite_title(
+        ip_id=request.ip_id,
+        original_title=request.original_title,
+        original_hook=hook,
+        original_body=body,
+        tags=request.tags,
+        content_type=request.content_type,
+        strategy=request.strategy
+    )
+    
+    return TitleRewriteResponse(
+        success=result["success"],
+        error=result.get("error", ""),
+        original=result.get("original", {}),
+        rewritten=result.get("rewritten", {}),
+        strategy=result.get("strategy", ""),
+        ip_id=result.get("ip_id", ""),
+        ip_name=result.get("ip_name", ""),
+        content_type=result.get("content_type", "")
+    )
+
+
+class BatchRewriteRequest(BaseModel):
+    """批量改写请求"""
+    titles: List[Dict[str, Any]] = Field(..., description="标题列表")
+
+
+@router.post(
+    "/strategy/v3/title-rewrite/batch",
+    summary="环节3：批量改写标题"
+)
+async def batch_rewrite_titles_api(
+    request: BatchRewriteRequest,
+    ip_id: str = Query(..., description="IP ID"),
+    strategy: str = Query("structure_keep", description="改写策略")
+):
+    """
+    批量改写多个标题
+    
+    适合从环节2获取多个爆款标题后批量改写
+    """
+    from app.services.title_rewrite_service import rewrite_title
+    
+    results = []
+    
+    for item in request.titles:
+        result = await rewrite_title(
+            ip_id=ip_id,
+            original_title=item.get("title", ""),
+            original_hook=item.get("hook", ""),
+            original_body=item.get("body", ""),
+            tags=item.get("tags", []),
+            content_type=item.get("content_type", "life"),
+            strategy=strategy
+        )
+        results.append(result)
+    
+    return {
+        "ip_id": ip_id,
+        "strategy": strategy,
+        "total": len(results),
+        "success_count": sum(1 for r in results if r["success"]),
+        "results": results
+    }
+
+
+@router.post(
+    "/strategy/v3/full-pipeline",
+    summary="完整流程：URL → 提取 → 改写（环节2+3组合）"
+)
+async def full_pipeline_api(
+    ip_id: str = Query(..., description="IP ID"),
+    url: str = Query(..., description="视频链接"),
+    rewrite_strategy: str = Query("structure_keep", description="改写策略")
+):
+    """
+    完整流程API：一站式完成环节2（提取）+ 环节3（改写）
+    
+    输入视频链接，直接返回改写后的标题
+    """
+    from app.services.smart_content_extractor import extract_content_for_remix
+    from app.services.title_rewrite_service import rewrite_title
+    
+    # 环节2：提取内容
+    extracted = await extract_content_for_remix(url)
+    
+    if not extracted.get("success"):
+        return {
+            "success": False,
+            "error": extracted.get("error", "提取失败"),
+            "stage": "extraction_failed"
+        }
+    
+    # 环节3：改写标题
+    rewrite_result = await rewrite_title(
+        ip_id=ip_id,
+        original_title=extracted.get("original_title", ""),
+        original_hook=extracted.get("hook", ""),
+        original_body=extracted.get("body", ""),
+        tags=extracted.get("tags", []),
+        content_type=extracted.get("content_type", "life"),
+        strategy=rewrite_strategy
+    )
+    
+    return {
+        "success": True,
+        "stage": "extraction_and_rewrite",
+        "ip_id": ip_id,
+        "source_url": url,
+        "extracted": {
+            "title": extracted.get("original_title"),
+            "hook": extracted.get("hook"),
+            "body": extracted.get("body"),
+            "tags": extracted.get("tags"),
+            "content_type": extracted.get("content_type"),
+            "stats": extracted.get("stats")
+        },
+        "rewritten": rewrite_result.get("rewritten", {}),
+        "strategy": rewrite_strategy
+    }
+
+
+# ============== 环节4：内容生成 ==============
+
+class ContentGenerationRequest(BaseModel):
+    """内容生成请求"""
+    ip_id: str = Field(..., description="IP ID")
+    title: str = Field(..., description="改写后的标题")
+    hook: str = Field(default="", description="hook部分")
+    body: str = Field(default="", description="body部分")
+    content_type: str = Field(default="life", description="内容类型")
+    target_duration: int = Field(default=60, description="目标时长（秒）")
+    use_rag: bool = Field(default=True, description="是否使用向量检索素材")
+
+
+class ContentGenerationResponse(BaseModel):
+    """内容生成响应"""
+    success: bool
+    error: str = ""
+    ip_id: str = ""
+    ip_name: str = ""
+    title: str = ""
+    script: str = ""  # 完整口播稿
+    sections: Dict[str, str] = {}  # 分段内容
+    reference_assets: List[Dict] = []
+    word_count: int = 0
+    estimated_duration: int = 0
+
+
+@router.post(
+    "/strategy/v4/content-generate",
+    response_model=ContentGenerationResponse,
+    summary="环节4：改写标题 + IP素材 → 内容生成"
+)
+async def generate_content_api(
+    request: ContentGenerationRequest
+):
+    """
+    环节4核心API：基于改写后的标题和IP素材生成视频口播稿
+    
+    输入：
+    - ip_id: IP ID
+    - title: 改写后的完整标题
+    - hook: hook部分
+    - body: body部分
+    - content_type: 内容类型
+    - target_duration: 目标时长（秒）
+    - use_rag: 是否使用向量检索素材
+    
+    输出：
+    - 完整口播稿（黄金3秒+正文+结尾）
+    - 使用的参考素材
+    - 字数和预估时长
+    
+    示例：
+    ```json
+    {
+      "ip_id": "xiaomin",
+      "title": "UI设计师靠AI接私单月入3万，分享我的3个获客渠道",
+      "hook": "UI设计师靠AI接私单月入3万",
+      "body": "分享我的3个获客渠道",
+      "content_type": "money",
+      "target_duration": 60
+    }
+    ```
+    
+    返回：
+    ```json
+    {
+      "success": true,
+      "ip_id": "xiaomin",
+      "ip_name": "小敏",
+      "title": "UI设计师靠AI接私单月入3万，分享我的3个获客渠道",
+      "script": "（完整口播稿内容）",
+      "sections": {
+        "hook": "黄金3秒内容",
+        "body": "正文内容",
+        "cta": "结尾引导"
+      },
+      "reference_assets": [
+        {"title": "素材1", "type": "article"}
+      ],
+      "word_count": 240,
+      "estimated_duration": 60
+    }
+    ```
+    """
+    from app.services.content_generation_service import generate_content
+    
+    result = await generate_content(
+        ip_id=request.ip_id,
+        title=request.title,
+        hook=request.hook,
+        body=request.body,
+        content_type=request.content_type,
+        target_duration=request.target_duration,
+        use_rag=request.use_rag
+    )
+    
+    return ContentGenerationResponse(
+        success=result["success"],
+        error=result.get("error", ""),
+        ip_id=result.get("ip_id", ""),
+        ip_name=result.get("ip_name", ""),
+        title=result.get("title", ""),
+        script=result.get("script", ""),
+        sections=result.get("sections", {}),
+        reference_assets=result.get("reference_assets", []),
+        word_count=result.get("word_count", 0),
+        estimated_duration=result.get("estimated_duration", 0)
+    )
+
+
+@router.post(
+    "/strategy/v4/complete-pipeline",
+    summary="完整流程：URL → 提取 → 改写 → 生成（环节2+3+4组合）"
+)
+async def complete_pipeline_api(
+    ip_id: str = Query(..., description="IP ID"),
+    url: str = Query(..., description="视频链接"),
+    rewrite_strategy: str = Query("structure_keep", description="改写策略"),
+    target_duration: int = Query(60, description="目标视频时长（秒）")
+):
+    """
+    完整流程API：一站式完成环节2（提取）+ 环节3（改写）+ 环节4（生成）
+    
+    输入视频链接，直接返回完整的视频口播稿
+    """
+    from app.services.smart_content_extractor import extract_content_for_remix
+    from app.services.title_rewrite_service import rewrite_title
+    from app.services.content_generation_service import generate_content
+    
+    # 环节2：提取内容
+    extracted = await extract_content_for_remix(url)
+    
+    if not extracted.get("success"):
+        return {
+            "success": False,
+            "error": extracted.get("error", "提取失败"),
+            "stage": "extraction_failed"
+        }
+    
+    # 环节3：改写标题
+    rewrite_result = await rewrite_title(
+        ip_id=ip_id,
+        original_title=extracted.get("original_title", ""),
+        original_hook=extracted.get("hook", ""),
+        original_body=extracted.get("body", ""),
+        tags=extracted.get("tags", []),
+        content_type=extracted.get("content_type", "life"),
+        strategy=rewrite_strategy
+    )
+    
+    if not rewrite_result.get("success"):
+        return {
+            "success": False,
+            "error": rewrite_result.get("error", "改写失败"),
+            "stage": "rewrite_failed",
+            "extracted": extracted
+        }
+    
+    # 环节4：生成内容
+    rewritten = rewrite_result.get("rewritten", {})
+    generated = await generate_content(
+        ip_id=ip_id,
+        title=rewritten.get("title", ""),
+        hook=rewritten.get("hook", ""),
+        body=rewritten.get("body", ""),
+        content_type=extracted.get("content_type", "life"),
+        target_duration=target_duration
+    )
+    
+    return {
+        "success": True,
+        "stage": "complete",
+        "ip_id": ip_id,
+        "source_url": url,
+        "pipeline": {
+            "stage2_extraction": {
+                "title": extracted.get("original_title"),
+                "hook": extracted.get("hook"),
+                "body": extracted.get("body"),
+                "tags": extracted.get("tags"),
+                "content_type": extracted.get("content_type")
+            },
+            "stage3_rewrite": {
+                "original": rewrite_result.get("original"),
+                "rewritten": rewritten,
+                "strategy": rewrite_result.get("strategy"),
+                "analysis": rewrite_result.get("analysis")
+            },
+            "stage4_generation": {
+                "script": generated.get("script"),
+                "sections": generated.get("sections"),
+                "word_count": generated.get("word_count"),
+                "estimated_duration": generated.get("estimated_duration"),
+                "reference_assets": generated.get("reference_assets")
+            }
+        }
     }

@@ -136,45 +136,40 @@ export function getFullApiUrl(path: string): string {
 }
 
 /**
+ * `/api/auth/*` 不在 Next 站内，相对路径会打到 Netlify 域名导致 404。
+ * 当 `getBrowserApiBaseUrl()` 为相对 `/api/v1` 时，回退到与直连相同的后端 origin。
+ */
+function resolveAuthBackendOrigin(): string {
+  const fallback = (
+    process.env.NEXT_PUBLIC_API_DIRECT_ORIGIN?.trim() || DEFAULT_PRODUCTION_API_ORIGIN
+  ).replace(/\/$/, '');
+
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+
+  const base = getBrowserApiBaseUrl();
+  if (base.startsWith('http')) {
+    return base.replace(/\/api\/v1\/?$/i, '').replace(/\/$/, '');
+  }
+  return fallback;
+}
+
+/**
  * 手机号验证码登录接口（与 axios /api/v1 的 base 解析规则一致）。
- * 直连 Railway 时必须走绝对 URL，否则 fetch('/api/auth/...') 会打到 Netlify/Next 而非后端。
  */
 export function getAuthSmsLoginUrl(): string {
-  if (typeof window === 'undefined') {
-    return '/api/auth/sms/login';
-  }
-  const base = getBrowserApiBaseUrl();
-  if (base.startsWith('http')) {
-    const origin = base.replace(/\/api\/v1\/?$/i, '').replace(/\/$/, '');
-    return `${origin}/api/auth/sms/login`;
-  }
-  return '/api/auth/sms/login';
+  return `${resolveAuthBackendOrigin()}/api/auth/sms/login`;
 }
 
-/** 邮箱 + 密码登录（与 `/api/v1` 直连规则一致） */
+/** 邮箱 + 密码登录 */
 export function getAuthEmailLoginUrl(): string {
-  if (typeof window === 'undefined') {
-    return '/api/auth/login';
-  }
-  const base = getBrowserApiBaseUrl();
-  if (base.startsWith('http')) {
-    const origin = base.replace(/\/api\/v1\/?$/i, '').replace(/\/$/, '');
-    return `${origin}/api/auth/login`;
-  }
-  return '/api/auth/login';
+  return `${resolveAuthBackendOrigin()}/api/auth/login`;
 }
 
-/** 发送登录验证码（与登录 URL 同源策略一致） */
+/** 发送登录验证码 */
 export function getAuthSmsSendCodeUrl(): string {
-  if (typeof window === 'undefined') {
-    return '/api/auth/sms/send-code';
-  }
-  const base = getBrowserApiBaseUrl();
-  if (base.startsWith('http')) {
-    const origin = base.replace(/\/api\/v1\/?$/i, '').replace(/\/$/, '');
-    return `${origin}/api/auth/sms/send-code`;
-  }
-  return '/api/auth/sms/send-code';
+  return `${resolveAuthBackendOrigin()}/api/auth/sms/send-code`;
 }
 
 /**

@@ -78,9 +78,12 @@ export function CreatorLayout({ children }: CreatorLayoutProps) {
             {!ipLoading && noIp && (
               <Link
                 href="/ip"
-                className="text-xs font-medium text-primary-400 hover:text-primary-300 whitespace-nowrap"
+                className="text-xs font-medium text-primary-400 hover:text-primary-300 truncate max-w-[200px] text-right"
+                title={
+                  '当前登录账号在「我的 IP」中暂无记录，界面会看不到「馒头女子」等名称。数据一般仍在数据库，多为 ip.owner_user_id 与当前用户不一致；邮箱登录与手机验证码可能是两个不同用户。请到 IP 管理排查，或在后端将 IP 归属绑定到当前用户（如 scripts/restore_ip_owner_by_phone.py）。'
+                }
               >
-                创建 IP
+                无 IP · 去管理
               </Link>
             )}
             {!ipLoading && !needsLogin && !noIp && ips.length === 1 && (

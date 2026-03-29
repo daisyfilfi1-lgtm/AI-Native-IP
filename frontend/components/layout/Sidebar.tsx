@@ -6,12 +6,6 @@ import { usePathname } from 'next/navigation';
 import { 
   LayoutDashboard, 
   Users, 
-  Brain, 
-  GitBranch, 
-  FileText, 
-  Shield, 
-  Video, 
-  BarChart3, 
   Settings,
   Cloud,
   Sparkles,
@@ -22,20 +16,6 @@ import {
 const navigation = [
   { name: '仪表盘', href: '/', icon: LayoutDashboard },
   { name: 'IP管理', href: '/ip', icon: Users },
-  { 
-    name: '7-Agent工作流', 
-    href: '/agents', 
-    icon: Sparkles,
-    children: [
-      { name: '记忆Agent', href: '/agents/memory', icon: Brain },
-      { name: '策略Agent', href: '/agents/strategy', icon: GitBranch },
-      { name: '重组Agent', href: '/agents/remix', icon: FileText },
-      { name: '生成Agent', href: '/agents/generation', icon: FileText },
-      { name: '合规Agent', href: '/agents/compliance', icon: Shield },
-      { name: '视觉Agent', href: '/agents/visual', icon: Video },
-      { name: '分析Agent', href: '/agents/analytics', icon: BarChart3 },
-    ]
-  },
   { 
     name: '配置中心', 
     href: '/config', 

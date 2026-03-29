@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -8,8 +9,12 @@ import { Badge } from '@/components/ui/Badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { creatorAPI, RemixAgentConfig, ScriptTemplate } from '@/lib/api/creator';
-import { useIP } from '@/contexts/IPContext';
+import {
+  creatorApi,
+  type RemixAgentConfig,
+  type ScriptTemplate,
+} from '@/lib/api/creator';
+import { useCreatorIp } from '@/contexts/CreatorIpContext';
 import { 
   Shuffle, 
   Link as LinkIcon, 
@@ -108,7 +113,7 @@ const DEFAULT_TEMPLATES: ScriptTemplate[] = [
 ];
 
 export default function RemixAgentPage() {
-  const { currentIP } = useIP();
+  const { ipId, loading: ipCtxLoading, needsLogin, noIp } = useCreatorIp();
   const [config, setConfig] = useState<RemixAgentConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -116,18 +121,18 @@ export default function RemixAgentPage() {
 
   // 加载配置
   const loadConfig = useCallback(async () => {
-    if (!currentIP?.ip_id) return;
-    
+    if (!ipId) return;
+
     try {
       setLoading(true);
-      const data = await creatorAPI.getRemixAgentConfig(currentIP.ip_id);
+      const data = await creatorApi.getRemixAgentConfig(ipId);
       setConfig(data);
     } catch (error) {
       console.error('Failed to load remix config:', error);
       toast.error('加载配置失败');
       // 使用默认配置兜底
       setConfig({
-        ip_id: currentIP.ip_id,
+        ip_id: ipId,
         templates: DEFAULT_TEMPLATES,
         deconstruct_rules: {
           script_template_recognition: { enabled: true, desc: '自动识别使用的四大模板类型' },
@@ -144,20 +149,26 @@ export default function RemixAgentPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentIP?.ip_id]);
+  }, [ipId]);
 
   useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
+    if (ipCtxLoading) return;
+    if (!ipId) {
+      setLoading(false);
+      setConfig(null);
+      return;
+    }
+    void loadConfig();
+  }, [ipCtxLoading, ipId, loadConfig]);
 
   // 保存配置
   const saveConfig = async () => {
-    if (!config || !currentIP?.ip_id) return;
-    
+    if (!config || !ipId) return;
+
     try {
       setSaving(true);
-      await creatorAPI.updateRemixAgentConfig({
-        ip_id: currentIP.ip_id,
+      await creatorApi.updateRemixAgentConfig({
+        ip_id: ipId,
         templates: config.templates,
         deconstruct_rules: config.deconstruct_rules,
         originality_thresholds: config.originality_thresholds,
@@ -174,11 +185,11 @@ export default function RemixAgentPage() {
 
   // 重置配置
   const resetConfig = async () => {
-    if (!currentIP?.ip_id) return;
-    
+    if (!ipId) return;
+
     try {
       setSaving(true);
-      const data = await creatorAPI.resetRemixAgentConfig(currentIP.ip_id);
+      const data = await creatorApi.resetRemixAgentConfig(ipId);
       setConfig(data);
       toast.success('配置已重置为默认');
     } catch (error) {
@@ -239,7 +250,7 @@ export default function RemixAgentPage() {
     });
   };
 
-  if (loading) {
+  if (ipCtxLoading || loading) {
     return (
       <MainLayout title="重组Agent - 配置">
         <div className="flex items-center justify-center h-64">
@@ -250,12 +261,32 @@ export default function RemixAgentPage() {
   }
 
   const templates = config?.templates || DEFAULT_TEMPLATES;
-  const deconstructRules = config?.deconstruct_rules || {};
+  const deconstructRules: RemixAgentConfig['deconstruct_rules'] =
+    config?.deconstruct_rules ??
+    ({} as RemixAgentConfig['deconstruct_rules']);
   const thresholds = config?.originality_thresholds || { text_repeat_rate: 25, structure_similarity: 40 };
   const advanced = config?.advanced_settings || { script_template_preference: 'auto', hybrid_strategy: 'best_of_breed', force_replace_rule: 'all' };
 
   return (
     <MainLayout title="重组Agent - 配置">
+      {needsLogin && (
+        <div className="mb-4 p-4 rounded-xl bg-background-tertiary border border-border text-sm text-foreground-secondary">
+          请先{' '}
+          <Link href="/login" className="text-primary-400 font-medium hover:underline">
+            登录
+          </Link>
+          后配置重组 Agent。
+        </div>
+      )}
+      {noIp && (
+        <div className="mb-4 p-4 rounded-xl bg-background-tertiary border border-border text-sm text-foreground-secondary">
+          暂无 IP。请前往{' '}
+          <Link href="/ip" className="text-primary-400 font-medium hover:underline">
+            IP 管理
+          </Link>{' '}
+          创建。
+        </div>
+      )}
       {/* Agent header */}
       <div className="mb-6 p-6 rounded-2xl bg-gradient-to-r from-pink-500/10 to-rose-600/10 border border-pink-500/20">
         <div className="flex items-center gap-4">
@@ -485,7 +516,9 @@ export default function RemixAgentPage() {
               <Select
                 label="脚本模板偏好"
                 value={advanced.script_template_preference}
-                onChange={(value) => updateAdvancedSetting('script_template_preference', value)}
+                onChange={(e) =>
+                  updateAdvancedSetting('script_template_preference', e.target.value)
+                }
                 options={[
                   { value: 'auto', label: '自动识别（推荐）' },
                   { value: 'opinion', label: '优先使用「说观点」' },
@@ -497,7 +530,7 @@ export default function RemixAgentPage() {
               <Select
                 label="杂交策略"
                 value={advanced.hybrid_strategy}
-                onChange={(value) => updateAdvancedSetting('hybrid_strategy', value)}
+                onChange={(e) => updateAdvancedSetting('hybrid_strategy', e.target.value)}
                 options={[
                   { value: 'best_of_breed', label: 'Best of Breed（每个节点取最优）' },
                   { value: 'single', label: '单一竞品深度解构' },
@@ -507,7 +540,7 @@ export default function RemixAgentPage() {
               <Select
                 label="强制替换规则"
                 value={advanced.force_replace_rule}
-                onChange={(value) => updateAdvancedSetting('force_replace_rule', value)}
+                onChange={(e) => updateAdvancedSetting('force_replace_rule', e.target.value)}
                 options={[
                   { value: 'all', label: '竞品案例100%替换' },
                   { value: 'partial', label: '部分替换' },

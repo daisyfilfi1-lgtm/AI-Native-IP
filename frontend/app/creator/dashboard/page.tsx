@@ -725,7 +725,7 @@ export default function CreatorDashboardPage() {
                             </p>
                             <p className="text-xs text-foreground-tertiary mt-1 line-clamp-2">{r.reason}</p>
                           </div>
-                          <Badge variant={r.is_my_competitor ? 'accent' : 'primary'} size="sm" className="shrink-0">
+                          <Badge variant={r.is_my_competitor ? 'info' : 'primary'} size="sm" className="shrink-0">
                             {r.platform === 'douyin' ? '抖音' : '小红书'}
                           </Badge>
                           <Button

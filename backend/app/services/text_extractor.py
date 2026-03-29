@@ -1174,14 +1174,9 @@ async def extract_text(url: str, prefer_method: Optional[str] = None) -> Extract
             ]
         )
     elif platform in ("douyin", "xiaohongshu"):
-        # 抖音/小红书：不依赖第三方 API。顺序：轻量 Web → yt-dlp → Playwright → Whisper(口播) → 可选 TikHub
-        strategies = [
-            ("web_scrape", lambda: extract_with_web_scrape(resolved_url, platform)),
-            ("ytdlp", lambda: extract_with_ytdlp(resolved_url)),
-        ]
-        if _playwright_enabled():
-            strategies.append(("playwright", lambda: extract_with_playwright(resolved_url, platform)))
-        # Whisper 语音识别 - 提取口播内容
+        # 抖音/小红书：直接用 Whisper 提取口播（目标），可选 TikHub 备选
+        # 跳过 Playwright 和 yt-dlp（只能提取标题/标签，非口播）
+        strategies = []
         if _whisper_enabled():
             strategies.append(("whisper", lambda: extract_with_whisper(resolved_url, platform)))
         if use_tikhub:

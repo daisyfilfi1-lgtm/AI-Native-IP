@@ -15,8 +15,6 @@ import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
-from urllib.parse import quote
-
 from app.services.datasource import get_datasource_manager_v2
 from app.services.datasource.base import TopicData
 from app.services.datasource.multi_source_hotlist import (
@@ -94,21 +92,6 @@ class TopicRecommendationServiceV4:
             "skill": 0.20,  # 20% 技术展示
             "life": 0.10,  # 10% 美好生活
         }
-
-    @staticmethod
-    def _fallback_topic_url(title: str, platform: str = "douyin") -> str:
-        """大数据源未给链接时，用原标题生成可打开的搜索页（与 TikHub billboard 逻辑一致）。"""
-        t = (title or "").strip()
-        if not t:
-            return ""
-        q = t[:80].replace(" ", "").replace("?", "").replace("？", "")
-        if not q:
-            return ""
-        safe_q = quote(q, safe="")
-        plat = (platform or "douyin").lower()
-        if plat == "xiaohongshu":
-            return f"https://www.xiaohongshu.com/search_result?keyword={safe_q}"
-        return f"https://www.douyin.com/search/{safe_q}"
 
     async def recommend_topics(
         self, 
@@ -352,11 +335,8 @@ class TopicRecommendationServiceV4:
         play_count = int(topic.extra.get("play_count") or 0)
         like_count = int(topic.extra.get("like_count") or 0)
         is_competitor = topic.extra.get("is_competitor_topic", False)
-        # 非竞品热点（抖音热榜等）也展示播放量与爆款分，便于与大数据对齐
-        resolved_url = (topic.url or "").strip() or self._fallback_topic_url(
-            topic.original_title or topic.title,
-            topic.platform,
-        )
+        # 仅使用数据源给出的真实链接；不用搜索页冒充「原链接」（内置库等无 URL 时留空）
+        resolved_url = (topic.url or "").strip()
 
         return RecommendedTopicV4(
             topic_id=topic.id,

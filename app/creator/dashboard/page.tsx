@@ -36,7 +36,8 @@ import {
   Wand2,
   Lightbulb,
   Pencil,
-  ExternalLink
+  ExternalLink,
+  Search
 } from 'lucide-react';
 import Link from 'next/link';
 import { useIpList } from '@/hooks/useIpList';
@@ -92,13 +93,25 @@ function AgentStatusCard({
   );
 }
 
-/** 无有效 URL 时用标题生成抖音搜索页，保证始终可点「看原文/溯源」 */
-function buildTopicSourceUrl(topic: TopicCard): string | null {
-  const direct = (topic.sourceUrl || '').trim();
-  if (direct.startsWith('http')) return direct;
-  const q = (topic.originalTitle || topic.title || '').trim();
+/** 仅允许 http(s) 作为「原链接」 */
+function safeExternalHref(url: string | undefined): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const t = url.trim();
+  if (!t.startsWith('http://') && !t.startsWith('https://')) return null;
+  try {
+    return new URL(t).href;
+  } catch {
+    return null;
+  }
+}
+
+/** 无单条原链时：抖音按标题搜索（与「查看原链接」区分） */
+function douyinSearchUrlFromTitle(title: string | undefined): string | null {
+  const t = (title || '').trim();
+  if (!t) return null;
+  const q = t.slice(0, 80).replace(/\s/g, '').replace(/[?？]/g, '');
   if (q.length < 2) return null;
-  return `https://www.douyin.com/search/${encodeURIComponent(q.slice(0, 80))}`;
+  return `https://www.douyin.com/search/${encodeURIComponent(q)}`;
 }
 
 // 选题卡片组件
@@ -114,7 +127,10 @@ function TopicCardComponent({
   isGenerating: boolean;
 }) {
   const scoreColor = topic.score >= 4.8 ? 'text-accent-green' : topic.score >= 4.5 ? 'text-accent-yellow' : 'text-foreground';
-  const sourceHref = buildTopicSourceUrl(topic);
+  const sourceHref = safeExternalHref(topic.sourceUrl);
+  const douyinSearchHref = !sourceHref
+    ? douyinSearchUrlFromTitle(topic.originalTitle || topic.title)
+    : null;
   const originalText = (topic.originalTitle || '').trim();
   const showOriginalBlock = Boolean(originalText);
 
@@ -159,7 +175,7 @@ function TopicCardComponent({
             </div>
           )}
           
-          {/* Source Link - 原链接（接口无 URL 时用标题兜底抖音搜索） */}
+          {/* 有真实溯源 URL → 原链接；否则 → 去抖音搜标题 */}
           {sourceHref && (
             <a 
               href={sourceHref}
@@ -169,8 +185,22 @@ function TopicCardComponent({
               onClick={(e) => e.stopPropagation()}
             >
               <LinkIcon className="w-3 h-3" />
-              {(topic.sourceUrl || '').trim() ? '查看原链接' : '抖音搜索原文'}
+              查看原链接
               <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+          {douyinSearchHref && (
+            <a 
+              href={douyinSearchHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 mb-3 text-xs text-foreground-secondary hover:text-primary-400 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+              title="在抖音按标题搜索，非单条作品溯源"
+            >
+              <Search className="w-3 h-3 shrink-0" />
+              去抖音搜标题
+              <ExternalLink className="w-3 h-3 shrink-0" />
             </a>
           )}
 

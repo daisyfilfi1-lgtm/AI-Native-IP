@@ -69,6 +69,7 @@ class CompetitorAccount(Base):
     ip_id = Column(String(64), ForeignKey("ip.ip_id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     platform = Column(String(64), nullable=False, default="")
+    external_id = Column(String(255), nullable=True)  # 抖音 sec_uid / 小红书 user id 等
     followers_display = Column(String(64), nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=now_utc)

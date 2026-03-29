@@ -1,5 +1,6 @@
 """
-仿写推荐：优先显示已抓取的竞品视频（competitor_videos）+ 抖音低粉爆款榜（TikHub）
+仿写推荐：优先显示竞品爆款视频直链（competitor_videos 或 TikHub 按 sec_uid 拉取）
+  + 抖音低粉爆款榜（TikHub）+ 小红书话题笔记。
 strategy_config.remix 可配置：
   search_keywords: 额外关键词列表
   xhs_topic_page_ids: 小红书话题 page_id 列表
@@ -12,12 +13,12 @@ import logging
 import os
 import re
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 
 from app.db.models import IP
 from app.services import tikhub_client
+from app.services.competitor_client import get_competitor_client
 
 logger = logging.getLogger(__name__)
 
@@ -135,24 +136,99 @@ def _xhs_topic_page_ids_for_remix(ip: Optional[IP]) -> List[str]:
     return _xhs_topic_page_ids_for_ip(ip)
 
 
+_URL_IN_TEXT_RE = re.compile(r"https?://[^\s\)\]\"'<>]+", re.IGNORECASE)
+
+
+def _extract_http_urls(text: Optional[str]) -> List[str]:
+    if not text or not isinstance(text, str):
+        return []
+    out: List[str] = []
+    for m in _URL_IN_TEXT_RE.finditer(text.strip()):
+        u = m.group(0).rstrip(".,;，。；、")
+        if u and u not in out:
+            out.append(u)
+    return out
+
+
+def _platform_lower(p: Optional[str]) -> str:
+    return (p or "").strip().lower()
+
+
+def _is_video_content_url(url: str) -> bool:
+    """仅接受可仿写的单条视频/笔记链接，排除主页、用户页。"""
+    u = (url or "").strip().lower()
+    if not u.startswith("http"):
+        return False
+    if "douyin.com/user" in u:
+        return False
+    if "xiaohongshu.com/user/" in u:
+        return False
+    if "douyin.com/video/" in u or "v.douyin.com" in u:
+        return True
+    if "xiaohongshu.com/explore/" in u:
+        return True
+    if "xhslink.com" in u:
+        return True
+    if "xiaohongshu.com/discovery/item" in u:
+        return True
+    if "channels.weixin.qq.com" in u and "/video/" in u:
+        return True
+    return False
+
+
+async def _best_douyin_video_item_from_sec_uid(
+    sec_uid: str, competitor_name: str
+) -> Optional[Dict[str, Any]]:
+    """按 sec_uid 拉取近期作品，取点赞最高的一条作为爆款视频链接。"""
+    uid = (sec_uid or "").strip()
+    if not uid:
+        return None
+    client = get_competitor_client()
+    if not (client.api_key or "").strip():
+        return None
+    try:
+        videos = await client.fetch_user_videos(uid, count=20)
+    except Exception as e:
+        logger.warning("按 sec_uid 拉取竞品视频失败: %s", e)
+        return None
+    if not videos:
+        return None
+    best = max(videos, key=lambda x: int(x.get("digg_count") or 0))
+    url = (best.get("sourceUrl") or "").strip()
+    if not url or not _is_video_content_url(url):
+        return None
+    title = (best.get("title") or best.get("originalTitle") or "视频")[:200]
+    digg = int(best.get("digg_count") or 0)
+    like_str = f"{digg / 10000:.1f}万" if digg > 10000 else str(digg)
+    return {
+        "url": url,
+        "title": title,
+        "platform": "douyin",
+        "reason": f"我的竞品：{competitor_name} · {like_str}赞",
+        "is_my_competitor": True,
+        "competitor_name": competitor_name,
+        "like_count": digg,
+    }
+
+
 async def build_remix_recommendations(
     db: Session,
     ip_id: str,
     limit: int = 12,
 ) -> List[Dict[str, Any]]:
-    from app.db.models import CompetitorAccount
     from sqlalchemy import text
     
     ip = db.query(IP).filter(IP.ip_id == ip_id).first()
     kws = remix_keywords_for_ip(ip)
     items: List[Dict[str, Any]] = []
     seen_urls: set = set()
+    competitors_with_video: set = set()
     
     # 首先获取已抓取的竞品视频（按点赞数排序，优先显示爆款）
     try:
         # 直接查询 competitor_videos 表
         result = db.execute(text("""
-            SELECT v.video_id, v.title, v.author, v.platform, v.like_count, v.play_count, c.name as competitor_name
+            SELECT v.competitor_id, v.video_id, v.title, v.author, v.platform, v.like_count, v.play_count, c.name as competitor_name
             FROM competitor_videos v
             JOIN competitor_accounts c ON v.competitor_id = c.competitor_id
             WHERE c.ip_id = :ip_id
@@ -162,6 +238,7 @@ async def build_remix_recommendations(
         
         videos = result.fetchall()
         for video in videos:
+            competitors_with_video.add(video.competitor_id)
             platform = video.platform or "douyin"
             video_id = video.video_id
             
@@ -196,6 +273,57 @@ async def build_remix_recommendations(
                 
     except Exception as e:
         logger.warning("已抓取竞品视频加载失败: %s", e)
+
+    # 库中无该账号视频时：优先备注里的单条视频链接，否则用抖音 sec_uid 实时拉取点赞最高的一条（不要主页链接）
+    if len(items) < limit:
+        try:
+            acc_rows = db.execute(
+                text("""
+                    SELECT competitor_id, name, platform, external_id, notes
+                    FROM competitor_accounts
+                    WHERE ip_id = :ip_id
+                    ORDER BY updated_at DESC NULLS LAST, created_at DESC
+                """),
+                {"ip_id": ip_id},
+            ).fetchall()
+            for row in acc_rows:
+                if len(items) >= limit:
+                    break
+                cid = row.competitor_id
+                if cid in competitors_with_video:
+                    continue
+                name = row.name or "竞品"
+                plat = row.platform or "douyin"
+                notes = row.notes or ""
+                pl = _platform_lower(plat)
+
+                picked: Optional[Dict[str, Any]] = None
+                for u in _extract_http_urls(notes):
+                    if _is_video_content_url(u):
+                        host = u.lower()
+                        item_plat = (
+                            "xiaohongshu"
+                            if ("xiaohongshu.com" in host or "xhslink.com" in host)
+                            else "douyin"
+                        )
+                        picked = {
+                            "url": u,
+                            "title": f"{name} · 备注中的爆款视频",
+                            "platform": item_plat,
+                            "reason": f"我的竞品监控账号（备注中的视频链接）",
+                            "is_my_competitor": True,
+                            "competitor_name": name,
+                        }
+                        break
+                if picked is None and pl in ("douyin", "dy", "抖音") and (row.external_id or "").strip():
+                    picked = await _best_douyin_video_item_from_sec_uid(row.external_id, name)
+
+                if picked and (picked.get("url") or "").strip() not in seen_urls:
+                    u = picked["url"].strip()
+                    seen_urls.add(u)
+                    items.append(picked)
+        except Exception as e:
+            logger.warning("竞品账号视频链接补充失败: %s", e)
 
     if tikhub_client.is_configured():
         try:

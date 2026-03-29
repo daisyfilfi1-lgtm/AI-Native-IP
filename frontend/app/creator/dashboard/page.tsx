@@ -28,15 +28,14 @@ import {
   RefreshCw,
   AlertCircle,
   CheckCircle2,
-  Settings,
-  ChevronRight,
   Flame,
   Upload,
   FileText as Keyboard,
   Wand2,
   Lightbulb,
   Pencil,
-  ExternalLink
+  ExternalLink,
+  Search
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -103,6 +102,15 @@ function safeExternalHref(url: string | undefined): string | null {
   }
 }
 
+/** 无单条原链时：用原标题/标题在抖音搜索（非「原链接」） */
+function douyinSearchUrlFromTitle(title: string | undefined): string | null {
+  const t = (title || '').trim();
+  if (!t) return null;
+  const q = t.slice(0, 80).replace(/\s/g, '').replace(/[?？]/g, '');
+  if (q.length < 2) return null;
+  return `https://www.douyin.com/search/${encodeURIComponent(q)}`;
+}
+
 // 选题卡片组件
 function TopicCardComponent({ 
   topic, 
@@ -116,6 +124,9 @@ function TopicCardComponent({
   isGenerating: boolean;
 }) {
   const sourceHref = safeExternalHref(topic.sourceUrl);
+  const douyinSearchHref = !sourceHref
+    ? douyinSearchUrlFromTitle(topic.originalTitle || topic.title)
+    : null;
   const scoreColor = topic.score >= 4.8 ? 'text-accent-green' : topic.score >= 4.5 ? 'text-accent-yellow' : 'text-foreground';
 
   return (
@@ -156,7 +167,7 @@ function TopicCardComponent({
             </div>
           )}
           
-          {/* Source Link - 原链接（后端未返回合法绝对 URL 时不展示，避免无效点击） */}
+          {/* 有真实溯源 URL → 原链接；否则 → 抖音按标题搜索（文案区分） */}
           {sourceHref && (
             <a 
               href={sourceHref}
@@ -168,6 +179,20 @@ function TopicCardComponent({
               <LinkIcon className="w-3 h-3" />
               查看原链接
               <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+          {douyinSearchHref && (
+            <a 
+              href={douyinSearchHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 mb-3 text-xs text-foreground-secondary hover:text-primary-400 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+              title="在抖音按标题搜索，非单条作品溯源"
+            >
+              <Search className="w-3 h-3 shrink-0" />
+              去抖音搜标题
+              <ExternalLink className="w-3 h-3 shrink-0" />
             </a>
           )}
 
@@ -551,37 +576,6 @@ export default function CreatorDashboardPage() {
         </p>
       </div>
 
-      {/* Agent状态监控 */}
-      <Card className="mb-6">
-        <div className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Settings className="w-4 h-4 text-foreground-secondary" />
-              <span className="text-sm font-medium text-foreground">
-                Agent系统
-                {allReady ? (
-                  <span className="ml-2 text-xs text-accent-green">已就绪</span>
-                ) : (
-                  <span className="ml-2 text-xs text-accent-yellow">部分待配置</span>
-                )}
-              </span>
-            </div>
-            <Link href="/agents" className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1">
-              前往后台配置 <ChevronRight className="w-3 h-3" />
-            </Link>
-          </div>
-
-          {!allReady && (
-            <div className="mt-3 p-3 bg-accent-yellow/10 border border-accent-yellow/20 rounded-lg flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-accent-yellow flex-shrink-0" />
-              <p className="text-xs text-accent-yellow">
-                部分Agent未配置完成，可能影响生成质量。建议先完成配置再创作。
-              </p>
-            </div>
-          )}
-        </div>
-      </Card>
-
       {/* 创作方式切换 */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-3 mb-6">
@@ -724,6 +718,18 @@ export default function CreatorDashboardPage() {
                               {r.title}
                             </p>
                             <p className="text-xs text-foreground-tertiary mt-1 line-clamp-2">{r.reason}</p>
+                            {r.url ? (
+                              <a
+                                href={r.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="mt-1.5 inline-flex items-center gap-1 max-w-full text-xs text-primary-500 hover:text-primary-400 hover:underline"
+                                title={r.url}
+                              >
+                                <ExternalLink className="w-3 h-3 shrink-0 opacity-80" aria-hidden />
+                                <span className="truncate">{r.url}</span>
+                              </a>
+                            ) : null}
                           </div>
                           <Badge variant={r.is_my_competitor ? 'info' : 'primary'} size="sm" className="shrink-0">
                             {r.platform === 'douyin' ? '抖音' : '小红书'}

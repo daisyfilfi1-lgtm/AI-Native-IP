@@ -16,7 +16,6 @@ import {
 
 const navigation = [
   { name: '今日工作台', href: '/creator/dashboard', icon: LayoutDashboard },
-  { name: '魔法生成', href: '/creator/generate', icon: Sparkles },
   { name: '我的内容库', href: '/creator/library', icon: Library },
   { name: '我的数据', href: '/creator/analytics', icon: BarChart3 },
 ];

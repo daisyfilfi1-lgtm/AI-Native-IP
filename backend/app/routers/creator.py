@@ -13,7 +13,6 @@ import re
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -1912,16 +1911,6 @@ def _format_play_count_label(play_count: int) -> str:
     return str(pc)
 
 
-def _v4_topic_douyin_search_url(title: str) -> str:
-    t = (title or "").strip()
-    if not t:
-        return ""
-    q = t[:80].replace(" ", "").replace("?", "").replace("？", "")
-    if not q:
-        return ""
-    return f"https://www.douyin.com/search/{quote(q, safe='')}"
-
-
 def _filter_topics_for_ip_alignment(
     ip_id: str,
     topics: List[Dict[str, Any]],
@@ -1970,10 +1959,6 @@ async def _async_build_recommended_topic_list(
             topics: List[Dict[str, Any]] = []
             for topic in v4_topics:
                 nu = _normalize_topic_source_url(topic.url or "")
-                if not nu:
-                    nu = _normalize_topic_source_url(
-                        _v4_topic_douyin_search_url(topic.original_title or topic.title)
-                    )
                 est_views = topic.original_plays or _format_play_count_label(
                     int(topic.competitor_play_count or 0)
                 )

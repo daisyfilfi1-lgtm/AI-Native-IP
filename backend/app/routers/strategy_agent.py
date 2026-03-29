@@ -99,6 +99,7 @@ class CompetitorCreate(BaseModel):
     ip_id: str
     name: str = Field(..., min_length=1, max_length=255)
     platform: str = Field("", max_length=64)
+    external_id: Optional[str] = Field(None, max_length=255, description="抖音 sec_uid / 小红书 user id 等")
     followers_display: Optional[str] = Field(None, max_length=64)
     notes: Optional[str] = None
 
@@ -107,6 +108,7 @@ class CompetitorPatch(BaseModel):
     ip_id: str
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     platform: Optional[str] = Field(None, max_length=64)
+    external_id: Optional[str] = Field(None, max_length=255)
     followers_display: Optional[str] = Field(None, max_length=64)
     notes: Optional[str] = None
 
@@ -116,6 +118,7 @@ class CompetitorOut(BaseModel):
     ip_id: str
     name: str
     platform: str
+    external_id: Optional[str] = None
     followers_display: Optional[str] = None
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -157,6 +160,7 @@ def list_competitors(
                 ip_id=r.ip_id,
                 name=r.name,
                 platform=r.platform or "",
+                external_id=r.external_id,
                 followers_display=r.followers_display,
                 notes=r.notes,
                 created_at=r.created_at,
@@ -176,11 +180,13 @@ def create_competitor(
         raise HTTPException(status_code=404, detail=f"IP不存在: {payload.ip_id}")
     cid = uuid.uuid4().hex[:16]
     now = datetime.utcnow()
+    ext = (payload.external_id or "").strip() or None
     row = CompetitorAccount(
         competitor_id=cid,
         ip_id=payload.ip_id,
         name=payload.name.strip(),
         platform=(payload.platform or "").strip(),
+        external_id=ext,
         followers_display=(payload.followers_display or "").strip() or None,
         notes=payload.notes,
         created_at=now,
@@ -194,6 +200,7 @@ def create_competitor(
         ip_id=row.ip_id,
         name=row.name,
         platform=row.platform or "",
+        external_id=row.external_id,
         followers_display=row.followers_display,
         notes=row.notes,
         created_at=row.created_at,
@@ -212,6 +219,9 @@ def patch_competitor(
         row.name = payload.name.strip()
     if payload.platform is not None:
         row.platform = payload.platform.strip()
+    if payload.external_id is not None:
+        v = payload.external_id.strip()
+        row.external_id = v or None
     if payload.followers_display is not None:
         v = payload.followers_display.strip()
         row.followers_display = v or None
@@ -226,6 +236,7 @@ def patch_competitor(
         ip_id=row.ip_id,
         name=row.name,
         platform=row.platform or "",
+        external_id=row.external_id,
         followers_display=row.followers_display,
         notes=row.notes,
         created_at=row.created_at,

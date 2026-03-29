@@ -3,7 +3,7 @@ FROM python:3.11-slim
 
 # 与 backend/Dockerfile 一致：Playwright --with-deps 需要 apt 与证书
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl \
+    ca-certificates curl ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

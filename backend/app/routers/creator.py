@@ -4,6 +4,7 @@ Creator API Router
 """
 
 from datetime import datetime, timezone
+import asyncio
 import json
 import logging
 import math
@@ -1190,11 +1191,13 @@ async def _run_remix_task(task_id: str, url: str, style: str, ip_id: str):
         _remix_tasks[task_id]["progress"] = 40
         _remix_tasks[task_id]["stage"] = "remixing"
         
-        # 执行增强洗稿
-        result = create_enhanced_remix(
-            ip_id=ip_id,
-            ip_profile=ip_profile,
-            competitor_content=competitor_text,
+        # 执行增强洗稿（同步管线含 LLM 调用；必须放到线程池，否则会阻塞事件循环，
+        # 导致 /generate/remix/{id}/status 轮询无法响应 → 网关 504）
+        result = await asyncio.to_thread(
+            create_enhanced_remix,
+            ip_id,
+            ip_profile,
+            competitor_text,
             competitor_url=url,
             topic=competitor_text[:200],
         )
@@ -1295,7 +1298,6 @@ async def generate_from_remix(req: RemixGenerateRequest):
     }
     
     # 启动后台任务
-    import asyncio
     asyncio.create_task(_run_remix_task(task_id, url, req.style, req.ipId or "1"))
     
     logger.info(f"[Task {task_id}] 任务已提交")

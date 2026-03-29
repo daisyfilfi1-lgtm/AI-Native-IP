@@ -10,6 +10,9 @@ export interface RemixRecommendationItem {
   title: string;
   platform: 'douyin' | 'xiaohongshu';
   reason: string;
+  is_my_competitor?: boolean;
+  competitor_name?: string;
+  like_count?: number;
 }
 
 // ===== 选题卡片 =====

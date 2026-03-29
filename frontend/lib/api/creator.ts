@@ -375,40 +375,51 @@ export const creatorApi = {
     });
   },
 
-  // ===== 场景二：仿写爆款 =====
-  async generateFromRemix(url: string, style: StyleType, ipId: string = 'xiaomin1'): Promise<GenerateResult> {
-    console.log('[API] Generate from remix:', { url, style, ipId });
+  // ===== 场景二：仿写爆款（异步任务模式）=====
+  async submitRemixTask(url: string, style: StyleType, ipId: string = 'xiaomin1'): Promise<{ task_id: string; status: string; error?: string }> {
+    console.log('[API] Submit remix task:', { url, style, ipId });
     
     if (USE_MOCK) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      return {
-        id: 'gen_remix_001',
-        status: 'completed',
-        progress: 100,
-        estimatedTime: 0
-      };
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return { task_id: 'mock_remix_task_001', status: 'pending' };
     }
     
-    const result = await apiFetch<GenerateResult>('/api/v1/creator/generate/remix', {
+    const result = await apiFetch<{ task_id: string; status: string; error?: string }>('/api/v1/creator/generate/remix', {
       method: 'POST',
       body: JSON.stringify({ url, style, ipId }),
     });
     
-    // 检查后端返回的状态
     if (result.status === 'failed') {
-      // 优先使用后端返回的具体错误信息
-      const errorMsg = result.error?.trim() || '仿写生成失败，请稍后重试或检查链接是否有效';
-      console.error('[API] Remix failed:', errorMsg, result);
-      throw new Error(errorMsg);
-    }
-    
-    // 额外检查：如果状态不是 completed 也不是 failed，视为异常
-    if (result.status !== 'completed' && result.status !== 'processing') {
-      console.error('[API] Remix returned unexpected status:', result.status);
-      throw new Error('仿写请求返回异常状态，请重试');
+      throw new Error(result.error || '提交仿写任务失败');
     }
     
     return result;
+  },
+
+  async getRemixTaskStatus(taskId: string): Promise<{ task_id: string; status: string; progress: number; stage: string; error?: string; draft_id?: string }> {
+    if (USE_MOCK) {
+      return { 
+        task_id: taskId, 
+        status: 'completed', 
+        progress: 100, 
+        stage: 'completed',
+        draft_id: 'gen_remix_mock_001'
+      };
+    }
+    return apiFetch(`/api/v1/creator/generate/remix/${encodeURIComponent(taskId)}/status`);
+  },
+
+  async getRemixTaskResult(taskId: string): Promise<GenerateResult & { task_id: string }> {
+    if (USE_MOCK) {
+      return {
+        task_id: taskId,
+        id: 'gen_remix_mock_001',
+        status: 'completed',
+        progress: 100,
+        estimatedTime: 0,
+      };
+    }
+    return apiFetch(`/api/v1/creator/generate/remix/${encodeURIComponent(taskId)}/result`);
   },
 
   // ===== 场景三：爆款原创（支持文本/语音输入）=====
@@ -613,7 +624,87 @@ export const creatorApi = {
   }> {
     return apiFetch(`/api/v1/creator/feedback/stats?ipId=${encodeURIComponent(ipId)}`);
   },
+
+  // ===== Remix Agent 配置 =====
+  async getRemixAgentConfig(ipId: string): Promise<RemixAgentConfig> {
+    return apiFetch(`/api/v1/agent/remix/config?ip_id=${encodeURIComponent(ipId)}`);
+  },
+
+  async updateRemixAgentConfig(config: RemixAgentConfigUpdate): Promise<RemixAgentConfig> {
+    return apiFetch('/api/v1/agent/remix/config', {
+      method: 'PUT',
+      body: JSON.stringify(config)
+    });
+  },
+
+  async resetRemixAgentConfig(ipId: string): Promise<RemixAgentConfig> {
+    return apiFetch(`/api/v1/agent/remix/config/reset?ip_id=${encodeURIComponent(ipId)}`, {
+      method: 'POST'
+    });
+  },
 };
+
+// ===== Remix Agent 配置类型 =====
+export interface RemixAgentConfig {
+  ip_id: string;
+  templates: ScriptTemplate[];
+  deconstruct_rules: DeconstructRules;
+  originality_thresholds: OriginalityThresholds;
+  advanced_settings: AdvancedSettings;
+  version: number;
+  updated_at: string;
+}
+
+export interface ScriptTemplate {
+  id: string;
+  name: string;
+  emoji: string;
+  desc: string;
+  enabled: boolean;
+  structure: Array<{
+    part: string;
+    duration: string;
+    desc: string;
+    example: string;
+  }>;
+  keywords?: string[];
+  bestFor: string;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  contentTypes?: string[];
+  hookTechniques?: string[];
+  topicMethods?: string[];
+  prototypes?: string[];
+  emotionCurve?: string;
+}
+
+export interface DeconstructRules {
+  script_template_recognition: { enabled: boolean; desc: string };
+  hook_pattern: { enabled: boolean; desc: string };
+  emotion_curve: { enabled: boolean; desc: string };
+  argument_structure: { enabled: boolean; desc: string };
+  visual_elements: { enabled: boolean; desc: string };
+}
+
+export interface OriginalityThresholds {
+  text_repeat_rate: number;
+  structure_similarity: number;
+}
+
+export interface AdvancedSettings {
+  script_template_preference: 'auto' | 'opinion' | 'process' | 'knowledge' | 'story';
+  hybrid_strategy: 'best_of_breed' | 'single' | 'hybrid';
+  force_replace_rule: 'all' | 'partial' | 'none';
+}
+
+export interface RemixAgentConfigUpdate {
+  ip_id: string;
+  templates?: ScriptTemplate[];
+  deconstruct_rules?: DeconstructRules;
+  originality_thresholds?: OriginalityThresholds;
+  advanced_settings?: AdvancedSettings;
+}
 
 // ===== 重新导出类型 =====
 export type { TopicCard, GeneratedContent, LibraryItem, AnalyticsMetrics, StyleType };

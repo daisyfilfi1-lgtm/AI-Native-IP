@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect, useCallback } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -7,6 +8,8 @@ import { Badge } from '@/components/ui/Badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { creatorAPI, RemixAgentConfig, ScriptTemplate } from '@/lib/api/creator';
+import { useIP } from '@/contexts/IPContext';
 import { 
   Shuffle, 
   Link as LinkIcon, 
@@ -21,16 +24,21 @@ import {
   AlertTriangle,
   TrendingUp,
   BookOpen,
-  Wand2
+  Wand2,
+  Save,
+  RotateCcw,
+  Loader2
 } from 'lucide-react';
+import { toast } from 'sonner';
 
-// 四大黄金脚本模板
-const SCRIPT_TEMPLATES = [
+// 默认模板（API失败时的兜底）
+const DEFAULT_TEMPLATES: ScriptTemplate[] = [
   {
     id: 'opinion',
     name: '说观点',
     emoji: '💡',
     desc: '吸真粉/高互动',
+    enabled: true,
     structure: [
       { part: '钩子', duration: '3秒', desc: '争议性观点', example: '"90%的人不知道，努力是职场最大的陷阱"' },
       { part: '论据', duration: '30秒', desc: '3个维度证明（数据/案例/逻辑）', example: '第一，数据显示...第二，真实案例...第三，逻辑推导...' },
@@ -47,6 +55,7 @@ const SCRIPT_TEMPLATES = [
     name: '晒过程',
     emoji: '🎬',
     desc: '强转化/近变现',
+    enabled: true,
     structure: [
       { part: '钩子', duration: '3秒', desc: '十大勾子技巧', example: '"花5000元买的教训"' },
       { part: '过程', duration: '40秒', desc: '服务/产品交付全过程', example: '第一步...第二步...最关键的一步...' },
@@ -64,6 +73,7 @@ const SCRIPT_TEMPLATES = [
     name: '教知识',
     emoji: '📚',
     desc: '精准粉/高客单',
+    enabled: true,
     structure: [
       { part: '问题', duration: '5秒', desc: '具体问题或痛点', example: '"Excel去重总是出错？"' },
       { part: '方法', duration: '35秒', desc: '步骤详解', example: '首先...然后...注意这个关键点...' },
@@ -81,6 +91,7 @@ const SCRIPT_TEMPLATES = [
     name: '讲故事',
     emoji: '📖',
     desc: '立人设/高信任',
+    enabled: true,
     structure: [
       { part: '困境', duration: '15秒', desc: '建立共情', example: '"2022年，我的公司现金流断裂..."' },
       { part: '转折', duration: '10秒', desc: '点燃希望', example: '"但一个数据让我改变了想法..."' },
@@ -97,6 +108,152 @@ const SCRIPT_TEMPLATES = [
 ];
 
 export default function RemixAgentPage() {
+  const { currentIP } = useIP();
+  const [config, setConfig] = useState<RemixAgentConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('templates');
+
+  // 加载配置
+  const loadConfig = useCallback(async () => {
+    if (!currentIP?.ip_id) return;
+    
+    try {
+      setLoading(true);
+      const data = await creatorAPI.getRemixAgentConfig(currentIP.ip_id);
+      setConfig(data);
+    } catch (error) {
+      console.error('Failed to load remix config:', error);
+      toast.error('加载配置失败');
+      // 使用默认配置兜底
+      setConfig({
+        ip_id: currentIP.ip_id,
+        templates: DEFAULT_TEMPLATES,
+        deconstruct_rules: {
+          script_template_recognition: { enabled: true, desc: '自动识别使用的四大模板类型' },
+          hook_pattern: { enabled: true, desc: '分析开头如何吸引注意力' },
+          emotion_curve: { enabled: true, desc: '识别情绪起伏的时间点' },
+          argument_structure: { enabled: true, desc: '提取逻辑框架和论据类型' },
+          visual_elements: { enabled: false, desc: '分析画面切换和特效使用' },
+        },
+        originality_thresholds: { text_repeat_rate: 25, structure_similarity: 40 },
+        advanced_settings: { script_template_preference: 'auto', hybrid_strategy: 'best_of_breed', force_replace_rule: 'all' },
+        version: 1,
+        updated_at: new Date().toISOString(),
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [currentIP?.ip_id]);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  // 保存配置
+  const saveConfig = async () => {
+    if (!config || !currentIP?.ip_id) return;
+    
+    try {
+      setSaving(true);
+      await creatorAPI.updateRemixAgentConfig({
+        ip_id: currentIP.ip_id,
+        templates: config.templates,
+        deconstruct_rules: config.deconstruct_rules,
+        originality_thresholds: config.originality_thresholds,
+        advanced_settings: config.advanced_settings,
+      });
+      toast.success('配置已保存');
+    } catch (error) {
+      console.error('Failed to save remix config:', error);
+      toast.error('保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // 重置配置
+  const resetConfig = async () => {
+    if (!currentIP?.ip_id) return;
+    
+    try {
+      setSaving(true);
+      const data = await creatorAPI.resetRemixAgentConfig(currentIP.ip_id);
+      setConfig(data);
+      toast.success('配置已重置为默认');
+    } catch (error) {
+      console.error('Failed to reset remix config:', error);
+      toast.error('重置失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // 切换模板启用状态
+  const toggleTemplate = (templateId: string) => {
+    if (!config) return;
+    setConfig({
+      ...config,
+      templates: config.templates.map(t => 
+        t.id === templateId ? { ...t, enabled: !t.enabled } : t
+      ),
+    });
+  };
+
+  // 更新解构规则
+  const toggleDeconstructRule = (ruleKey: string) => {
+    if (!config) return;
+    setConfig({
+      ...config,
+      deconstruct_rules: {
+        ...config.deconstruct_rules,
+        [ruleKey]: {
+          ...config.deconstruct_rules[ruleKey as keyof typeof config.deconstruct_rules],
+          enabled: !config.deconstruct_rules[ruleKey as keyof typeof config.deconstruct_rules].enabled,
+        },
+      },
+    });
+  };
+
+  // 更新阈值
+  const updateThreshold = (key: 'text_repeat_rate' | 'structure_similarity', value: number) => {
+    if (!config) return;
+    setConfig({
+      ...config,
+      originality_thresholds: {
+        ...config.originality_thresholds,
+        [key]: value,
+      },
+    });
+  };
+
+  // 更新高级设置
+  const updateAdvancedSetting = (key: string, value: string) => {
+    if (!config) return;
+    setConfig({
+      ...config,
+      advanced_settings: {
+        ...config.advanced_settings,
+        [key]: value,
+      },
+    });
+  };
+
+  if (loading) {
+    return (
+      <MainLayout title="重组Agent - 配置">
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
+        </div>
+      </MainLayout>
+    );
+  }
+
+  const templates = config?.templates || DEFAULT_TEMPLATES;
+  const deconstructRules = config?.deconstruct_rules || {};
+  const thresholds = config?.originality_thresholds || { text_repeat_rate: 25, structure_similarity: 40 };
+  const advanced = config?.advanced_settings || { script_template_preference: 'auto', hybrid_strategy: 'best_of_breed', force_replace_rule: 'all' };
+
   return (
     <MainLayout title="重组Agent - 配置">
       {/* Agent header */}
@@ -109,16 +266,34 @@ export default function RemixAgentPage() {
             <h2 className="text-xl font-bold text-foreground">重组Agent</h2>
             <p className="text-foreground-secondary">竞品解构并IP化重组，四大黄金脚本模板智能匹配</p>
           </div>
-          <Badge variant="success" dot>运行中</Badge>
+          <div className="flex items-center gap-3">
+            <Badge variant="success" dot>运行中</Badge>
+            <Button 
+              variant="secondary" 
+              size="sm" 
+              leftIcon={<RotateCcw className="w-4 h-4" />}
+              onClick={resetConfig}
+              disabled={saving}
+            >
+              重置默认
+            </Button>
+            <Button 
+              size="sm" 
+              leftIcon={saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              onClick={saveConfig}
+              disabled={saving}
+            >
+              保存配置
+            </Button>
+          </div>
         </div>
       </div>
 
-      <Tabs defaultValue="templates" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList>
           <TabsTrigger value="templates">四大脚本模板</TabsTrigger>
-          <TabsTrigger value="deconstruct">竞品解构</TabsTrigger>
-          <TabsTrigger value="remix">内容重组</TabsTrigger>
-          <TabsTrigger value="rules">重组规则</TabsTrigger>
+          <TabsTrigger value="deconstruct">解构规则</TabsTrigger>
+          <TabsTrigger value="rules">原创度保障</TabsTrigger>
           <TabsTrigger value="config">高级配置</TabsTrigger>
         </TabsList>
 
@@ -143,7 +318,7 @@ export default function RemixAgentPage() {
 
             {/* 模板卡片 */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {SCRIPT_TEMPLATES.map((template) => (
+              {templates.map((template) => (
                 <Card key={template.id} className="overflow-hidden">
                   {/* 头部 */}
                   <div className={`p-4 ${template.bgColor} border-b ${template.borderColor}`}>
@@ -157,7 +332,10 @@ export default function RemixAgentPage() {
                           <p className="text-sm text-foreground-secondary">{template.desc}</p>
                         </div>
                       </div>
-                      <Switch defaultChecked />
+                      <Switch 
+                        defaultChecked={template.enabled} 
+                        onChange={() => toggleTemplate(template.id)}
+                      />
                     </div>
                   </div>
 
@@ -229,151 +407,75 @@ export default function RemixAgentPage() {
         </TabsContent>
 
         <TabsContent value="deconstruct">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader 
-                title="输入竞品链接" 
-                description="粘贴抖音/视频号/小红书链接"
-              />
-              <div className="space-y-4">
-                <Input
-                  placeholder="https://v.douyin.com/xxxxx"
-                  leftIcon={<LinkIcon className="w-4 h-4" />}
-                />
-                <Button className="w-full" leftIcon={<Scissors className="w-4 h-4" />}>
-                  开始解构
-                </Button>
-              </div>
-            </Card>
-
-            <Card>
-              <CardHeader title="解构结果" description="分析视频结构和关键要素" />
-              <div className="space-y-3">
-                {[
-                  { part: '黄金3秒', content: '钩子：90%的人不知道...', type: 'hook' },
-                  { part: '脚本模板识别', content: '检测为「说观点」模板', type: 'template', template: 'opinion' },
-                  { part: '情绪铺垫', content: '讲述失败经历，建立共鸣', type: 'setup' },
-                  { part: '冲突转折', content: '但是我发现了一个秘密...', type: 'conflict' },
-                  { part: '高潮论证', content: '用数据和案例支撑观点', type: 'climax' },
-                  { part: '结尾CTA', content: '关注我看更多干货', type: 'cta' },
-                ].map((item, index) => (
-                  <div key={index} className="p-3 rounded-xl bg-background-tertiary">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant={item.type === 'template' ? 'success' : 'primary'} size="sm">{item.part}</Badge>
-                      {item.template && (
-                        <span className="text-xs text-accent-green">💡 说观点模板</span>
-                      )}
-                    </div>
-                    <p className="text-sm text-foreground-secondary">{item.content}</p>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="remix">
           <Card>
-            <CardHeader 
-              title="重组版本生成" 
-              description="基于解构结果和四大模板生成3个IP化版本"
-            />
-            <div className="space-y-4">
-              {[
-                { emotion: '愤怒版', desc: '直击痛点，引发共鸣', color: 'from-red-500 to-orange-500', template: 'opinion' },
-                { emotion: '希望版', desc: '积极向上，传递力量', color: 'from-green-500 to-teal-500', template: 'story' },
-                { emotion: '好奇版', desc: '悬念设置，引导思考', color: 'from-blue-500 to-purple-500', template: 'knowledge' },
-              ].map((version, index) => (
-                <div key={index} className="p-4 rounded-xl bg-background-tertiary border border-border">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${version.color} flex items-center justify-center`}>
-                        <span className="text-white font-bold">{index + 1}</span>
-                      </div>
-                      <div>
-                        <h4 className="font-medium text-foreground">{version.emotion}</h4>
-                        <p className="text-xs text-foreground-tertiary">{version.desc}</p>
-                      </div>
-                      <Badge variant="primary" size="sm">
-                        {SCRIPT_TEMPLATES.find(t => t.id === version.template)?.name}
-                      </Badge>
-                    </div>
-                    <Button size="sm" leftIcon={<Play className="w-4 h-4" />}>
-                      生成
-                    </Button>
-                  </div>
-                  <div className="p-3 rounded-lg bg-background-elevated">
-                    <p className="text-sm text-foreground-secondary">
-                      [生成的文案内容将显示在这里...]
+            <CardHeader title="解构规则" description="配置竞品解构时要提取的要素" />
+            <div className="space-y-3">
+              {Object.entries(deconstructRules).map(([key, rule]) => (
+                <label key={key} className="flex items-start gap-3 p-3 rounded-xl bg-background-tertiary cursor-pointer hover:bg-background-elevated transition-colors">
+                  <input 
+                    type="checkbox" 
+                    checked={rule.enabled} 
+                    onChange={() => toggleDeconstructRule(key)}
+                    className="mt-1 w-4 h-4 accent-primary-500"
+                  />
+                  <div>
+                    <p className="font-medium text-foreground">
+                      {key === 'script_template_recognition' && '脚本模板识别'}
+                      {key === 'hook_pattern' && '钩子模式'}
+                      {key === 'emotion_curve' && '情绪曲线'}
+                      {key === 'argument_structure' && '论证结构'}
+                      {key === 'visual_elements' && '视觉元素'}
                     </p>
+                    <p className="text-xs text-foreground-tertiary">{rule.desc}</p>
                   </div>
-                </div>
+                </label>
               ))}
             </div>
           </Card>
         </TabsContent>
 
         <TabsContent value="rules">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader title="解构规则" description="提取竞品的哪些要素" />
-              <div className="space-y-3">
-                {[
-                  { name: '脚本模板识别', desc: '自动识别使用的四大模板类型', enabled: true },
-                  { name: '钩子模式', desc: '分析开头如何吸引注意力', enabled: true },
-                  { name: '情绪曲线', desc: '识别情绪起伏的时间点', enabled: true },
-                  { name: '论证结构', desc: '提取逻辑框架和论据类型', enabled: true },
-                  { name: '视觉元素', desc: '分析画面切换和特效使用', enabled: false },
-                ].map((rule) => (
-                  <label key={rule.name} className="flex items-start gap-3 p-3 rounded-xl bg-background-tertiary cursor-pointer">
-                    <input type="checkbox" defaultChecked={rule.enabled} className="mt-1" />
-                    <div>
-                      <p className="font-medium text-foreground">{rule.name}</p>
-                      <p className="text-xs text-foreground-tertiary">{rule.desc}</p>
-                    </div>
-                  </label>
-                ))}
+          <Card>
+            <CardHeader title="原创度保障" description="配置内容相似度阈值" />
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-foreground">文本重复率阈值</span>
+                  <span className="text-sm font-medium text-foreground">{thresholds.text_repeat_rate}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="50"
+                  value={thresholds.text_repeat_rate}
+                  onChange={(e) => updateThreshold('text_repeat_rate', parseInt(e.target.value))}
+                  className="w-full h-2 bg-background-elevated rounded-lg appearance-none cursor-pointer accent-primary-500"
+                />
+                <p className="text-xs text-foreground-tertiary mt-1">超过此阈值将触发原创度警告</p>
               </div>
-            </Card>
-
-            <Card>
-              <CardHeader title="原创度保障" description="防止内容过于相似" />
-              <div className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-foreground">文本重复率阈值</span>
-                    <span className="text-sm font-medium text-foreground">25%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="10"
-                    max="50"
-                    defaultValue="25"
-                    className="w-full h-2 bg-background-elevated rounded-lg appearance-none cursor-pointer accent-primary-500"
-                  />
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-foreground">结构相似度阈值</span>
+                  <span className="text-sm font-medium text-foreground">{thresholds.structure_similarity}%</span>
                 </div>
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-foreground">结构相似度阈值</span>
-                    <span className="text-sm font-medium text-foreground">40%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="20"
-                    max="60"
-                    defaultValue="40"
-                    className="w-full h-2 bg-background-elevated rounded-lg appearance-none cursor-pointer accent-primary-500"
-                  />
-                </div>
-                <div className="p-3 rounded-lg bg-accent-green/10 border border-accent-green/20">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-accent-green" />
-                    <span className="text-sm text-accent-green">当前设置符合平台安全标准</span>
-                  </div>
+                <input
+                  type="range"
+                  min="20"
+                  max="60"
+                  value={thresholds.structure_similarity}
+                  onChange={(e) => updateThreshold('structure_similarity', parseInt(e.target.value))}
+                  className="w-full h-2 bg-background-elevated rounded-lg appearance-none cursor-pointer accent-primary-500"
+                />
+                <p className="text-xs text-foreground-tertiary mt-1">超过此阈值将建议调整结构</p>
+              </div>
+              <div className="p-3 rounded-lg bg-accent-green/10 border border-accent-green/20">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-accent-green" />
+                  <span className="text-sm text-accent-green">当前设置符合平台安全标准</span>
                 </div>
               </div>
-            </Card>
-          </div>
+            </div>
+          </Card>
         </TabsContent>
 
         <TabsContent value="config">
@@ -382,6 +484,8 @@ export default function RemixAgentPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Select
                 label="脚本模板偏好"
+                value={advanced.script_template_preference}
+                onChange={(value) => updateAdvancedSetting('script_template_preference', value)}
                 options={[
                   { value: 'auto', label: '自动识别（推荐）' },
                   { value: 'opinion', label: '优先使用「说观点」' },
@@ -392,6 +496,8 @@ export default function RemixAgentPage() {
               />
               <Select
                 label="杂交策略"
+                value={advanced.hybrid_strategy}
+                onChange={(value) => updateAdvancedSetting('hybrid_strategy', value)}
                 options={[
                   { value: 'best_of_breed', label: 'Best of Breed（每个节点取最优）' },
                   { value: 'single', label: '单一竞品深度解构' },
@@ -400,6 +506,8 @@ export default function RemixAgentPage() {
               />
               <Select
                 label="强制替换规则"
+                value={advanced.force_replace_rule}
+                onChange={(value) => updateAdvancedSetting('force_replace_rule', value)}
                 options={[
                   { value: 'all', label: '竞品案例100%替换' },
                   { value: 'partial', label: '部分替换' },
@@ -414,16 +522,22 @@ export default function RemixAgentPage() {
   );
 }
 
-// Switch组件（简化版）
-function Switch({ defaultChecked, size = 'md' }: { defaultChecked?: boolean; size?: 'sm' | 'md' }) {
-  const sizeClasses = size === 'sm' ? 'w-8 h-4' : 'w-11 h-6';
-  const dotSize = size === 'sm' ? 'w-3 h-3' : 'w-5 h-5';
-  const translate = defaultChecked ? 'translate-x-full' : 'translate-x-0.5';
-  const bg = defaultChecked ? 'bg-primary-500' : 'bg-background-elevated';
+// Switch组件
+function Switch({ defaultChecked, onChange }: { defaultChecked?: boolean; onChange?: () => void }) {
+  const [checked, setChecked] = useState(defaultChecked);
+  
+  const handleClick = () => {
+    const newValue = !checked;
+    setChecked(newValue);
+    onChange?.();
+  };
   
   return (
-    <div className={`${sizeClasses} ${bg} rounded-full relative transition-colors cursor-pointer`}>
-      <div className={`absolute top-0.5 ${translate} ${dotSize} bg-white rounded-full transition-transform`} />
+    <div 
+      onClick={handleClick}
+      className={`w-11 h-6 rounded-full relative transition-colors cursor-pointer ${checked ? 'bg-primary-500' : 'bg-background-elevated'}`}
+    >
+      <div className={`absolute top-0.5 ${checked ? 'translate-x-6' : 'translate-x-0.5'} w-5 h-5 bg-white rounded-full transition-transform`} />
     </div>
   );
 }

@@ -82,10 +82,10 @@ export function ThirdPartyExtractor({ videoUrl, onTextExtracted }: ThirdPartyExt
           <AlertCircle className="w-5 h-5 text-accent-yellow flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-medium text-foreground mb-1">
-              自动提取暂时不可用
+              自动提取遇到了问题
             </p>
             <p className="text-sm text-foreground-secondary">
-              你可以使用以下第三方工具提取文案，然后粘贴回来继续仿写。
+              你可以使用以下备用方案获取文案，然后粘贴回来继续仿写。
             </p>
           </div>
         </div>

@@ -397,7 +397,11 @@ export default function CreatorDashboardPage() {
     }
   };
 
-  // 场景二：仿写爆款
+  // 场景二：仿写爆款（异步任务模式）
+  const [remixTaskId, setRemixTaskId] = useState<string | null>(null);
+  const [remixProgress, setRemixProgress] = useState(0);
+  const [remixStage, setRemixStage] = useState('');
+
   const handleRemix = async () => {
     if (!ipId || !remixUrl.trim()) {
       setRemixError('请输入有效的竞品链接');
@@ -414,18 +418,51 @@ export default function CreatorDashboardPage() {
     
     setRemixError(null);
     setShowThirdPartyExtractor(false);
+    setRemixManualMode(false);
     setIsRemixing(true);
+    setRemixProgress(0);
+    setRemixStage('pending');
     
     try {
-      const result = await creatorApi.generateFromRemix(url, DEFAULT_WORKFLOW_STYLE, ipId);
+      // 步骤1: 提交任务
+      const submitResult = await creatorApi.submitRemixTask(url, DEFAULT_WORKFLOW_STYLE, ipId);
       
-      // 双重检查：即使API调用成功，也要确认状态
-      if (result.status === 'failed') {
-        throw new Error(result.error || '仿写生成失败');
+      if (submitResult.status === 'failed') {
+        throw new Error(submitResult.error || '提交仿写任务失败');
       }
       
-      // 成功，跳转到生成结果页
-      router.push(`/creator/generate?id=${result.id}&type=remix`);
+      const taskId = submitResult.task_id;
+      setRemixTaskId(taskId);
+      
+      // 步骤2: 轮询任务状态
+      const pollInterval = 2000; // 2秒轮询一次
+      const maxAttempts = 150; // 最多轮询300秒（5分钟）
+      let attempts = 0;
+      
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        
+        const status = await creatorApi.getRemixTaskStatus(taskId);
+        setRemixProgress(status.progress);
+        setRemixStage(status.stage);
+        
+        if (status.status === 'completed') {
+          // 任务完成，获取结果并跳转
+          const result = await creatorApi.getRemixTaskResult(taskId);
+          router.push(`/creator/generate?id=${result.id}&type=remix`);
+          return;
+        }
+        
+        if (status.status === 'failed') {
+          throw new Error(status.error || '仿写生成失败');
+        }
+        
+        attempts++;
+      }
+      
+      // 超时
+      throw new Error('仿写任务超时，请稍后检查结果或重试');
+      
     } catch (error) {
       console.error('Remix failed:', error);
       const msg = error instanceof Error 
@@ -433,6 +470,7 @@ export default function CreatorDashboardPage() {
         : '仿写请求失败，请检查网络或稍后重试';
       setRemixError(msg);
       setIsRemixing(false);
+      setRemixTaskId(null);
     }
   };
 
@@ -516,47 +554,21 @@ export default function CreatorDashboardPage() {
       {/* Agent状态监控 */}
       <Card className="mb-6">
         <div className="p-4">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Settings className="w-4 h-4 text-foreground-secondary" />
-              <span className="text-sm font-medium text-foreground">Agent配置状态</span>
+              <span className="text-sm font-medium text-foreground">
+                Agent系统
+                {allReady ? (
+                  <span className="ml-2 text-xs text-accent-green">已就绪</span>
+                ) : (
+                  <span className="ml-2 text-xs text-accent-yellow">部分待配置</span>
+                )}
+              </span>
             </div>
             <Link href="/agents" className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1">
-              前往配置 <ChevronRight className="w-3 h-3" />
+              前往后台配置 <ChevronRight className="w-3 h-3" />
             </Link>
-          </div>
-          
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <AgentStatusCard 
-              name="Strategy" 
-              icon={BarChart3} 
-              status={agentStatus?.strategy.status || 'configuring'}
-              config={agentStatus?.strategy.config || ['评分权重', '竞品监控']}
-            />
-            <AgentStatusCard 
-              name="Memory" 
-              icon={Brain} 
-              status={agentStatus?.memory.status || 'configuring'}
-              config={agentStatus?.memory.config || ['标签体系', '检索策略']}
-            />
-            <AgentStatusCard 
-              name="Remix" 
-              icon={RefreshCw} 
-              status={agentStatus?.remix.status || 'configuring'}
-              config={agentStatus?.remix.config || ['解构规则', '原创度']}
-            />
-            <AgentStatusCard 
-              name="Generation" 
-              icon={Sparkles} 
-              status={agentStatus?.generation.status || 'configuring'}
-              config={agentStatus?.generation.config || ['风格训练', '口头禅']}
-            />
-            <AgentStatusCard 
-              name="Compliance" 
-              icon={Shield} 
-              status={agentStatus?.compliance.status || 'configuring'}
-              config={agentStatus?.compliance.config || ['敏感词库', '平台规则']}
-            />
           </div>
 
           {!allReady && (
@@ -629,12 +641,11 @@ export default function CreatorDashboardPage() {
             )}
 
             {!isStrategyReady && (
-              <div className="text-center py-8">
-                <AlertCircle className="w-12 h-12 mx-auto mb-3 text-accent-yellow" />
-                <p className="text-foreground-secondary mb-3">Strategy Agent 未配置完成</p>
-                <Button variant="secondary" leftIcon={<Settings className="w-4 h-4" />}>
-                  前往配置评分权重
-                </Button>
+              <div className="p-4 bg-accent-yellow/10 border border-accent-yellow/20 rounded-xl text-center">
+                <p className="text-sm text-accent-yellow mb-2">Agent配置未完成</p>
+                <Link href="/agents" className="text-xs text-primary-400 hover:text-primary-300">
+                  前往后台配置 →
+                </Link>
               </div>
             )}
           </div>
@@ -652,7 +663,7 @@ export default function CreatorDashboardPage() {
                 <div>
                   <h3 className="font-medium text-foreground mb-1">Remix Agent 结构仿写</h3>
                   <p className="text-sm text-foreground-secondary">
-                    输入竞品链接，Remix Agent会<span className="text-accent-pink">解构其结构</span>（钩子/情绪/论证），
+                    输入竞品链接，Remix Agent会<span className="text-accent-pink">自动提取口播稿</span>并解构其结构（钩子/情绪/论证），
                     然后调用Memory Agent<span className="text-accent-pink">替换为你的素材</span>，
                     最后Generation Agent用<span className="text-accent-pink">你的风格重写</span>。
                   </p>
@@ -665,9 +676,9 @@ export default function CreatorDashboardPage() {
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-3">
                     <div>
-                      <h4 className="text-sm font-medium text-foreground">低粉爆款推荐（TikHub）</h4>
+                      <h4 className="text-sm font-medium text-foreground">仿写推荐来源</h4>
                       <p className="text-xs text-foreground-tertiary mt-0.5">
-                        按 IP 画像 + <span className="text-accent-pink/90">TIKHUB_REMIX_EXTRA_KEYWORDS</span> 匹配标题后排序
+                        我的竞品监控账号 + 抖音低粉爆款榜
                       </p>
                     </div>
                     <Button
@@ -690,24 +701,31 @@ export default function CreatorDashboardPage() {
                   {remixRecLoading && remixRecs.length === 0 ? (
                     <div className="flex items-center justify-center py-8 text-foreground-tertiary text-sm">
                       <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                      拉取低粉榜…
+                      加载推荐…
                     </div>
                   ) : remixRecs.length === 0 ? (
                     <p className="text-sm text-foreground-tertiary py-4 text-center rounded-xl bg-background-tertiary/50 border border-border">
-                      暂无推荐。请确认后端已配置 TIKHUB_API_KEY，且 TikHub 低粉榜接口有数据；关键词仅影响排序与「命中」文案。
+                      暂无推荐。请配置竞品监控账号或确认 TikHub API 正常。
                     </p>
                   ) : (
                     <ul className="space-y-2 max-h-64 overflow-y-auto pr-1">
                       {remixRecs.map((r, idx) => (
                         <li
                           key={`${r.url}-${idx}`}
-                          className="flex items-start gap-3 p-3 rounded-xl bg-background-tertiary/80 border border-border"
+                          className={`flex items-start gap-3 p-3 rounded-xl border ${
+                            r.is_my_competitor 
+                              ? 'bg-accent-pink/5 border-accent-pink/20' 
+                              : 'bg-background-tertiary/80 border-border'
+                          }`}
                         >
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground line-clamp-2">{r.title}</p>
+                            <p className="text-sm font-medium text-foreground line-clamp-2">
+                              {r.is_my_competitor && <span className="text-accent-pink mr-1">[我的竞品]</span>}
+                              {r.title}
+                            </p>
                             <p className="text-xs text-foreground-tertiary mt-1 line-clamp-2">{r.reason}</p>
                           </div>
-                          <Badge variant="primary" size="sm" className="shrink-0">
+                          <Badge variant={r.is_my_competitor ? 'accent' : 'primary'} size="sm" className="shrink-0">
                             {r.platform === 'douyin' ? '抖音' : '小红书'}
                           </Badge>
                           <Button
@@ -744,36 +762,22 @@ export default function CreatorDashboardPage() {
                   </div>
                 </div>
 
-                {/* 配置检查 */}
-                <div className="p-4 bg-background-tertiary rounded-xl space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    {isRemixReady ? (
-                      <CheckCircle2 className="w-4 h-4 text-accent-green" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-accent-yellow" />
-                    )}
-                    <span className={isRemixReady ? 'text-accent-green' : 'text-accent-yellow'}>
-                      Remix Agent: {isRemixReady ? '解构规则已配置' : '需配置解构规则'}
-                    </span>
+                {/* 配置状态提示 - 简化版 */}
+                {remixAgentsBlock && (
+                  <div className="p-3 bg-accent-yellow/10 border border-accent-yellow/20 rounded-lg">
+                    <p className="text-xs text-accent-yellow">
+                      Agent配置未完成，可能影响仿写效果。
+                      <Link href="/agents" className="underline hover:text-accent-yellow/80 ml-1">前往配置</Link>
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    {isMemoryReady ? (
-                      <CheckCircle2 className="w-4 h-4 text-accent-green" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-accent-yellow" />
-                    )}
-                    <span className={isMemoryReady ? 'text-accent-green' : 'text-accent-yellow'}>
-                      Memory Agent: {isMemoryReady ? '素材库已就绪' : '需配置标签体系'}
-                    </span>
-                  </div>
-                </div>
+                )}
 
                 {remixError && (
                   <div className="p-4 rounded-xl bg-accent-red/10 border border-accent-red/25">
                     <div className="flex items-start gap-3">
                       <AlertCircle className="w-5 h-5 text-accent-red flex-shrink-0 mt-0.5" />
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-accent-red mb-2">仿写失败</p>
+                        <p className="text-sm font-medium text-accent-red mb-2">自动提取未成功</p>
                         <p className="text-sm text-accent-red/80 whitespace-pre-wrap">{remixError}</p>
                         
                         {/* 根据错误类型显示解决建议 */}
@@ -792,11 +796,11 @@ export default function CreatorDashboardPage() {
                             </ul>
                           </div>
                         )}
-                        {/* 提取失败或API错误时显示第三方工具 */}
-                        {(remixError.includes('提取') || remixError.includes('权限') || remixError.includes('API') || remixError.includes('TikHub') || remixError.includes('配置') || remixError.includes('第三方工具') || remixError.includes('无法自动提取')) && (
+                        {/* 提取失败或处理错误时显示备用方案 */}
+                        {(remixError.includes('提取') || remixError.includes('下载') || remixError.includes('ffmpeg') || remixError.includes('ASR') || remixError.includes('处理') || remixError.includes('超时') || remixError.includes('权限') || remixError.includes('API') || remixError.includes('TikHub') || remixError.includes('配置') || remixError.includes('第三方工具') || remixError.includes('无法自动提取') || remixError.includes('音频') || remixError.includes('视频')) && (
                           <>
                             <div className="mt-3 p-3 rounded-lg bg-background-tertiary/50 text-xs text-foreground-secondary">
-                              <p className="font-medium text-foreground mb-1">💡 解决方案：</p>
+                              <p className="font-medium text-foreground mb-1">💡 备用方案：</p>
                               <ul className="space-y-1">
                                 <li>• 使用下方「第三方工具」提取文案</li>
                                 <li>• 或直接点击「粘贴文案」手动输入</li>
@@ -825,7 +829,7 @@ export default function CreatorDashboardPage() {
                           }}
                           className="mt-3 text-xs text-primary-400 hover:text-primary-300 underline"
                         >
-                          {remixManualMode ? '← 返回链接提取模式' : '直接粘贴文案 →'}
+                          {remixManualMode ? '← 返回自动提取' : '手动输入文案 →'}
                         </button>
                       </div>
                     </div>
@@ -836,10 +840,10 @@ export default function CreatorDashboardPage() {
                 {remixManualMode && (
                   <div className="p-4 rounded-xl bg-background-tertiary border border-border">
                     <label className="block text-sm font-medium text-foreground mb-2">
-                      手动粘贴竞品文案
+                      手动粘贴文案
                     </label>
                     <p className="text-xs text-foreground-secondary mb-3">
-                      当自动提取失败时，你可以直接复制视频的标题和文案粘贴到这里。
+                      复制视频的标题和口播文案，粘贴到这里继续仿写。
                     </p>
                     <textarea
                       value={remixManualText}
@@ -891,6 +895,28 @@ export default function CreatorDashboardPage() {
                   />
                 )}
 
+                {/* 进度显示 */}
+                {isRemixing && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs text-foreground-secondary">
+                      <span>
+                        {remixStage === 'extracting' && '正在提取口播稿...'}
+                        {remixStage === 'remixing' && '正在进行AI仿写...'}
+                        {remixStage === 'saving' && '正在保存结果...'}
+                        {remixStage === 'pending' && '任务排队中...'}
+                        {!remixStage && '处理中...'}
+                      </span>
+                      <span>{remixProgress}%</span>
+                    </div>
+                    <div className="h-2 bg-background-elevated rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-primary-500 to-accent-cyan transition-all duration-500"
+                        style={{ width: `${remixProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* 生成按钮 */}
                 <Button
                   className="w-full"
@@ -900,7 +926,7 @@ export default function CreatorDashboardPage() {
                   isLoading={isRemixing}
                   disabled={!remixUrl.trim() || isRemixing || remixAgentsBlock}
                 >
-                  {isRemixing ? '解构与生成中...' : '开始仿写'}
+                  {isRemixing ? '仿写中...' : '开始仿写'}
                 </Button>
               </div>
             </Card>
@@ -1137,39 +1163,15 @@ export default function CreatorDashboardPage() {
                   </div>
                 </div>
 
-                {/* 配置检查 */}
-                <div className="p-4 bg-background-tertiary rounded-xl space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    {isStrategyReady ? (
-                      <CheckCircle2 className="w-4 h-4 text-accent-green" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-accent-yellow" />
-                    )}
-                    <span className={isStrategyReady ? 'text-accent-green' : 'text-accent-yellow'}>
-                      Strategy Agent: {isStrategyReady ? '八大元素分析已就绪' : '需配置爆款元素'}
-                    </span>
+                {/* 配置状态提示 - 简化版 */}
+                {!allReady && (
+                  <div className="p-3 bg-accent-yellow/10 border border-accent-yellow/20 rounded-lg">
+                    <p className="text-xs text-accent-yellow">
+                      部分Agent配置未完成，可能影响生成效果。
+                      <Link href="/agents" className="underline hover:text-accent-yellow/80 ml-1">前往配置</Link>
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    {isMemoryReady ? (
-                      <CheckCircle2 className="w-4 h-4 text-accent-green" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-accent-yellow" />
-                    )}
-                    <span className={isMemoryReady ? 'text-accent-green' : 'text-accent-yellow'}>
-                      Memory Agent: {isMemoryReady ? '素材库已就绪' : '需配置检索策略'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    {isGenerationReady ? (
-                      <CheckCircle2 className="w-4 h-4 text-accent-green" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-accent-yellow" />
-                    )}
-                    <span className={isGenerationReady ? 'text-accent-green' : 'text-accent-yellow'}>
-                      Generation Agent: {isGenerationReady ? '四大模板已配置' : '需配置脚本模板'}
-                    </span>
-                  </div>
-                </div>
+                )}
 
                 {/* 生成按钮 */}
                 <Button

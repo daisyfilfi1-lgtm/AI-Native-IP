@@ -151,6 +151,19 @@ export function getAuthSmsLoginUrl(): string {
   return '/api/auth/sms/login';
 }
 
+/** 邮箱 + 密码登录（与 `/api/v1` 直连规则一致） */
+export function getAuthEmailLoginUrl(): string {
+  if (typeof window === 'undefined') {
+    return '/api/auth/login';
+  }
+  const base = getBrowserApiBaseUrl();
+  if (base.startsWith('http')) {
+    const origin = base.replace(/\/api\/v1\/?$/i, '').replace(/\/$/, '');
+    return `${origin}/api/auth/login`;
+  }
+  return '/api/auth/login';
+}
+
 /** 发送登录验证码（与登录 URL 同源策略一致） */
 export function getAuthSmsSendCodeUrl(): string {
   if (typeof window === 'undefined') {

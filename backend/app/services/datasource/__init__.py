@@ -33,6 +33,17 @@ from .cache import TopicCache
 from .builtin_source import BuiltinDataSource
 from .tikhub_source import TikHubDataSource
 from .competitor_source import CompetitorTopicDataSource
+from .multi_source_hotlist import (
+    MultiSourceHotlistAggregator,
+    fetch_multi_source_hotlist,
+    fetch_hotlist_fallback,
+    get_multi_source_aggregator,
+)
+from .builtin_viral_repository import (
+    BuiltinViralRepository,
+    get_builtin_repository,
+    get_builtin_topics,
+)
 
 __all__ = [
     # 基类
@@ -56,4 +67,13 @@ __all__ = [
     "BuiltinDataSource",
     "TikHubDataSource",
     "CompetitorTopicDataSource",
+    # 新增：多源热榜
+    "MultiSourceHotlistAggregator",
+    "fetch_multi_source_hotlist",
+    "fetch_hotlist_fallback",
+    "get_multi_source_aggregator",
+    # 新增：内置爆款库
+    "BuiltinViralRepository",
+    "get_builtin_repository",
+    "get_builtin_topics",
 ]

@@ -19,6 +19,20 @@ from urllib.parse import quote
 
 from app.services.datasource import get_datasource_manager_v2
 from app.services.datasource.base import TopicData
+from app.services.datasource.multi_source_hotlist import (
+    fetch_multi_source_hotlist,
+    fetch_hotlist_fallback,
+    get_multi_source_aggregator,
+)
+from app.services.datasource.builtin_viral_repository import (
+    get_builtin_repository,
+    BuiltinViralRepository,
+)
+from app.services.smart_ip_matcher import get_smart_matcher
+from app.services.real_competitor_service import (
+    fetch_competitor_viral_topics,
+    get_real_competitor_service,
+)
 from app.services.competitor_content_remixer import (
     CompetitorContentRemixer, 
     RemixResult,
@@ -132,11 +146,11 @@ class TopicRecommendationServiceV4:
         
         # 2. 根据策略获取选题
         if strategy == "competitor_only":
-            topics = await self._fetch_competitor_topics(db, ip_profile, limit)
+            topics = await self._fetch_competitor_topics(db, ip_profile, limit, ip_id)
         elif strategy == "competitor_first":
-            topics = await self._fetch_competitor_first(db, ip_profile, limit)
+            topics = await self._fetch_competitor_first(db, ip_profile, limit, ip_id)
         else:  # hybrid
-            topics = await self._fetch_hybrid(db, ip_profile, limit)
+            topics = await self._fetch_hybrid(db, ip_profile, limit, ip_id)
         
         # 3. 内容重构（针对竞品选题）
         remixed_topics = await self._remix_topics(topics, ip_profile)
@@ -170,26 +184,67 @@ class TopicRecommendationServiceV4:
         self, 
         db, 
         ip_profile: Dict[str, Any], 
-        limit: int
+        limit: int,
+        ip_id: str = None
     ) -> List[TopicData]:
-        """仅从竞品获取选题"""
-        from app.services.datasource.competitor_source import CompetitorTopicDataSource
+        """
+        从竞品获取选题
         
-        source = CompetitorTopicDataSource(db_session=db)
-        topics = await source.fetch(ip_profile, limit * 2)  # 多取一些用于筛选
+        【推荐方案】使用Railway数据库中已有的竞品数据
+        - competitor_accounts: 竞品账号配置
+        - competitor_videos: 竞品视频数据
         
-        logger.info(f"[V4] Fetched {len(topics)} topics from competitors")
-        return topics
+        优势：
+        1. 数据已同步，无需实时抓取API
+        2. 竞品与IP同领域，匹配度高
+        3. 有真实播放量验证
+        """
+        if not ip_id:
+            logger.warning("[V4] No ip_id provided, cannot fetch competitor topics")
+            return []
+        
+        try:
+            logger.info(f"[V4] Fetching viral topics from database (competitor_videos)...")
+            
+            # 使用真实竞品服务（从数据库读取）
+            service = get_real_competitor_service(db)
+            result = await service.fetch_viral_topics(
+                ip_id=ip_id,
+                ip_profile=ip_profile,
+                limit=limit,
+                min_play_count=10000,  # 至少1万播放才算爆款
+                days_back=30
+            )
+            
+            if result.topics:
+                logger.info(
+                    f"[V4] Got {len(result.topics)} topics from "
+                    f"{result.stats.get('competitor_count', 0)} competitors "
+                    f"(DB: {result.from_db})"
+                )
+                return result.topics
+            
+            # 如果数据库没有数据，降级到内置库
+            logger.warning(
+                f"[V4] No competitor videos in database for IP: {ip_id}, "
+                f"using builtin fallback"
+            )
+            return []
+            
+        except Exception as e:
+            logger.error(f"[V4] Failed to fetch competitor topics: {e}")
+            return []
     
     async def _fetch_competitor_first(
         self, 
         db, 
         ip_profile: Dict[str, Any], 
-        limit: int
+        limit: int,
+        ip_id: str = None
     ) -> List[TopicData]:
         """优先竞品，不足时补充其他来源"""
         # 先取竞品
-        competitor_topics = await self._fetch_competitor_topics(db, ip_profile, int(limit * 0.8))
+        competitor_topics = await self._fetch_competitor_topics(db, ip_profile, int(limit * 0.8), ip_id)
         
         # 如果竞品不足，补充其他来源
         if len(competitor_topics) < limit:
@@ -203,12 +258,13 @@ class TopicRecommendationServiceV4:
         self, 
         db, 
         ip_profile: Dict[str, Any], 
-        limit: int
+        limit: int,
+        ip_id: str = None
     ) -> List[TopicData]:
         """混合模式：竞品 + 全网热点"""
         # 竞品占60%
         competitor_limit = int(limit * 0.6)
-        competitor_topics = await self._fetch_competitor_topics(db, ip_profile, competitor_limit)
+        competitor_topics = await self._fetch_competitor_topics(db, ip_profile, competitor_limit, ip_id)
         
         # 全网热点占40%
         hot_limit = limit - len(competitor_topics)
@@ -222,21 +278,58 @@ class TopicRecommendationServiceV4:
         ip_profile: Dict[str, Any], 
         limit: int
     ) -> List[TopicData]:
-        """从其他来源获取选题"""
+        """
+        从其他来源获取选题
+        
+        新策略：
+        1. 优先使用多源热榜聚合（抖音+小红书+快手+B站）
+        2. 如果都失败，使用内置爆款库兜底
+        """
         try:
-            return await self.datasource_manager.fetch_with_strategy(
-                ip_profile, limit, "smart"
-            )
+            # 1. 尝试多源热榜聚合
+            logger.info(f"[V4] Fetching from multi-source hotlist...")
+            multi_source_topics = await fetch_hotlist_fallback(ip_profile, limit)
+            
+            if multi_source_topics and len(multi_source_topics) >= limit // 2:
+                logger.info(f"[V4] Got {len(multi_source_topics)} topics from multi-source")
+                return multi_source_topics
+            
+            # 2. 多源不足，使用内置库兜底
+            logger.warning(f"[V4] Multi-source insufficient, using builtin fallback")
+            builtin_repo = get_builtin_repository()
+            builtin_topics = builtin_repo.get_topics_for_ip(ip_profile, limit)
+            
+            # 3. 合并结果
+            if multi_source_topics:
+                # 去重合并
+                seen_titles = {t.title for t in multi_source_topics}
+                for topic in builtin_topics:
+                    if topic.title not in seen_titles:
+                        multi_source_topics.append(topic)
+                return multi_source_topics[:limit]
+            
+            return builtin_topics
+            
         except Exception as e:
-            logger.warning(f"[V4] Failed to fetch from other sources: {e}")
-            return []
+            logger.error(f"[V4] Failed to fetch from other sources: {e}")
+            # 最终兜底：返回内置库
+            try:
+                builtin_repo = get_builtin_repository()
+                return builtin_repo.get_topics_for_ip(ip_profile, limit)
+            except Exception as e2:
+                logger.error(f"[V4] Builtin fallback also failed: {e2}")
+                return []
     
     async def _fetch_hot_topics(
         self, 
         ip_profile: Dict[str, Any], 
         limit: int
     ) -> List[TopicData]:
-        """从全网热点获取"""
+        """
+        从全网热点获取
+        
+        使用多源热榜聚合
+        """
         return await self._fetch_other_sources(ip_profile, limit)
     
     async def _remix_topics(
@@ -470,24 +563,35 @@ class TopicRecommendationServiceV4:
         topic: RecommendedTopicV4, 
         ip_profile: Dict[str, Any]
     ) -> float:
-        """计算IP适配度"""
-        fit_score = 0.5
+        """
+        计算IP适配度
         
-        # 内容类型匹配
-        ip_expertise = ip_profile.get("expertise", "")
-        if topic.content_type == "money" and "创业" in ip_expertise:
-            fit_score += 0.3
-        elif topic.content_type == "emotion" and "情感" in ip_expertise:
-            fit_score += 0.3
-        
-        # 标签匹配
-        ip_tags = set(ip_profile.get("target_audience", "").split(","))
-        topic_tags = set(topic.tags)
-        overlap = ip_tags & topic_tags
-        if overlap:
-            fit_score += min(0.2, len(overlap) * 0.1)
-        
-        return min(1.0, fit_score)
+        使用智能匹配器进行语义级匹配
+        """
+        try:
+            matcher = get_smart_matcher()
+            match_result = matcher.analyze_match(topic.title, ip_profile)
+            return match_result.overall
+        except Exception as e:
+            logger.warning(f"[V4] Smart matcher failed, using fallback: {e}")
+            # 降级到简单匹配
+            fit_score = 0.5
+            
+            # 内容类型匹配
+            ip_expertise = ip_profile.get("expertise", "")
+            if topic.content_type == "money" and "创业" in ip_expertise:
+                fit_score += 0.3
+            elif topic.content_type == "emotion" and "情感" in ip_expertise:
+                fit_score += 0.3
+            
+            # 标签匹配
+            ip_tags = set(ip_profile.get("target_audience", "").split(","))
+            topic_tags = set(topic.tags)
+            overlap = ip_tags & topic_tags
+            if overlap:
+                fit_score += min(0.2, len(overlap) * 0.1)
+            
+            return min(1.0, fit_score)
     
     def _distribute_by_matrix(
         self, 
@@ -533,32 +637,8 @@ class TopicRecommendationServiceV4:
     ) -> Dict[str, Any]:
         """获取竞品统计数据"""
         try:
-            from sqlalchemy import text
-            
-            # 查询竞品账号数
-            result = db.execute(
-                text("SELECT COUNT(*) FROM competitor_accounts WHERE ip_id = :ip_id"),
-                {"ip_id": ip_id}
-            )
-            competitor_count = result.scalar()
-            
-            # 查询竞品视频数
-            result = db.execute(
-                text("""
-                    SELECT COUNT(*), AVG(play_count) 
-                    FROM competitor_videos cv
-                    JOIN competitor_accounts ca ON cv.competitor_id = ca.competitor_id
-                    WHERE ca.ip_id = :ip_id
-                """),
-                {"ip_id": ip_id}
-            )
-            video_stats = result.fetchone()
-            
-            return {
-                "competitor_count": competitor_count,
-                "video_count": video_stats[0] if video_stats else 0,
-                "avg_play_count": int(video_stats[1]) if video_stats and video_stats[1] else 0,
-            }
+            service = get_real_competitor_service(db)
+            return await service.get_competitor_stats(ip_id)
         except Exception as e:
             logger.error(f"[V4] Failed to get competitor stats: {e}")
             return {}

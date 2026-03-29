@@ -34,6 +34,7 @@ from app.routers import (
     vector,
     remix,
     topic_recommendation,
+    migration,
 )
 from app.middleware.auth import verify_api_key_or_jwt
 
@@ -177,6 +178,8 @@ def create_app() -> FastAPI:
     app.include_router(debug.router, prefix="/api/v1", tags=["debug"], dependencies=api_key_dep)
     # 临时修复路由 - 迁移竞品账号
     app.include_router(fix_competitor.router, prefix="/api/v1", tags=["admin"], dependencies=api_key_dep)
+    # 手动迁移路由
+    app.include_router(migration.router, prefix="/api", tags=["admin"])
     # Creator 路由 - 推荐选题等接口公开访问
     app.include_router(creator.router, prefix="/api/v1", tags=["creator"])
 

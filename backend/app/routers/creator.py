@@ -2289,7 +2289,7 @@ async def test_tikhub_api():
         import httpx
         
         headers = {"Authorization": f"Bearer {key}"}
-        payload = {"page": 1, "page_size": 3, "date_window": 1, "tags": []}
+        payload = {"page": 1, "page_size": 10, "date_window": 7}
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -2339,7 +2339,7 @@ async def test_tikhub_with_key(api_key: str = Query(..., description="TikHub API
     
     try:
         headers = {"Authorization": f"Bearer {api_key}"}
-        payload = {"page": 1, "page_size": 3, "date_window": 1, "tags": []}
+        payload = {"page": 1, "page_size": 10, "date_window": 7}
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -2441,7 +2441,7 @@ async def test_tikhub_nested():
     
     try:
         headers = {"Authorization": f"Bearer {key}"}
-        payload = {"page": 1, "page_size": 3, "date_window": 1, "tags": []}
+        payload = {"page": 1, "page_size": 10, "date_window": 7}
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(

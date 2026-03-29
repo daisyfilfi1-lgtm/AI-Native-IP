@@ -3,7 +3,7 @@
 结合向量语义理解和图关系推理，提供更精准的检索结果
 """
 import os
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.services.ai_client import embed
 from app.services.graph_rag_service import graph_retrieve
@@ -176,7 +176,7 @@ def _expand_graph_to_assets(
     for asset in assets:
         content = asset.content or ""
         for entity in entity_names:
-            if entity.lower() in content.lower():
+            if entity and entity.lower() in content.lower():
                 matched_assets.append({
                     "asset_id": asset.asset_id,
                     "similarity": 0.8,  # 简化：固定分数
@@ -244,7 +244,6 @@ def hybrid_search(
         HybridRetrievalConfig.GRAPH_WEIGHT /= total_weight
     
     vector_results = []
-    graph_results = []
     
     # 1. 向量检索
     if use_vector:
@@ -258,7 +257,9 @@ def hybrid_search(
         except Exception as e:
             print(f"Vector search failed: {e}")
     
-    # 2. Graph检索
+    # 2. Graph检索（graph_retrieve 返回单 dict；RRF 需要「每条带 paths 的记录」列表）
+    graph_results: Any = {}
+    graph_expanded: List[dict] = []
     if use_graph:
         try:
             graph_results = graph_retrieve(
@@ -275,12 +276,17 @@ def hybrid_search(
                 graph_expanded = []
         except Exception as e:
             print(f"Graph search failed: {e}")
+            graph_results = {}
             graph_expanded = []
+
+    graph_list_for_rrf: List[dict] = []
+    if isinstance(graph_results, dict) and graph_results and not graph_results.get("error"):
+        graph_list_for_rrf = [graph_results]
     
     # 3. 结果融合
     if use_vector and use_graph:
         # 纯向量+纯图结果融合
-        fused_results = _reciprocal_rank_fusion(vector_results, graph_results)
+        fused_results = _reciprocal_rank_fusion(vector_results, graph_list_for_rrf)
         
         # 添加graph扩展的结果
         for ge in graph_expanded:
@@ -323,7 +329,7 @@ def hybrid_search(
             "vector_weight": HybridRetrievalConfig.VECTOR_WEIGHT,
             "graph_weight": HybridRetrievalConfig.GRAPH_WEIGHT,
             "vector_results_count": len(vector_results),
-            "graph_results_count": len(graph_results),
+            "graph_results_count": len(graph_list_for_rrf) if use_graph else 0,
             "fusion_method": "RRF",
         },
     }

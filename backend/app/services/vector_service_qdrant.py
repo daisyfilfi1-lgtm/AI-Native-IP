@@ -200,7 +200,8 @@ def query_similar_assets(
     q = (query or "").strip()
     if not q:
         return []
-    
+    _ = use_hybrid  # 保留参数兼容；当前实现与 dense 向量检索等价
+
     # 生成query向量
     qv = embed([q])
     if not qv or not qv[0]:
@@ -231,38 +232,35 @@ def query_similar_assets(
             hnsw_ef=128,  # 加速检索
             exact=False,
         )
-        
-        if use_hybrid:
-            # 混合搜索：融合向量和关键词
-            results = client.search(
-                collection_name=collection_name,
-                query_vector=("text", query_vec),
-                query_text=q,  # 关键词补充
-                limit=top_k,
-                search_params=search_params,
-                with_payload=True,
-                with_vectors=False,
+
+        # qdrant-client 新版本已移除 client.search；统一用 query_points + named vector "text"
+        # （旧版 hybrid 的 query_text 在新 API 中需单独 prefetch/融合，此处与纯向量等价）
+        resp = client.query_points(
+            collection_name=collection_name,
+            query=query_vec,
+            using="text",
+            query_filter=qdrant_filter,
+            search_params=search_params,
+            limit=top_k,
+            with_payload=True,
+            with_vectors=False,
+        )
+        results = getattr(resp, "points", None) or []
+
+        out: list[dict[str, Any]] = []
+        for r in results:
+            pl = r.payload or {}
+            if not isinstance(pl, dict):
+                pl = {}
+            out.append(
+                {
+                    "asset_id": r.id,
+                    "similarity": r.score,
+                    "content": pl.get("content", ""),
+                    "metadata": pl.get("metadata", {}),
+                }
             )
-        else:
-            # 纯向量搜索
-            results = client.search(
-                collection_name=collection_name,
-                query_vector=("text", query_vec),
-                limit=top_k,
-                search_params=search_params,
-                with_payload=True,
-                with_vectors=False,
-            )
-        
-        return [
-            {
-                "asset_id": r.id,
-                "similarity": r.score,
-                "content": r.payload.get("content", ""),
-                "metadata": r.payload.get("metadata", {}),
-            }
-            for r in results
-        ]
+        return out
         
     except Exception as e:
         print(f"Qdrant search failed, falling back to PostgreSQL: {e}")

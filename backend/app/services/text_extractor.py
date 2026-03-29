@@ -1,8 +1,9 @@
 """
 统一文本提取服务（口播稿专用）
 
-抖音：TikHub → 视频直链 → 下载 → ffmpeg → 阿里云 ASR（极速版）
-      失败后再尝试本地 Whisper 兜底。
+抖音：默认优先火山方舟豆包（ARK_API_KEY + ARK_MODEL）根据链接与页面摘录生成口播稿；
+      未配置豆包时仍走 TikHub → ffmpeg → ASR；可选本地 Whisper。
+      已配置豆包时默认不再跑 TikHub/Whisper（更省、更稳），需要时可设 REMIX_DOUYIN_TRY_LEGACY=1。
 小红书：Playwright 优先（图文正文 / 视频拦截）
         失败后再尝试本地 Whisper 兜底。
 
@@ -1256,6 +1257,55 @@ def _playwright_enabled() -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _douyin_try_legacy_pipeline() -> bool:
+    """
+    是否在豆包之后（或未配置豆包时）尝试 TikHub+ASR / Whisper。
+    默认：仅当未配置豆包时走旧链路；若已配置豆包则不再跑 TikHub/Whisper，除非 REMIX_DOUYIN_TRY_LEGACY=1。
+    """
+    from app.services.doubao_script_client import is_doubao_configured
+
+    if is_doubao_configured():
+        v = os.environ.get("REMIX_DOUYIN_TRY_LEGACY", "").strip().lower()
+        return v in ("1", "true", "yes", "on")
+    return True
+
+
+async def extract_with_doubao_douyin(resolved_url: str, original_url: str) -> ExtractResult:
+    """抖音：豆包根据链接 + 可选页面摘录生成口播稿（主路径）。"""
+    from app.services.doubao_script_client import douyin_script_via_doubao, is_doubao_configured
+
+    if not is_doubao_configured():
+        return ExtractResult(
+            success=False,
+            text="",
+            method="doubao",
+            error="豆包未配置：请设置 ARK_API_KEY（或 DOUBAO_API_KEY）与 ARK_MODEL（推理接入点 ID）",
+        )
+
+    snippet = ""
+    try:
+        wr = await extract_with_web_scrape(resolved_url, "douyin")
+        if wr.success and wr.text:
+            snippet = wr.text[:8000]
+    except Exception as e:
+        logger.debug("为豆包抓取页面摘录失败（可忽略）: %s", e)
+
+    text = await douyin_script_via_doubao(resolved_url, original_url, snippet)
+    if text and len(text.strip()) >= 20:
+        return ExtractResult(
+            success=True,
+            text=text[:12000],
+            method="doubao",
+            metadata={"sub_method": "ark_chat", "snippet_len": len(snippet)},
+        )
+    return ExtractResult(
+        success=False,
+        text="",
+        method="doubao",
+        error="豆包未返回有效口播稿（或过短）",
+    )
+
+
 # ============== 统一入口 ==============
 
 async def extract_text(url: str, prefer_method: Optional[str] = None) -> ExtractResult:
@@ -1311,13 +1361,18 @@ async def extract_text(url: str, prefer_method: Optional[str] = None) -> Extract
             ]
         )
     elif platform == "douyin":
-        # 抖音：TikHub → 视频直链 → 下载 → ffmpeg → 阿里云 ASR（最优）
-        # 失败后再尝试本地 Whisper 兜底
+        # 抖音：默认优先豆包（ARK）；旧链路（TikHub+ASR / Whisper）仅在未配置豆包时启用，
+        # 或设置 REMIX_DOUYIN_TRY_LEGACY=1 时在豆包失败后再尝试。
+        from app.services.doubao_script_client import is_doubao_configured
+
         strategies = []
-        if use_tikhub:
-            strategies.append(("douyin_pipeline", lambda: extract_douyin_audio_pipeline(resolved_url)))
-        if _whisper_enabled():
-            strategies.append(("whisper", lambda: extract_with_whisper(resolved_url, platform)))
+        if is_doubao_configured():
+            strategies.append(("doubao", lambda: extract_with_doubao_douyin(resolved_url, url)))
+        if _douyin_try_legacy_pipeline():
+            if use_tikhub:
+                strategies.append(("douyin_pipeline", lambda: extract_douyin_audio_pipeline(resolved_url)))
+            if _whisper_enabled():
+                strategies.append(("whisper", lambda: extract_with_whisper(resolved_url, platform)))
     elif platform == "xiaohongshu":
         # 小红书：Playwright 优先（图文正文在页面里；视频则拦截或降级 Whisper）
         strategies = []

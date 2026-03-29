@@ -121,25 +121,58 @@ async def fetch_douyin_web_one_video_by_share_url(share_url: str) -> Any:
 async def fetch_douyin_low_fan_hot_list(
     page: int = 1,
     page_size: int = 20,
-    date_window: int = 2,
+    date_window: int = 7,
 ) -> Any:
     """
     抖音热榜 · 低粉爆款榜（用于仿写推荐）。
     POST /api/v1/douyin/billboard/fetch_hot_total_low_fan_list
+
+    说明：部分 TikHub 版本对空 tags、过小 page_size 或 date_window 会返回「参数不合法」；
+    此处不传 tags，并限制 page_size / date_window 为常见合法组合；失败时自动换一组参数重试。
     """
-    payload = {
-        "page": page,
-        "page_size": page_size,
-        "date_window": date_window,
-        "tags": [],
-    }
-    return unwrap_response(
-        await _request(
-            "POST",
-            "/api/v1/douyin/billboard/fetch_hot_total_low_fan_list",
-            json=payload,
-        )
-    )
+    ps = max(10, min(int(page_size), 50))
+    dw = int(date_window)
+    if dw not in (1, 7, 30):
+        dw = 7
+
+    raw_payloads: List[Dict[str, Any]] = [
+        {"page": int(page), "page_size": ps, "date_window": dw},
+        {"page": 1, "page_size": 20, "date_window": 7},
+        {"page": 1, "page_size": 10, "date_window": 1},
+    ]
+    seen: set[str] = set()
+    payloads: List[Dict[str, Any]] = []
+    for p in raw_payloads:
+        key = json.dumps(p, sort_keys=True, ensure_ascii=False)
+        if key in seen:
+            continue
+        seen.add(key)
+        payloads.append(p)
+
+    last_exc: Optional[Exception] = None
+    for payload in payloads:
+        try:
+            return unwrap_response(
+                await _request(
+                    "POST",
+                    "/api/v1/douyin/billboard/fetch_hot_total_low_fan_list",
+                    json=payload,
+                )
+            )
+        except TikHubError as e:
+            last_exc = e
+            msg = str(e)
+            if "参数" in msg or "不合法" in msg or "invalid" in msg.lower():
+                logger.warning(
+                    "[TikHub] low_fan list retry with alternate payload: %s (tried %s)",
+                    msg,
+                    payload,
+                )
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    raise TikHubError("低粉爆款榜请求失败")
 
 
 async def fetch_xhs_topic_info(page_id: str, source: str = "normal") -> Any:

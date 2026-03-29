@@ -7,7 +7,7 @@
 
 import logging
 import re
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
@@ -101,6 +101,15 @@ class SmartIPMatcher:
         match_result = self.analyze_match(title, ip_profile)
         return match_result.overall
     
+    @staticmethod
+    def _safe_lower(s: Any) -> str:
+        """DB 字段可能为 None，不能对 .get(k, \"\") 结果直接 .lower()。"""
+        if s is None:
+            return ""
+        if not isinstance(s, str):
+            return str(s).lower()
+        return s.lower()
+
     def analyze_match(
         self,
         title: str,
@@ -115,7 +124,8 @@ class SmartIPMatcher:
         dimensions = {}
         reasons = []
         suggestions = []
-        
+        title = title or ""
+
         # 1. 领域匹配度 (25%)
         domain_score = self._calculate_domain_match(title, ip_profile)
         dimensions[MatchDimension.DOMAIN.value] = domain_score
@@ -164,8 +174,8 @@ class SmartIPMatcher:
     
     def _calculate_domain_match(self, title: str, ip_profile: Dict[str, Any]) -> float:
         """计算领域匹配度"""
-        expertise = ip_profile.get("expertise", "").lower()
-        content_direction = ip_profile.get("content_direction", "").lower()
+        expertise = self._safe_lower(ip_profile.get("expertise"))
+        content_direction = self._safe_lower(ip_profile.get("content_direction"))
         ip_text = f"{expertise} {content_direction}"
         
         # 找出IP的领域
@@ -180,7 +190,7 @@ class SmartIPMatcher:
             return 0.5  # 未知领域，给中等分
         
         # 检查标题是否包含相关领域关键词
-        title_lower = title.lower()
+        title_lower = self._safe_lower(title)
         match_count = 0
         for domain in ip_domains:
             keywords = self.domain_keywords.get(domain, [])
@@ -197,8 +207,8 @@ class SmartIPMatcher:
     
     def _calculate_audience_match(self, title: str, ip_profile: Dict[str, Any]) -> float:
         """计算受众匹配度"""
-        target_audience = ip_profile.get("target_audience", "").lower()
-        title_lower = title.lower()
+        target_audience = self._safe_lower(ip_profile.get("target_audience"))
+        title_lower = self._safe_lower(title)
         
         # 找出IP的目标受众
         ip_audiences = set()
@@ -228,7 +238,7 @@ class SmartIPMatcher:
     def _calculate_style_match(self, title: str, ip_profile: Dict[str, Any]) -> float:
         """计算风格匹配度"""
         # 基于IP的风格特征
-        style_features = ip_profile.get("style_features", "").lower()
+        style_features = self._safe_lower(ip_profile.get("style_features"))
         
         # 检测标题风格
         title_style_indicators = {
@@ -240,7 +250,7 @@ class SmartIPMatcher:
         }
         
         # 简单匹配：如果标题风格与IP风格描述有重叠
-        title_lower = title.lower()
+        title_lower = self._safe_lower(title)
         match_score = 0.5
         
         for style, indicators in title_style_indicators.items():
@@ -255,13 +265,13 @@ class SmartIPMatcher:
     
     def _calculate_value_match(self, title: str, ip_profile: Dict[str, Any]) -> float:
         """计算价值主张匹配度"""
-        unique_value = ip_profile.get("unique_value_prop", "").lower()
+        unique_value = self._safe_lower(ip_profile.get("unique_value_prop"))
         
         if not unique_value:
             return 0.5
         
         # 提取标题中的价值关键词
-        title_lower = title.lower()
+        title_lower = self._safe_lower(title)
         
         # 价值关键词
         value_keywords = ["省钱", "赚钱", "省时间", "高效", "简单", "轻松", "专业", "靠谱"]
@@ -280,7 +290,7 @@ class SmartIPMatcher:
         
         # 检测是否包含需要专业设备/场景的词汇
         complex_indicators = ["电影级", "纪录片", "航拍", "特效", "专业棚", "团队"]
-        title_lower = title.lower()
+        title_lower = self._safe_lower(title)
         
         complexity_score = 0
         for indicator in complex_indicators:
@@ -291,7 +301,7 @@ class SmartIPMatcher:
         feasibility = 1.0 - complexity_score
         
         # 检查是否有IP能提供的独特资源/经历
-        expertise = ip_profile.get("expertise", "").lower()
+        expertise = self._safe_lower(ip_profile.get("expertise"))
         if any(kw in title_lower for kw in expertise.split(",") if kw):
             feasibility += 0.1
         
@@ -304,7 +314,7 @@ class SmartIPMatcher:
         Returns:
             (内容类型, 置信度)
         """
-        title_lower = title.lower()
+        title_lower = self._safe_lower(title)
         scores = {t: 0 for t in self.content_type_keywords.keys()}
         
         for content_type, keywords in self.content_type_keywords.items():
@@ -326,7 +336,7 @@ class SmartIPMatcher:
     
     def extract_viral_elements(self, title: str) -> List[str]:
         """提取标题中的爆款元素"""
-        title_lower = title.lower()
+        title_lower = self._safe_lower(title)
         elements = []
         
         for element, keywords in self.viral_element_keywords.items():

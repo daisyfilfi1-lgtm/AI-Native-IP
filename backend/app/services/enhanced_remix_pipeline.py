@@ -169,9 +169,10 @@ class EnhancedRemixPipeline:
                 ip_id=self.ip_id,
                 top_k=self.retrieval_top_k
             )
-            # Handle both dict and other types
             if isinstance(search_result, dict):
                 assets = search_result.get("results", [])
+            elif isinstance(search_result, list):
+                assets = search_result
             else:
                 assets = []
         except Exception as e:

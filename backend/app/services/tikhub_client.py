@@ -184,6 +184,34 @@ def looks_like_douyin_share_url(url: str) -> bool:
     return "douyin.com" in u or "iesdouyin.com" in u
 
 
+def extract_douyin_video_url(data: Any) -> Optional[str]:
+    """
+    从 TikHub 抖音单条作品响应中提取无水印视频地址。
+    优先取 video.play_addr.url_list[0]，其次 video.play_addr_lowbr.url_list[0]。
+    """
+    if not isinstance(data, dict):
+        return None
+
+    # 解包 TikHub 常见嵌套
+    for key in ("aweme_detail", "aweme", "video", "item", "data"):
+        if key in data and isinstance(data[key], dict):
+            data = {**data, **data[key]}
+
+    video = data.get("video")
+    if not isinstance(video, dict):
+        return None
+
+    for addr_key in ("play_addr", "play_addr_lowbr"):
+        addr = video.get(addr_key)
+        if isinstance(addr, dict):
+            url_list = addr.get("url_list")
+            if isinstance(url_list, list):
+                for u in url_list:
+                    if isinstance(u, str) and u.startswith("http"):
+                        return u
+    return None
+
+
 _URL_RE = re.compile(r"https?://[^\s<>\"']+")
 _GENERIC_TOPIC_TITLE_RE = re.compile(r"^热点选题\s*\d+$")
 

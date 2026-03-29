@@ -24,9 +24,9 @@ from app.db.models import ContentDraft, IP, IPAsset
 from app.prompts.viral_strategy_templates import get_viral_template, resolve_viral_elements
 from app.services.content_scenario import (
     ContentGenerator,
-    ScenarioTwoRequest,
     ScenarioThreeRequest,
 )
+from app.services.enhanced_remix_pipeline import create_enhanced_remix
 from app.services import (
     competitor_text_extraction,
     remix_recommendation_service,
@@ -110,6 +110,17 @@ def get_ip_profile(db: Session, ip_id: str) -> Optional[Dict[str, Any]]:
         "expertise": ip.expertise or "",
     }
     merged = {**base, **sp}
+    
+    # 兼容 EnhancedRemixPipeline 的字段命名
+    # style_profile 可能存储的是旧字段名，需要映射到新字段名
+    if "style" in merged and not merged.get("style_features"):
+        merged["style_features"] = merged["style"]
+    if "style_evidence" in merged and not merged.get("vocabulary"):
+        # 从 style_evidence 提取词汇特征
+        evidence = merged.get("style_evidence", [])
+        if isinstance(evidence, list) and evidence:
+            merged["vocabulary"] = ", ".join([str(e) for e in evidence[:5]])
+    
     return merged
 
 
@@ -1081,43 +1092,39 @@ async def generate_from_topic(req: TopicGenerateRequest, db: Session = Depends(g
         }
 
 
-# === 场景二：仿写爆款 ===
+# === 场景二：仿写爆款（异步任务模式）===
 class RemixGenerateRequest(BaseModel):
     url: str
     style: str
     ipId: Optional[str] = "1"
 
 
-@router.post("/generate/remix")
-async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(get_db)):
-    """场景二：仿写爆款（链接文案：Web / yt-dlp / Playwright，可选 TikHub 兜底；失败时返回明确错误）"""
-    
-    # 参数校验
-    url = (req.url or "").strip()
-    if not url:
-        return {
-            "id": "gen_remix_invalid",
-            "status": "failed",
-            "error": "链接不能为空",
-        }
-    
-    # 检查链接格式（允许手动输入模式）
-    MANUAL_PREFIX = "[MANUAL_TEXT]"
-    if not url.startswith(("http://", "https://", MANUAL_PREFIX)):
-        return {
-            "id": "gen_remix_invalid",
-            "status": "failed", 
-            "error": "链接格式不正确，必须以 http:// 或 https:// 开头",
-        }
-    
+# 内存任务存储（生产环境建议用 Redis）
+_remix_tasks: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_db_session():
+    """获取独立的数据库 session（用于后台任务）"""
+    from app.db import SessionLocal
+    return SessionLocal()
+
+
+async def _run_remix_task(task_id: str, url: str, style: str, ip_id: str):
+    """后台执行 Remix 任务"""
+    db = None
     try:
-        ip_profile = get_ip_profile(db, req.ipId or "") or {}
-        ip_profile["ip_id"] = req.ipId or "1"
+        db = _get_db_session()
+        _remix_tasks[task_id]["status"] = "processing"
+        _remix_tasks[task_id]["progress"] = 10
+        _remix_tasks[task_id]["stage"] = "extracting"
+        
+        # 获取 IP Profile
+        ip_profile = get_ip_profile(db, ip_id) or {}
+        ip_profile["ip_id"] = ip_id
 
         # 检查是否为手动输入模式
         MANUAL_PREFIX = "[MANUAL_TEXT]"
         if url.startswith(MANUAL_PREFIX):
-            # 手动输入模式：直接提取文本，跳过链接解析
             competitor_text = url[len(MANUAL_PREFIX):].strip()
             extraction_result = {
                 "success": True,
@@ -1130,17 +1137,16 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
                     "resolved_url": "manual_input",
                 }
             }
-            logger.info(f"使用手动输入模式，文本长度: {len(competitor_text)}")
+            logger.info(f"[Task {task_id}] 手动输入模式，文本长度: {len(competitor_text)}")
         else:
-            # 步骤1: 提取竞品文本（使用新版统一提取服务）
+            # 提取竞品文本
             extraction_result = await competitor_text_extraction.extract_competitor_text_with_fallback(url)
         
         if not extraction_result["success"]:
-            logger.warning(f"竞品文本提取失败: {extraction_result['error']}")
-            # 提供更友好的错误信息
             error_msg = extraction_result["error"]
+            logger.warning(f"[Task {task_id}] 文本提取失败: {error_msg}")
             
-            # 分类错误信息 - 提供明确的解决方案
+            # 分类错误信息
             if "TIKHUB_API_KEY" in error_msg:
                 user_error = "文本提取服务未配置（TIKHUB_API_KEY），建议：\n1. 点击「第三方工具」提取文案\n2. 或使用「粘贴文案」手动输入"
             elif "403" in error_msg or "权限" in error_msg:
@@ -1154,61 +1160,64 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
             else:
                 user_error = f"无法提取链接内容，建议：\n1. 使用「第三方工具」提取文案\n2. 或「粘贴文案」手动输入"
             
-            return {
-                "id": "gen_remix_extract_failed",
+            _remix_tasks[task_id].update({
                 "status": "failed",
                 "error": user_error,
                 "details": {
                     "stage": "text_extraction",
                     "url": url[:100],
                     "raw_error": error_msg,
-                    "metadata": extraction_result.get("metadata", {}),
                 }
-            }
+            })
+            return
         
         competitor_text = extraction_result["text"]
         metadata = extraction_result.get("metadata", {})
-        logger.info(f"竞品文本提取成功，方法: {extraction_result['method']}, 平台: {metadata.get('platform')}, 长度: {len(competitor_text)}")
-
-        # 步骤2: 构建风格上下文
-        ip_profile.update(
-            _build_style_context_from_vector(
-                db,
-                ip_id=req.ipId or "1",
-                topic=competitor_text[:200],
-                emotion=str(ip_profile.get("content_direction") or ""),
-                audience=str(ip_profile.get("target_audience") or ""),
-                top_k=3,
-            )
-        )
-
-        # 步骤3: 构建生成请求
-        request = ScenarioTwoRequest(
-            ip_id=req.ipId or "1",
-            competitor_content=competitor_text,
-            competitor_platform=None,
-            ip_profile=ip_profile,
-            rewrite_level="medium",
-        )
-
-        # 步骤4: 执行生成
-        result = await ContentGenerator.scenario_two(request)
+        logger.info(f"[Task {task_id}] 文本提取成功，长度: {len(competitor_text)}")
         
-        # 步骤5: 保存结果
+        # 检查文本长度
+        if len(competitor_text.strip()) < 20:
+            _remix_tasks[task_id].update({
+                "status": "failed",
+                "error": "提取的口播稿太短（少于20字），无法进行有效仿写。\n建议：\n1. 检查原视频是否有语音内容\n2. 使用「粘贴文案」手动输入完整文案",
+                "details": {
+                    "stage": "text_validation",
+                    "text_length": len(competitor_text),
+                }
+            })
+            return
+        
+        _remix_tasks[task_id]["progress"] = 40
+        _remix_tasks[task_id]["stage"] = "remixing"
+        
+        # 执行增强洗稿
+        result = create_enhanced_remix(
+            ip_id=ip_id,
+            ip_profile=ip_profile,
+            competitor_content=competitor_text,
+            competitor_url=url,
+            topic=competitor_text[:200],
+        )
+        
+        _remix_tasks[task_id]["progress"] = 80
+        _remix_tasks[task_id]["stage"] = "saving"
+        
+        # 保存结果
         draft_id = f"gen_remix_{uuid.uuid4().hex[:10]}"
-        raw_score = float(result.score or 0.0)
+        safe_content = str(result.get("content", "")).strip()
+        quality = result.get("quality") or {}
+        raw_score = float(quality.get("overall", 0.8) if isinstance(quality, dict) else 0.8)
         if not math.isfinite(raw_score):
-            raw_score = 0.0
-        safe_content = (result.content if isinstance(result.content, str) else "") or ""
+            raw_score = 0.8
         
         _save_generated_draft(
             db,
             draft_id=draft_id,
-            ip_id=req.ipId or "1",
+            ip_id=ip_id,
             level="remix",
             title="仿写爆款",
             content=safe_content,
-            style=req.style,
+            style=style,
             generation_source="remix",
             score=raw_score,
             extra_workflow={
@@ -1217,31 +1226,129 @@ async def generate_from_remix(req: RemixGenerateRequest, db: Session = Depends(g
                 "text_extraction_platform": metadata.get("platform"),
                 "text_extraction_resolved_url": metadata.get("resolved_url"),
                 "text_extraction_length": len(competitor_text),
-                "original_competitor_text": competitor_text[:500],  # 保存前500字符用于调试
-                "styleDiagnostics": (result.metadata or {}).get("style_diagnostics"),
-                "structureSnapshot": (result.metadata or {}).get("structure_snapshot"),
-                "retrievalTrace": (result.metadata or {}).get("retrieval_trace"),
-                "validationReport": (result.metadata or {}).get("validation_report"),
-                "remixV2Enabled": (result.metadata or {}).get("remix_v2_enabled"),
+                "original_competitor_text": competitor_text[:500],
+                "structure": result.get("structure"),
+                "elevations": result.get("elevations"),
+                "viral_elements": result.get("viral_elements"),
+                "assets_used": [
+                    {"id": a.get("id"), "title": a.get("title")}
+                    for a in (result.get("assets_used") or [])
+                ],
+                "duration_seconds": result.get("duration_seconds"),
+                "remixV2Enabled": True,
             },
         )
-
-        return {
-            "id": draft_id,
+        
+        _remix_tasks[task_id].update({
             "status": "completed",
             "progress": 100,
-            "estimatedTime": 0,
+            "draft_id": draft_id,
             "content": safe_content,
             "score": raw_score,
-        }
+        })
+        logger.info(f"[Task {task_id}] 任务完成，draft_id: {draft_id}")
         
     except Exception as e:
-        logger.exception("generate_from_remix failed: %s", e)
-        return {
-            "id": "gen_remix_error",
+        logger.exception(f"[Task {task_id}] 任务失败: {e}")
+        _remix_tasks[task_id].update({
             "status": "failed",
             "error": f"仿写生成失败: {str(e)}",
+        })
+    finally:
+        if db:
+            db.close()
+
+
+@router.post("/generate/remix")
+async def generate_from_remix(req: RemixGenerateRequest):
+    """场景二：仿写爆款 - 提交异步任务
+    
+    返回任务ID，前端需要轮询 /generate/remix/{task_id}/status 获取进度
+    """
+    # 参数校验
+    url = (req.url or "").strip()
+    if not url:
+        return {
+            "task_id": "",
+            "status": "failed",
+            "error": "链接不能为空",
         }
+    
+    MANUAL_PREFIX = "[MANUAL_TEXT]"
+    if not url.startswith(("http://", "https://", MANUAL_PREFIX)):
+        return {
+            "task_id": "",
+            "status": "failed", 
+            "error": "链接格式不正确，必须以 http:// 或 https:// 开头",
+        }
+    
+    # 创建任务
+    task_id = f"remix_task_{uuid.uuid4().hex[:16]}"
+    _remix_tasks[task_id] = {
+        "task_id": task_id,
+        "status": "pending",
+        "progress": 0,
+        "stage": "pending",
+        "url": url[:100],
+        "ip_id": req.ipId or "1",
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    
+    # 启动后台任务
+    import asyncio
+    asyncio.create_task(_run_remix_task(task_id, url, req.style, req.ipId or "1"))
+    
+    logger.info(f"[Task {task_id}] 任务已提交")
+    
+    return {
+        "task_id": task_id,
+        "status": "pending",
+        "progress": 0,
+        "message": "任务已提交，请轮询状态接口获取进度",
+    }
+
+
+@router.get("/generate/remix/{task_id}/status")
+async def get_remix_task_status(task_id: str):
+    """查询 Remix 任务状态"""
+    task = _remix_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    # 清理敏感信息
+    return {
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "progress": task.get("progress", 0),
+        "stage": task.get("stage", ""),
+        "error": task.get("error"),
+        "draft_id": task.get("draft_id"),
+    }
+
+
+@router.get("/generate/remix/{task_id}/result")
+async def get_remix_task_result(task_id: str):
+    """获取 Remix 任务结果（完成后）"""
+    task = _remix_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    if task["status"] != "completed":
+        return {
+            "task_id": task_id,
+            "status": task["status"],
+            "error": task.get("error"),
+        }
+    
+    return {
+        "task_id": task_id,
+        "status": "completed",
+        "id": task.get("draft_id"),
+        "progress": 100,
+        "estimatedTime": 0,
+        "content": task.get("content"),
+        "score": task.get("score"),
+    }
 
 
 @router.get("/remix/recommendations")

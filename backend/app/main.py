@@ -29,11 +29,12 @@ from app.routers import (
     memory,
     memory_consolidation,
     multimodal,
+    remix,
+    remix_agent,
     strategy_agent,
     style,
-    vector,
-    remix,
     topic_recommendation,
+    vector,
     migration,
 )
 from app.middleware.auth import verify_api_key_or_jwt
@@ -174,6 +175,7 @@ def create_app() -> FastAPI:
     app.include_router(strategy_agent.router, prefix="/api/v1", tags=["strategy"], dependencies=api_key_dep)
     app.include_router(style.router, prefix="/api/v1", tags=["style"], dependencies=api_key_dep)
     app.include_router(remix.router, prefix="/api/v1", tags=["remix"], dependencies=api_key_dep)
+    app.include_router(remix_agent.router, prefix="/api/v1", tags=["agent"], dependencies=api_key_dep)
     app.include_router(topic_recommendation.router, prefix="/api/v1", tags=["topic"], dependencies=api_key_dep)
     app.include_router(debug.router, prefix="/api/v1", tags=["debug"], dependencies=api_key_dep)
     # 临时修复路由 - 迁移竞品账号

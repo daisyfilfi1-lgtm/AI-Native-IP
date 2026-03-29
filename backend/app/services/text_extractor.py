@@ -1,10 +1,12 @@
 """
-统一文本提取服务
-整合多种提取策略：Web 爬取、yt-dlp、Playwright、可选 TikHub API。
+统一文本提取服务（口播稿专用）
 
-抖音/小红书：默认优先自研链路（Web → yt-dlp → Playwright），TikHub 置后且可用
-REMIX_SKIP_TIKHUB=1 跳过。Web 结果过短（REMIX_MIN_WEB_CHARS，默认 50）视为失败并继续尝试。
-Playwright 使用 domcontentloaded + 页面内 JSON（__UNIVERSAL_DATA__ 等）解析，避免 networkidle 卡死。
+抖音：TikHub → 视频直链 → 下载 → ffmpeg → 阿里云 ASR（极速版）
+      失败后再尝试本地 Whisper 兜底。
+小红书：Playwright 优先（图文正文 / 视频拦截）
+        失败后再尝试本地 Whisper 兜底。
+
+Web 爬取对短视频口播稿基本无效，已从抖音链路中移除。
 """
 import json
 import logging
@@ -12,12 +14,13 @@ import os
 import re
 import shutil
 import asyncio
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 import httpx
 
-from app.services import tikhub_client
+from app.services import tikhub_client, aliyun_asr
 from app.services.link_resolver import resolve_any_url, detect_platform
 
 logger = logging.getLogger(__name__)
@@ -674,6 +677,113 @@ def _whisper_enabled() -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+# ============== 抖音专用音频提取链路 ==============
+
+async def extract_douyin_audio_pipeline(url: str) -> ExtractResult:
+    """
+    抖音最优链路：TikHub → 视频直链 → 下载 → ffmpeg → 阿里云 ASR
+    """
+    # Step 1: TikHub 解析视频直链
+    try:
+        raw = await tikhub_client.fetch_douyin_web_one_video_by_share_url(url)
+        video_url = tikhub_client.extract_douyin_video_url(raw)
+        if not video_url:
+            return ExtractResult(
+                success=False,
+                text="",
+                method="tikhub",
+                error="TikHub 未返回视频地址",
+            )
+    except Exception as e:
+        return ExtractResult(
+            success=False,
+            text="",
+            method="tikhub",
+            error=f"TikHub 解析失败: {e}",
+        )
+
+    temp_dir = tempfile.mkdtemp()
+    video_path = os.path.join(temp_dir, "video.mp4")
+    audio_path = os.path.join(temp_dir, "audio.mp3")
+
+    try:
+        # Step 2: 下载视频（限制 30MB，超时 10s）
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(video_url, follow_redirects=True)
+            r.raise_for_status()
+
+            content_length = int(r.headers.get("content-length", 0))
+            if content_length > 30 * 1024 * 1024:
+                return ExtractResult(
+                    success=False,
+                    text="",
+                    method="download",
+                    error="视频文件过大（>30MB）",
+                )
+
+            with open(video_path, "wb") as f:
+                f.write(r.content)
+
+        # Step 3: ffmpeg 抽音频
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", video_path,
+            "-vn", "-ar", "16000", "-ac", "1", "-b:a", "32k",
+            audio_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=15)
+        if proc.returncode != 0:
+            err_msg = err.decode("utf-8", errors="replace")[:200]
+            return ExtractResult(
+                success=False,
+                text="",
+                method="ffmpeg",
+                error=f"音频提取失败: {err_msg}",
+            )
+
+        # Step 4: 阿里云 ASR
+        text = await aliyun_asr.extract_audio_to_text(audio_path)
+        if not text or len(text.strip()) < 5:
+            return ExtractResult(
+                success=False,
+                text="",
+                method="aliyun_asr",
+                error="ASR 返回空文本",
+            )
+
+        return ExtractResult(
+            success=True,
+            text=text.strip(),
+            method="aliyun_asr",
+            metadata={
+                "video_url": video_url[:100],
+                "video_size": os.path.getsize(video_path),
+            },
+        )
+
+    except asyncio.TimeoutError:
+        return ExtractResult(
+            success=False,
+            text="",
+            method="pipeline",
+            error="下载或处理超时",
+        )
+    except Exception as e:
+        return ExtractResult(
+            success=False,
+            text="",
+            method="pipeline",
+            error=f"处理失败: {e}",
+        )
+    finally:
+        for p in [video_path, audio_path]:
+            if os.path.exists(p):
+                os.remove(p)
+        if os.path.exists(temp_dir):
+            os.rmdir(temp_dir)
+
+
 # ============== Whisper 语音识别 ==============
 
 async def extract_with_whisper(resolved_url: str, platform: Optional[str] = None) -> ExtractResult:
@@ -1047,6 +1157,15 @@ async def extract_with_playwright(url: str, platform: Optional[str] = None) -> E
                         continue
                         
             elif platform == "xiaohongshu":
+                # 关键：点击「展开全文」
+                try:
+                    expand = await page.query_selector('text=展开全文')
+                    if expand:
+                        await expand.click()
+                        await asyncio.sleep(0.5)
+                except Exception:
+                    pass
+
                 selectors = [
                     '#detail-desc',
                     '.note-content',
@@ -1065,6 +1184,9 @@ async def extract_with_playwright(url: str, platform: Optional[str] = None) -> E
                                 break
                     except Exception:
                         continue
+
+                # 清理按钮文字
+                text = re.sub(r'^(展开全文|收起)\s*', '', text).strip()
             
             if not text or len(text) < 10:
                 title = await page.title()
@@ -1085,7 +1207,22 @@ async def extract_with_playwright(url: str, platform: Optional[str] = None) -> E
             text = text.strip() if text else ""
             if platform == "xiaohongshu" and text:
                 text = re.sub(r"^展开\s*", "", text).strip()
-            
+
+            # 小红书：正文很短且页面有视频元素，判定为视频笔记，建议走 Whisper
+            if platform == "xiaohongshu" and (not text or len(text) < 50):
+                try:
+                    is_video = await page.query_selector('video') or await page.query_selector('.video-player')
+                    if is_video:
+                        return ExtractResult(
+                            success=False,
+                            text="",
+                            method="playwright",
+                            error="小红书视频笔记，需要音频提取",
+                            metadata={"platform": platform, "needs_whisper": True}
+                        )
+                except Exception:
+                    pass
+
             if text and len(text) > 10:
                 return ExtractResult(
                     success=True,
@@ -1173,14 +1310,21 @@ async def extract_text(url: str, prefer_method: Optional[str] = None) -> Extract
                 ("playwright", lambda: extract_with_playwright(resolved_url, platform)),
             ]
         )
-    elif platform in ("douyin", "xiaohongshu"):
-        # 抖音/小红书：直接用 Whisper 提取口播（目标），可选 TikHub 备选
-        # 跳过 Playwright 和 yt-dlp（只能提取标题/标签，非口播）
+    elif platform == "douyin":
+        # 抖音：TikHub → 视频直链 → 下载 → ffmpeg → 阿里云 ASR（最优）
+        # 失败后再尝试本地 Whisper 兜底
         strategies = []
+        if use_tikhub:
+            strategies.append(("douyin_pipeline", lambda: extract_douyin_audio_pipeline(resolved_url)))
         if _whisper_enabled():
             strategies.append(("whisper", lambda: extract_with_whisper(resolved_url, platform)))
-        if use_tikhub:
-            strategies.append(("tikhub", lambda: extract_with_tikhub(resolved_url, platform)))
+    elif platform == "xiaohongshu":
+        # 小红书：Playwright 优先（图文正文在页面里；视频则拦截或降级 Whisper）
+        strategies = []
+        if _playwright_enabled():
+            strategies.append(("playwright", lambda: extract_with_playwright(resolved_url, platform)))
+        if _whisper_enabled():
+            strategies.append(("whisper", lambda: extract_with_whisper(resolved_url, platform)))
     else:
         # 其他平台：Web → 可选 TikHub → yt-dlp → Playwright
         strategies = [

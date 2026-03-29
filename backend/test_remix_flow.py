@@ -63,9 +63,9 @@ async def test_text_extraction():
 async def test_scenario_two_pipeline():
     """测试场景二生成管道"""
     print("\n=== 测试4: 场景二生成管道 ===")
-    
-    from app.services.content_scenario import ScenarioTwoGenerator
-    
+
+    from app.services.content_scenario import ContentGenerator, ScenarioTwoRequest
+
     # 模拟IP画像
     ip_profile = {
         "ip_id": "xiaomin1",
@@ -75,7 +75,7 @@ async def test_scenario_two_pipeline():
         "content_direction": "女性独立、搞钱方法论",
         "target_audience": "想搞钱的宝妈",
     }
-    
+
     # 模拟竞品内容（如果文本提取失败，这就是兜底文本）
     competitor_content = """
     30岁被裁员后，我用这个方法月入5万
@@ -83,20 +83,22 @@ async def test_scenario_two_pipeline():
     我曾经也是这样，直到我发现了这个副业方法...
     现在我把这个方法分享给你，记得点赞收藏！
     """
-    
-    generator = ScenarioTwoGenerator(ip_profile)
-    
+
+    request = ScenarioTwoRequest(
+        ip_id="xiaomin1",
+        competitor_content=competitor_content.strip(),
+        competitor_platform="douyin",
+        ip_profile=ip_profile,
+        rewrite_level="medium",
+    )
+
     try:
-        result = await generator.generate(
-            competitor_content=competitor_content,
-            platform="douyin",
-            rewrite_level="medium"
-        )
+        result = await ContentGenerator.scenario_two(request)
         print(f"  生成状态: {'成功' if result.content else '失败'}")
         print(f"  内容长度: {len(result.content)}")
         print(f"  质量评分: {result.score}")
         print(f"  元数据: {result.metadata.keys()}")
-        
+
         if not result.content:
             print("  ⚠️ 警告: 生成内容为空")
     except Exception as e:

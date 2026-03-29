@@ -153,48 +153,33 @@ async def get_competitor_stats(
     summary="测试内容重构（调试用）"
 )
 async def test_remix(
-    title: str = Query(..., description="原标题"),
+    title: str = Query(..., description="原标题/口播稿"),
     ip_id: str = Query(..., description="IP ID")
 ):
-    """测试内容重构引擎"""
-    from app.services.competitor_content_remixer import CompetitorContentRemixer
-    
-    remixer = CompetitorContentRemixer()
-    
-    # 模拟竞品选题
-    test_topic = {
-        "title": title,
-        "extra": {
-            "content_structure": {
-                "hook_type": "数字",
-                "conflict_point": "",
-                "emotion_type": "励志",
-                "target_audience": ""
-            }
-        }
-    }
-    
-    # 模拟IP画像
+    """测试增强洗稿管道"""
+    from app.services.enhanced_remix_pipeline import create_enhanced_remix
+
     ip_profile = {
-        "ip_id": ip_id,
-        "expertise": "宝妈创业、副业变现",
-        "target_audience": "宝妈、想赚钱的女性",
-        "content_direction": "在家赚钱、女性成长"
+        "name": "测试IP",
+        "style_features": "亲切、专业、有温度",
+        "vocabulary": "创业、副业、变现",
+        "tone": "亲切专业",
+        "catchphrases": "姐妹们、听我说",
     }
-    
-    result = remixer.remix(test_topic, ip_profile)
-    
-    if result:
-        return {
-            "original": result.original_title,
-            "remixed": result.remixed_title,
-            "confidence": result.confidence,
-            "angle": result.angle.value,
-            "content_type": result.structure.content_type,
-            "reason": result.reason,
-        }
-    else:
-        return {"error": "重构失败"}
+
+    result = create_enhanced_remix(
+        ip_id=ip_id,
+        ip_profile=ip_profile,
+        competitor_content=title,
+        topic=title[:50],
+    )
+
+    return {
+        "content": result.get("content"),
+        "quality": result.get("quality"),
+        "structure": result.get("structure"),
+        "viral_elements": result.get("viral_elements"),
+    }
 
 
 @router.get(

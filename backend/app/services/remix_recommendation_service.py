@@ -1,5 +1,5 @@
 """
-仿写推荐：结合 IP 定位关键词 + 抖音低粉爆款榜 + 小红书话题笔记流（TikHub）。
+仿写推荐：优先显示已抓取的竞品视频（competitor_videos）+ 抖音低粉爆款榜（TikHub）
 strategy_config.remix 可配置：
   search_keywords: 额外关键词列表
   xhs_topic_page_ids: 小红书话题 page_id 列表
@@ -12,6 +12,7 @@ import logging
 import os
 import re
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 
@@ -139,10 +140,62 @@ async def build_remix_recommendations(
     ip_id: str,
     limit: int = 12,
 ) -> List[Dict[str, Any]]:
+    from app.db.models import CompetitorAccount
+    from sqlalchemy import text
+    
     ip = db.query(IP).filter(IP.ip_id == ip_id).first()
     kws = remix_keywords_for_ip(ip)
     items: List[Dict[str, Any]] = []
     seen_urls: set = set()
+    
+    # 首先获取已抓取的竞品视频（按点赞数排序，优先显示爆款）
+    try:
+        # 直接查询 competitor_videos 表
+        result = db.execute(text("""
+            SELECT v.video_id, v.title, v.author, v.platform, v.like_count, v.play_count, c.name as competitor_name
+            FROM competitor_videos v
+            JOIN competitor_accounts c ON v.competitor_id = c.competitor_id
+            WHERE c.ip_id = :ip_id
+            ORDER BY v.like_count DESC NULLS LAST
+            LIMIT :limit
+        """), {"ip_id": ip_id, "limit": limit})
+        
+        videos = result.fetchall()
+        for video in videos:
+            platform = video.platform or "douyin"
+            video_id = video.video_id
+            
+            # 构造视频链接
+            if platform == "douyin":
+                video_url = f"https://www.douyin.com/video/{video_id}"
+            elif platform == "xiaohongshu":
+                video_url = f"https://www.xiaohongshu.com/explore/{video_id}"
+            else:
+                continue
+            
+            if video_url in seen_urls:
+                continue
+            seen_urls.add(video_url)
+            
+            # 构造理由文本
+            like_str = f"{video.like_count / 10000:.1f}万" if video.like_count and video.like_count > 10000 else str(video.like_count or 0)
+            reason = f"我的竞品：{video.competitor_name} · {like_str}赞"
+            
+            items.append({
+                "url": video_url,
+                "title": video.title or f"{video.author}的视频",
+                "platform": platform,
+                "reason": reason,
+                "is_my_competitor": True,
+                "competitor_name": video.competitor_name,
+                "like_count": video.like_count,
+            })
+            
+            if len(items) >= limit:
+                return items[:limit]
+                
+    except Exception as e:
+        logger.warning("已抓取竞品视频加载失败: %s", e)
 
     if tikhub_client.is_configured():
         try:

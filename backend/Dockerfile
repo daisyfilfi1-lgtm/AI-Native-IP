@@ -2,10 +2,11 @@
 # 与仓库根 Dockerfile 行为一致：迁移后启动 Uvicorn。
 FROM python:3.11-slim
 
-# 安装系统依赖（包括 Playwright 需要的依赖）
+# 安装系统依赖（包括 Playwright 和 ffmpeg 需要的依赖）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    ffmpeg \
     wget \
     gnupg \
     libglib2.0-0 \

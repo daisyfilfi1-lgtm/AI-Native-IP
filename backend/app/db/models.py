@@ -158,6 +158,30 @@ class IntegrationConfig(Base):
     updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
 
 
+class RemixAgentConfig(Base):
+    """Remix Agent 动态配置表"""
+    __tablename__ = "remix_agent_config"
+
+    config_id = Column(String(64), primary_key=True)
+    ip_id = Column(String(64), ForeignKey("ip.ip_id"), nullable=False, index=True)
+    
+    # 四大脚本模板配置
+    templates = Column(JSONB, nullable=False, default=list)
+    
+    # 解构规则配置
+    deconstruct_rules = Column(JSONB, nullable=False, default=dict)
+    
+    # 原创度保障阈值
+    originality_thresholds = Column(JSONB, nullable=False, default=dict)
+    
+    # 高级配置
+    advanced_settings = Column(JSONB, nullable=False, default=dict)
+    
+    version = Column(Integer, nullable=False, default=1)
+    updated_by = Column(String(64), nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=now_utc, onupdate=now_utc)
+
+
 class IntegrationBinding(Base):
     __tablename__ = "integration_bindings"
 

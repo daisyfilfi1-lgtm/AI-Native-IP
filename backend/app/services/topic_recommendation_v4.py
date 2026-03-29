@@ -33,12 +33,6 @@ from app.services.real_competitor_service import (
     fetch_competitor_viral_topics,
     get_real_competitor_service,
 )
-from app.services.competitor_content_remixer import (
-    CompetitorContentRemixer, 
-    RemixResult,
-    ContentAngle
-)
-
 logger = logging.getLogger(__name__)
 
 
@@ -93,7 +87,6 @@ class TopicRecommendationServiceV4:
     
     def __init__(self):
         self.datasource_manager = get_datasource_manager_v2()
-        self.remixer = CompetitorContentRemixer()
         # 内容类型分布比例（4-3-2-1矩阵）
         self.content_matrix = {
             "money": 0.40,  # 40% 搞钱方法论
@@ -346,82 +339,13 @@ class TopicRecommendationServiceV4:
         results = []
         
         for topic in topics:
-            # 判断是否为竞品选题
-            is_competitor = topic.extra.get("is_competitor_topic", False)
-            needs_rewrite = topic.extra.get("needs_rewrite", False)
-            
-            if is_competitor and needs_rewrite:
-                # 使用内容重构引擎
-                remix_result = self.remixer.remix(
-                    {
-                        "title": topic.title,
-                        "extra": topic.extra,
-                    },
-                    ip_profile
-                )
-                
-                if remix_result and remix_result.confidence > 0.5:
-                    # 重构成功
-                    recommended = self._create_remixed_topic(topic, remix_result)
-                    results.append(recommended)
-                else:
-                    # 重构失败，使用原标题
-                    recommended = self._create_topic_from_data(topic)
-                    results.append(recommended)
-            else:
-                # 非竞品选题，简单处理
-                recommended = self._create_topic_from_data(topic)
-                results.append(recommended)
+            # 非竞品选题与竞品选题统一走简单处理
+            # 深度仿写由用户进入仿写流程后通过 enhanced_remix_pipeline 完成
+            recommended = self._create_topic_from_data(topic)
+            results.append(recommended)
         
         return results
     
-    def _create_remixed_topic(
-        self, 
-        original: TopicData, 
-        remix: RemixResult
-    ) -> RecommendedTopicV4:
-        """创建重构后的选题"""
-        # 计算仿写潜力
-        play_count = original.extra.get("play_count", 0)
-        remix_potential = self._calculate_remix_potential(play_count, remix.confidence)
-        
-        # 计算爆款分数
-        viral_score = self._calculate_viral_score(play_count, original.extra.get("like_count", 0))
-        
-        # 格式化播放量显示
-        original_plays = self._format_play_count(play_count) if play_count > 0 else None
-        resolved_url = (original.url or "").strip() or self._fallback_topic_url(
-            remix.original_title or remix.remixed_title or original.title,
-            original.platform,
-        )
-
-        return RecommendedTopicV4(
-            topic_id=original.id,
-            title=remix.remixed_title,  # 使用重构后的标题
-            original_title=remix.original_title,
-            source=original.source,
-            source_type="competitor",
-            competitor_author=original.extra.get("competitor_author"),
-            competitor_play_count=play_count,
-            competitor_like_count=original.extra.get("like_count", 0),
-            content_type=remix.structure.content_type,
-            content_angle=remix.structure.angle.value,
-            is_remixed=True,
-            remix_confidence=remix.confidence,
-            remix_reason=remix.reason,
-            tags=original.tags,
-            url=resolved_url,
-            extra={
-                "content_structure": remix.structure,
-                **original.extra
-            },
-            # V4 前端展示字段
-            competitor_name=original.extra.get("competitor_name"),
-            competitor_platform=original.extra.get("competitor_platform", "douyin"),
-            remix_potential=remix_potential,
-            viral_score=viral_score,
-            original_plays=original_plays
-        )
     
     def _create_topic_from_data(self, topic: TopicData) -> RecommendedTopicV4:
         """从TopicData创建RecommendedTopicV4"""

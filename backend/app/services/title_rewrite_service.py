@@ -182,9 +182,11 @@ class TitleRewriteService:
     
     def _extract_ip_profile(self, ip: IP) -> Dict[str, Any]:
         """提取IP人设信息"""
+        nickname = ip.nickname or ip.name
         profile = {
             "name": ip.name,
-            "nickname": ip.nickname or ip.name,
+            "nickname": nickname,
+            "self_name": nickname,  # 适配content_scenario的字段要求
             "bio": ip.bio or "",
             "expertise": ip.expertise or "",
             "passion": ip.passion or "",

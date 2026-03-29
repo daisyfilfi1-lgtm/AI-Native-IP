@@ -170,11 +170,14 @@ class ContentGenerationService:
             db.close()
     
     def _build_ip_profile(self, ip: IP) -> Dict[str, Any]:
-        """构建IP画像"""
+        """构建IP画像 - 适配content_scenario的字段要求"""
+        # content_scenario.py期望self_name而不是nickname
+        nickname = ip.nickname or ip.name
         return {
             "ip_id": ip.ip_id,
             "name": ip.name,
-            "nickname": ip.nickname or ip.name,
+            "nickname": nickname,
+            "self_name": nickname,  # content_scenario使用self_name
             "bio": ip.bio or "",
             "expertise": ip.expertise or "",
             "passion": ip.passion or "",

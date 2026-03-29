@@ -668,6 +668,164 @@ def _ytdlp_enabled() -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _whisper_enabled() -> bool:
+    """检查是否启用语音识别"""
+    v = os.environ.get("REMIX_WHISPER_FALLBACK", "1").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+# ============== Whisper 语音识别 ==============
+
+async def extract_with_whisper(resolved_url: str, platform: Optional[str] = None) -> ExtractResult:
+    """
+    使用 faster-whisper 提取视频语音转文字
+    适合提取口播内容
+    """
+    if not _whisper_enabled():
+        return ExtractResult(
+            success=False,
+            text="",
+            method="whisper",
+            error="语音识别未启用（设置 REMIX_WHISPER_FALLBACK=1 启用）"
+        )
+    
+    # 检查 yt-dlp 是否可用（用于下载音频）
+    yt_dlp_exe = shutil.which("yt-dlp") or shutil.which("yt_dlp")
+    if not yt_dlp_exe:
+        return ExtractResult(
+            success=False,
+            text="",
+            method="whisper",
+            error="yt-dlp 未安装，无法下载音频进行语音识别"
+        )
+    
+    import tempfile
+    import asyncio
+    
+    logger.info(f"开始语音识别提取: {resolved_url[:60]}...")
+    
+    # 创建临时目录
+    temp_dir = tempfile.mkdtemp()
+    audio_path = os.path.join(temp_dir, "audio.mp3")
+    
+    try:
+        # 下载音频（只下载音轨，转为 mp3）
+        download_proc = await asyncio.create_subprocess_exec(
+            yt_dlp_exe,
+            "-x",  # 提取音频
+            "--audio-format", "mp3",
+            "--audio-quality", "0",  # 最高质量
+            "-o", audio_path,
+            "--no-warnings",
+            "--no-progress",
+            resolved_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        
+        out_b, err_b = await asyncio.wait_for(download_proc.communicate(), timeout=120.0)
+        
+        if download_proc.returncode != 0:
+            err_msg = (err_b or b"").decode("utf-8", errors="replace")[:200]
+            logger.warning(f"音频下载失败: {err_msg}")
+            return ExtractResult(
+                success=False,
+                text="",
+                method="whisper",
+                error=f"音频下载失败: {err_msg}"
+            )
+        
+        # 检查音频文件是否生成
+        if not os.path.exists(audio_path):
+            logger.warning("音频文件未生成")
+            return ExtractResult(
+                success=False,
+                text="",
+                method="whisper",
+                error="音频文件未生成"
+            )
+        
+        # 使用 faster-whisper 进行语音识别
+        try:
+            from faster_whisper import WhisperModel
+            
+            # 使用 small 模型（兼顾速度和准确度）
+            model_size = os.environ.get("WHISPER_MODEL_SIZE", "small")
+            logger.info(f"加载 Whisper {model_size} 模型...")
+            
+            # 先尝试用 CPU，如果失败再用 int8
+            try:
+                model = WhisperModel(model_size, device="cpu", compute_type="int8")
+            except Exception:
+                model = WhisperModel(model_size, device="cpu", compute_type="float32")
+            
+            logger.info("开始语音识别...")
+            segments, info = model.transcribe(
+                audio_path,
+                language="zh",
+                beam_size=5,
+                vad_filter=True,  # 启用语音活动检测
+                vad_parameters=dict(min_silence_duration_ms=500)
+            )
+            
+            logger.info(f"检测到语言: {info.language}, 概率: {info.language_probability:.2f}")
+            
+            # 合并所有片段
+            transcribed_text = []
+            for segment in segments:
+                text = segment.text.strip()
+                if text:
+                    transcribed_text.append(text)
+            
+            full_text = " ".join(transcribed_text)
+            
+            if full_text and len(full_text) > 20:
+                logger.info(f"语音识别成功，长度: {len(full_text)}")
+                return ExtractResult(
+                    success=True,
+                    text=full_text[:15000],  # 限制长度
+                    method="whisper",
+                    metadata={
+                        "language": info.language,
+                        "language_probability": info.language_probability,
+                        "platform": platform,
+                    }
+                )
+            else:
+                return ExtractResult(
+                    success=False,
+                    text="",
+                    method="whisper",
+                    error="语音识别结果为空"
+                )
+                
+        except ImportError:
+            return ExtractResult(
+                success=False,
+                text="",
+                method="whisper",
+                error="faster-whisper 未安装"
+            )
+        except Exception as e:
+            logger.warning(f"语音识别失败: {e}")
+            return ExtractResult(
+                success=False,
+                text="",
+                method="whisper",
+                error=f"语音识别失败: {e}"
+            )
+    
+    finally:
+        # 清理临时文件
+        try:
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+            if os.path.exists(temp_dir):
+                os.rmdir(temp_dir)
+        except Exception:
+            pass
+
+
 # ============== Playwright 浏览器提取 (终极方案) ==============
 
 _playwright_instance = None
@@ -1016,13 +1174,16 @@ async def extract_text(url: str, prefer_method: Optional[str] = None) -> Extract
             ]
         )
     elif platform in ("douyin", "xiaohongshu"):
-        # 抖音/小红书：不依赖第三方 API。顺序：轻量 Web → yt-dlp（抖音元数据常可用）→ Playwright（真实渲染 + JSON）→ 可选 TikHub
+        # 抖音/小红书：不依赖第三方 API。顺序：轻量 Web → yt-dlp → Playwright → Whisper(口播) → 可选 TikHub
         strategies = [
             ("web_scrape", lambda: extract_with_web_scrape(resolved_url, platform)),
             ("ytdlp", lambda: extract_with_ytdlp(resolved_url)),
         ]
         if _playwright_enabled():
             strategies.append(("playwright", lambda: extract_with_playwright(resolved_url, platform)))
+        # Whisper 语音识别 - 提取口播内容
+        if _whisper_enabled():
+            strategies.append(("whisper", lambda: extract_with_whisper(resolved_url, platform)))
         if use_tikhub:
             strategies.append(("tikhub", lambda: extract_with_tikhub(resolved_url, platform)))
     else:

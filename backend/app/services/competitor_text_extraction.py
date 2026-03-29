@@ -3,7 +3,7 @@
 使用统一的文本提取服务
 """
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.services.text_extractor import extract_text, ExtractResult
 from app.services.link_resolver import resolve_any_url
@@ -11,9 +11,14 @@ from app.services.link_resolver import resolve_any_url
 logger = logging.getLogger(__name__)
 
 
-async def extract_competitor_text_with_fallback(url: str) -> Dict[str, Any]:
+async def extract_competitor_text_with_fallback(
+    url: str,
+    pasted_script: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     带诊断信息的竞品文本提取（主入口）
+
+    pasted_script: 可选；与链接一起提供时（尤其抖音），会并入豆包/TikHub 上下文，提高准确度。
     
     返回:
         {
@@ -34,7 +39,7 @@ async def extract_competitor_text_with_fallback(url: str) -> Dict[str, Any]:
         }
     
     # 使用统一的提取服务
-    result: ExtractResult = await extract_text(url.strip())
+    result: ExtractResult = await extract_text(url.strip(), pasted_script=pasted_script)
     
     return {
         "success": result.success,

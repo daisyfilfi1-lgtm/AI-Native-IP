@@ -1,13 +1,14 @@
 """
 统一文本提取服务（口播稿专用）
 
-抖音：默认优先火山方舟豆包（ARK_API_KEY + ARK_MODEL）根据链接与页面摘录生成口播稿；
-      未配置豆包时仍走 TikHub → ffmpeg → ASR；可选本地 Whisper。
-      已配置豆包时默认不再跑 TikHub/Whisper（更省、更稳），需要时可设 REMIX_DOUYIN_TRY_LEGACY=1。
+抖音：主路径为豆包（ARK）；会先合并 TikHub 元数据、页面摘录、可选用户粘贴，
+      可选 REMIX_DOUYIN_ASR_BEFORE_DOUBAO=1 时再并入 ASR，再交给豆包整理。
+      未配置豆包时仍走 TikHub → ffmpeg → ASR；可选 Whisper。
+      已配置豆包时默认不再跑 TikHub/ASR/Whisper，除非 REMIX_DOUYIN_TRY_LEGACY=1。
 小红书：Playwright 优先（图文正文 / 视频拦截）
         失败后再尝试本地 Whisper 兜底。
 
-Web 爬取对短视频口播稿基本无效，已从抖音链路中移除。
+Web 爬取对短视频口播稿基本无效，豆包侧仅作补充摘录。
 """
 import json
 import logging
@@ -1270,8 +1271,85 @@ def _douyin_try_legacy_pipeline() -> bool:
     return True
 
 
-async def extract_with_doubao_douyin(resolved_url: str, original_url: str) -> ExtractResult:
-    """抖音：豆包根据链接 + 可选页面摘录生成口播稿（主路径）。"""
+def _douyin_asr_before_doubao() -> bool:
+    """素材仍过短时，是否在调用豆包前尝试 TikHub→下载→ASR（较慢，默认关闭）。"""
+    v = os.environ.get("REMIX_DOUYIN_ASR_BEFORE_DOUBAO", "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _douyin_snippet_min_chars_for_asr() -> int:
+    raw = os.environ.get("REMIX_DOUYIN_MIN_SNIPPET_FOR_ASR", "").strip()
+    if raw.isdigit():
+        return max(0, int(raw))
+    return 40
+
+
+async def _assemble_douyin_context_for_doubao(
+    resolved_url: str,
+    platform: str,
+    pasted_context: Optional[str] = None,
+) -> tuple[str, dict]:
+    """
+    为豆包组装上下文：用户粘贴 → TikHub 元数据 → 页面摘录 →（可选）ASR 全文。
+    返回 (合并后的摘录, 诊断字段)。
+    """
+    parts: list[str] = []
+    meta: dict = {
+        "tikhub_len": 0,
+        "web_len": 0,
+        "asr_len": 0,
+        "paste_len": 0,
+    }
+
+    if pasted_context and pasted_context.strip():
+        p = pasted_context.strip()[:12000]
+        parts.append("【用户粘贴的文案/补充】\n" + p)
+        meta["paste_len"] = len(p)
+
+    if _tikhub_in_chain() and tikhub_client.is_configured():
+        try:
+            tr = await extract_with_tikhub(resolved_url, platform)
+            if tr.success and tr.text and tr.text.strip():
+                t = tr.text.strip()[:8000]
+                parts.append("【来自 TikHub 接口的标题/描述等元数据】\n" + t)
+                meta["tikhub_len"] = len(t)
+        except Exception as e:
+            logger.debug("豆包前置 TikHub 元数据失败: %s", e)
+
+    try:
+        wr = await extract_with_web_scrape(resolved_url, "douyin")
+        if wr.success and wr.text and wr.text.strip():
+            w = wr.text.strip()[:8000]
+            parts.append("【页面 HTML 可见文字摘录】\n" + w)
+            meta["web_len"] = len(w)
+    except Exception as e:
+        logger.debug("豆包前置网页摘录失败（可忽略）: %s", e)
+
+    combined = "\n\n".join(parts)
+
+    if (
+        _douyin_asr_before_doubao()
+        and len(combined.strip()) < _douyin_snippet_min_chars_for_asr()
+        and tikhub_client.is_configured()
+    ):
+        try:
+            ar = await extract_douyin_audio_pipeline(resolved_url)
+            if ar.success and ar.text and len(ar.text.strip()) >= 5:
+                a = ar.text.strip()[:12000]
+                combined = (combined + "\n\n" if combined.strip() else "") + "【语音识别 ASR 全文】\n" + a
+                meta["asr_len"] = len(a)
+        except Exception as e:
+            logger.debug("豆包前置 ASR 失败: %s", e)
+
+    return combined, meta
+
+
+async def extract_with_doubao_douyin(
+    resolved_url: str,
+    original_url: str,
+    pasted_context: Optional[str] = None,
+) -> ExtractResult:
+    """抖音：先拼 TikHub/页面/可选粘贴与可选 ASR，再交给豆包整理成口播稿（主路径）。"""
     from app.services.doubao_script_client import douyin_script_via_doubao, is_doubao_configured
 
     if not is_doubao_configured():
@@ -1279,24 +1357,26 @@ async def extract_with_doubao_douyin(resolved_url: str, original_url: str) -> Ex
             success=False,
             text="",
             method="doubao",
-            error="豆包未配置：请设置 ARK_API_KEY（或 DOUBAO_API_KEY）与 ARK_MODEL（推理接入点 ID）",
+            error="豆包未配置：请设置 ARK_API_KEY（或 DOUBAO_API_KEY），以及 ARK_MODEL（推理接入点 ep ）或 ARK_BOT_ID（应用 Bot）",
         )
 
-    snippet = ""
-    try:
-        wr = await extract_with_web_scrape(resolved_url, "douyin")
-        if wr.success and wr.text:
-            snippet = wr.text[:8000]
-    except Exception as e:
-        logger.debug("为豆包抓取页面摘录失败（可忽略）: %s", e)
+    snippet, ctx_meta = await _assemble_douyin_context_for_doubao(
+        resolved_url, "douyin", pasted_context=pasted_context
+    )
 
-    text = await douyin_script_via_doubao(resolved_url, original_url, snippet)
+    text, ark_ep = await douyin_script_via_doubao(resolved_url, original_url, snippet)
     if text and len(text.strip()) >= 20:
+        sub = "ark_bot" if ark_ep == "bot" else "ark_chat"
+        md = {
+            "sub_method": sub,
+            "snippet_len": len(snippet),
+            **{k: ctx_meta[k] for k in ("tikhub_len", "web_len", "asr_len", "paste_len") if k in ctx_meta},
+        }
         return ExtractResult(
             success=True,
             text=text[:12000],
             method="doubao",
-            metadata={"sub_method": "ark_chat", "snippet_len": len(snippet)},
+            metadata=md,
         )
     return ExtractResult(
         success=False,
@@ -1308,13 +1388,18 @@ async def extract_with_doubao_douyin(resolved_url: str, original_url: str) -> Ex
 
 # ============== 统一入口 ==============
 
-async def extract_text(url: str, prefer_method: Optional[str] = None) -> ExtractResult:
+async def extract_text(
+    url: str,
+    prefer_method: Optional[str] = None,
+    pasted_script: Optional[str] = None,
+) -> ExtractResult:
     """
     统一的文本提取入口
     
     参数:
         url: 视频链接
         prefer_method: 优先使用的提取方法 (tikhub / web_scrape / ytdlp)
+        pasted_script: 可选；抖音等场景下用户额外粘贴的标题/口播，会并入豆包上下文
     
     返回:
         ExtractResult 对象
@@ -1361,13 +1446,17 @@ async def extract_text(url: str, prefer_method: Optional[str] = None) -> Extract
             ]
         )
     elif platform == "douyin":
-        # 抖音：默认优先豆包（ARK）；旧链路（TikHub+ASR / Whisper）仅在未配置豆包时启用，
-        # 或设置 REMIX_DOUYIN_TRY_LEGACY=1 时在豆包失败后再尝试。
+        # 抖音：分享链接直走豆包（不先调 TikHub 元数据）；旧链路见 _douyin_try_legacy_pipeline。
         from app.services.doubao_script_client import is_doubao_configured
 
         strategies = []
         if is_doubao_configured():
-            strategies.append(("doubao", lambda: extract_with_doubao_douyin(resolved_url, url)))
+            ps = pasted_script
+
+            async def _doubao_douyin() -> ExtractResult:
+                return await extract_with_doubao_douyin(resolved_url, url, pasted_context=ps)
+
+            strategies.append(("doubao", _doubao_douyin))
         if _douyin_try_legacy_pipeline():
             if use_tikhub:
                 strategies.append(("douyin_pipeline", lambda: extract_douyin_audio_pipeline(resolved_url)))

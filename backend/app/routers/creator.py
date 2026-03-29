@@ -1098,6 +1098,8 @@ class RemixGenerateRequest(BaseModel):
     url: str
     style: str
     ipId: Optional[str] = "1"
+    # 与 url 同时提交时，并入豆包上下文（标题/口播摘录），提高抖音链路的提取准确度
+    pasted_script: Optional[str] = None
 
 
 # 内存任务存储（生产环境建议用 Redis）
@@ -1110,7 +1112,13 @@ def _get_db_session():
     return SessionLocal()
 
 
-async def _run_remix_task(task_id: str, url: str, style: str, ip_id: str):
+async def _run_remix_task(
+    task_id: str,
+    url: str,
+    style: str,
+    ip_id: str,
+    pasted_script: Optional[str] = None,
+):
     """后台执行 Remix 任务"""
     db = None
     try:
@@ -1141,7 +1149,10 @@ async def _run_remix_task(task_id: str, url: str, style: str, ip_id: str):
             logger.info(f"[Task {task_id}] 手动输入模式，文本长度: {len(competitor_text)}")
         else:
             # 提取竞品文本
-            extraction_result = await competitor_text_extraction.extract_competitor_text_with_fallback(url)
+            extraction_result = await competitor_text_extraction.extract_competitor_text_with_fallback(
+                url,
+                pasted_script=pasted_script,
+            )
         
         if not extraction_result["success"]:
             error_msg = extraction_result["error"]
@@ -1298,7 +1309,15 @@ async def generate_from_remix(req: RemixGenerateRequest):
     }
     
     # 启动后台任务
-    asyncio.create_task(_run_remix_task(task_id, url, req.style, req.ipId or "1"))
+    asyncio.create_task(
+        _run_remix_task(
+            task_id,
+            url,
+            req.style,
+            req.ipId or "1",
+            pasted_script=(req.pasted_script or "").strip() or None,
+        )
+    )
     
     logger.info(f"[Task {task_id}] 任务已提交")
     

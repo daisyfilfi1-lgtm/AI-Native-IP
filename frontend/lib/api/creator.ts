@@ -295,7 +295,10 @@ async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> 
   
   if (!response.ok) {
     const text = await response.text();
-    let msg = `API error: ${response.status}`;
+    let msg =
+      response.status === 504
+        ? '生成超时（504），请稍后重试。'
+        : `API error: ${response.status}`;
     try {
       const j = JSON.parse(text) as { detail?: unknown; message?: unknown };
       if (typeof j.detail === 'string') msg = j.detail;
@@ -303,7 +306,7 @@ async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> 
         msg = (j.detail[0] as { msg: string }).msg;
       } else if (typeof j.message === 'string') msg = j.message;
     } catch {
-      if (text.trim()) msg = text.slice(0, 500);
+      if (text.trim() && response.status !== 504) msg = text.slice(0, 500);
     }
     throw new Error(msg);
   }

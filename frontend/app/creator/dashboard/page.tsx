@@ -743,18 +743,6 @@ export default function CreatorDashboardPage() {
                               {r.title}
                             </p>
                             <p className="text-xs text-foreground-tertiary mt-1 line-clamp-2">{r.reason}</p>
-                            {r.url ? (
-                              <a
-                                href={r.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="mt-1.5 inline-flex items-center gap-1 max-w-full text-xs text-primary-500 hover:text-primary-400 hover:underline"
-                                title={r.url}
-                              >
-                                <ExternalLink className="w-3 h-3 shrink-0 opacity-80" aria-hidden />
-                                <span className="truncate">{r.url}</span>
-                              </a>
-                            ) : null}
                             <div className="mt-2 space-y-1.5 w-full">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <span className="text-xs text-foreground-tertiary">
@@ -1281,7 +1269,7 @@ export default function CreatorDashboardPage() {
                     )
                   }
                 >
-                  {isGeneratingViral ? '工业化流水线加工中...' : '生成爆款原创'}
+                  {isGeneratingViral ? '爆款生成中' : '生成爆款原创'}
                 </Button>
 
                 {!(viralConfig.viralElements.includes('auto') || viralConfig.viralElements.includes('system_auto')) && viralConfig.viralElements.length < 2 && (

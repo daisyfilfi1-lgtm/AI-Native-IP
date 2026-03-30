@@ -1054,7 +1054,7 @@ export default function CreatorDashboardPage() {
                     )
                   }
                 >
-                  {isGeneratingViral ? '工业化流水线加工中...' : '生成爆款原创'}
+                  {isGeneratingViral ? '爆款生成中' : '生成爆款原创'}
                 </Button>
 
                 {!(viralConfig.viralElements.includes('auto') || viralConfig.viralElements.includes('system_auto')) && viralConfig.viralElements.length < 2 && (

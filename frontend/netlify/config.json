@@ -15,16 +15,5 @@
   },
   "edge_functions": {
     "directory": "netlify/edge-functions"
-  },
-  "redirects": [
-    {
-      "from": "/api/*",
-      "to": "/.netlify/functions/api-proxy",
-      "status": 200,
-      "force": true,
-      "conditions": {
-        "Role": []
-      }
-    }
-  ]
+  }
 }

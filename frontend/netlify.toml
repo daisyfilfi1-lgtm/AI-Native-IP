@@ -9,15 +9,6 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Direct redirect to Railway backend (bypass Edge function routing issues)
-[[redirects]]
-  from = "/api/*"
-  to = "https://ai-native-ip-production.up.railway.app/api/:splat"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/health"
-  to = "https://ai-native-ip-production.up.railway.app/health"
-  status = 200
-  force = true
+# 不再将 /api/* 代理到 Railway：Netlify 网关约 30s 会 504，长耗时生成必失败。
+# 前端一律使用 NEXT_PUBLIC_API_DIRECT_ORIGIN（或默认 Railway）直连，见 lib/apiBaseUrl.ts。
+# /health 请直接访问 Railway 或用于监控的外部探测。

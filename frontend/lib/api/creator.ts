@@ -294,9 +294,20 @@ async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> 
   // 404 fallback removed - all creator APIs now use /api/v1/creator/ prefix
   
   if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
+    const text = await response.text();
+    let msg = `API error: ${response.status}`;
+    try {
+      const j = JSON.parse(text) as { detail?: unknown; message?: unknown };
+      if (typeof j.detail === 'string') msg = j.detail;
+      else if (Array.isArray(j.detail) && j.detail.length && typeof (j.detail[0] as { msg?: string }).msg === 'string') {
+        msg = (j.detail[0] as { msg: string }).msg;
+      } else if (typeof j.message === 'string') msg = j.message;
+    } catch {
+      if (text.trim()) msg = text.slice(0, 500);
+    }
+    throw new Error(msg);
   }
-  
+
   return response.json();
 }
 
@@ -614,6 +625,65 @@ export const creatorApi = {
       method: 'POST',
       body: JSON.stringify(params)
     });
+  },
+
+  /** 对话式优化：根据自然语言反馈改写当前草稿四段 */
+  async refineDraft(params: {
+    draft_id: string;
+    ip_id: string;
+    user_feedback: string;
+    /** 与页面当前四段一致时传入，避免本地改过段落仍按库内旧稿改写 */
+    hook?: string;
+    story?: string;
+    opinion?: string;
+    cta?: string;
+  }): Promise<{
+    ok: boolean;
+    draft_id: string;
+    hook: string;
+    story: string;
+    opinion: string;
+    cta: string;
+    assistant_reply?: string;
+  }> {
+    return apiFetch('/api/v1/creator/generate/refine', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  /** 满意后总结迭代经验，写入 IP 长期学习要点 */
+  async recordIterationLearning(params: {
+    draft_id: string;
+    ip_id: string;
+    user_note?: string;
+  }): Promise<{ ok: boolean; added: number; bullets: string[] }> {
+    return apiFetch('/api/v1/creator/feedback/learning', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  async getStyleLearnings(ipId: string): Promise<{
+    ip_id: string;
+    items: Array<{ text: string }>;
+  }> {
+    return apiFetch(
+      `/api/v1/creator/feedback/learnings?ipId=${encodeURIComponent(ipId)}`
+    );
+  },
+
+  /** 将已有学习要点批量写入 Memory 向量库（历史补全，勿频繁重复调用） */
+  async backfillStyleLearningMemory(ipId: string): Promise<{
+    ok: boolean;
+    ip_id: string;
+    synced: number;
+    warning?: string;
+  }> {
+    return apiFetch(
+      `/api/v1/creator/feedback/learnings/backfill-memory?ipId=${encodeURIComponent(ipId)}`,
+      { method: 'POST' }
+    );
   },
 
   async getFeedbackStats(ipId: string): Promise<{

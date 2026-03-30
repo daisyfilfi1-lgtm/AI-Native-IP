@@ -11,7 +11,7 @@ import logging
 
 from openai import OpenAI
 
-from app.config.ai_config import get_ai_config
+from app.config.ai_config import get_ai_config, get_feedback_llm_config
 
 logger = logging.getLogger(__name__)
 
@@ -392,6 +392,46 @@ def chat(
         return (resp.choices[0].message.content or "").strip() or None
     except Exception as e:
         logger.warning("LLM chat failed: %s", e, exc_info=False)
+        return None
+
+
+def chat_feedback(
+    messages: list[dict[str, str]],
+    model: str | None = None,
+    temperature: float | None = None,
+) -> str | None:
+    """
+    多轮对话反馈链路专用（改写稿件、总结学习要点）。
+    配置了 FEEDBACK_LLM_MODEL 时使用专用 Key/Base；否则与 chat() 相同（主 LLM）。
+    """
+    fb = get_feedback_llm_config()
+    if not fb.get("llm_model"):
+        return chat(messages, model=model, temperature=temperature)
+    if not fb.get("api_key"):
+        logger.warning(
+            "FEEDBACK_LLM_MODEL is set but no API key found; falling back to main LLM"
+        )
+        return chat(messages, model=model, temperature=temperature)
+    kwargs_client: dict[str, Any] = {
+        "api_key": fb["api_key"],
+        "timeout": _http_timeout_seconds(),
+    }
+    if fb.get("base_url"):
+        kwargs_client["base_url"] = fb["base_url"]
+    try:
+        client = OpenAI(**kwargs_client)
+    except Exception as e:
+        logger.warning("feedback LLM client init failed: %s", e)
+        return chat(messages, model=model, temperature=temperature)
+    use_model = model or fb.get("llm_model") or "gpt-4o-mini"
+    try:
+        kwargs: dict[str, Any] = {"model": use_model, "messages": messages}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        resp = client.chat.completions.create(**kwargs)
+        return (resp.choices[0].message.content or "").strip() or None
+    except Exception as e:
+        logger.warning("feedback LLM chat failed: %s", e, exc_info=False)
         return None
 
 

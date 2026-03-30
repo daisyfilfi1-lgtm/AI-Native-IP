@@ -78,6 +78,17 @@ export interface GeneratedContent {
   // 元数据
   createdAt?: string;
   updatedAt?: string;
+
+  /** 对话式改稿历史（与后端 content_drafts.workflow.refine_history 对齐） */
+  refine_history?: RefineHistoryEntry[];
+}
+
+/** 单轮改稿记录：用户一句 + 助手摘要（多轮 Gemini 体感） */
+export interface RefineHistoryEntry {
+  at?: string;
+  type?: string;
+  user_feedback?: string;
+  assistant_reply?: string;
 }
 
 // ===== 素材溯源 =====

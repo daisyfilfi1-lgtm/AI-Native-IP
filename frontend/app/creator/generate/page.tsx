@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CreatorLayout } from '@/components/creator/CreatorLayout';
@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { creatorApi } from '@/lib/api/creator';
-import type { GeneratedContent } from '@/types/creator';
+import type { GeneratedContent, RefineHistoryEntry } from '@/types/creator';
 import { 
   Sparkles, 
   CheckCircle2, 
@@ -24,11 +24,13 @@ import {
   FileText,
   Library,
   Clock,
-  TrendingUp
+  TrendingUp,
+  GraduationCap,
+  MessageCircle
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { RewriteFeedbackModal } from '@/components/creator/RewriteFeedbackModal';
+import { useCreatorIp } from '@/contexts/CreatorIpContext';
 
 interface SectionConfig {
   title: string;
@@ -59,9 +61,31 @@ const sectionLabels: Record<string, SectionConfig> = {
   },
 };
 
+type RefineChatBubble = { id: string; role: 'user' | 'assistant'; content: string };
+
+function buildRefineChatMessages(history: RefineHistoryEntry[] | undefined): RefineChatBubble[] {
+  if (!history?.length) return [];
+  const out: RefineChatBubble[] = [];
+  let n = 0;
+  for (const h of history) {
+    if (h.type && h.type !== 'refine') continue;
+    const u = (h.user_feedback || '').trim();
+    if (!u) continue;
+    out.push({ id: `u-${n}`, role: 'user', content: u });
+    n += 1;
+    const a = (h.assistant_reply || '').trim();
+    if (a) {
+      out.push({ id: `a-${n}`, role: 'assistant', content: a });
+      n += 1;
+    }
+  }
+  return out;
+}
+
 function GeneratePageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { ipId } = useCreatorIp();
   
   // 从URL获取参数：id(生成ID) 和 type(生成类型: topic/remix/original，兼容viral)
   const id = searchParams.get('id');
@@ -77,8 +101,23 @@ function GeneratePageContent() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [isRewriting, setIsRewriting] = useState(false);
+  /** 对话改稿：与 Gemini 类似的多轮气泡（来自 refine_history） */
+  const [refineChatMessages, setRefineChatMessages] = useState<RefineChatBubble[]>([]);
+  const [refineInput, setRefineInput] = useState('');
+  const [refineLoading, setRefineLoading] = useState(false);
+  const refineChatAnchorRef = useRef<HTMLDivElement>(null);
+  const refineChatScrollRef = useRef<HTMLDivElement>(null);
+  const refineInputRef = useRef<HTMLTextAreaElement>(null);
+  /** 满意后总结学习 */
+  const [learningNote, setLearningNote] = useState('');
+  const [learningLoading, setLearningLoading] = useState(false);
+  const [styleLearnings, setStyleLearnings] = useState<Array<{ text: string }>>([]);
+  const [learningToast, setLearningToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    const el = refineChatScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [refineChatMessages, refineLoading]);
 
   // 加载生成内容
   useEffect(() => {
@@ -90,6 +129,18 @@ function GeneratePageContent() {
       setIsGenerating(false);
     }
   }, [id]);
+
+  const refreshLearnings = useCallback(() => {
+    if (!ipId) return;
+    void creatorApi
+      .getStyleLearnings(ipId)
+      .then((r) => setStyleLearnings(r.items))
+      .catch(() => setStyleLearnings([]));
+  }, [ipId]);
+
+  useEffect(() => {
+    refreshLearnings();
+  }, [refreshLearnings]);
 
   // 生成动画
   useEffect(() => {
@@ -118,14 +169,19 @@ function GeneratePageContent() {
       const data = await creatorApi.getGeneratedContent(id!);
       const quickView = searchParams.get('from') === 'library';
 
+      const apply = (d: GeneratedContent) => {
+        setContent(d);
+        setRefineChatMessages(buildRefineChatMessages(d.refine_history));
+      };
+
       if (quickView) {
         setProgress(100);
-        setContent(data);
+        apply(data);
         setIsGenerating(false);
       } else {
         setTimeout(() => {
           setProgress(100);
-          setContent(data);
+          apply(data);
           setIsGenerating(false);
         }, 1500);
       }
@@ -198,23 +254,55 @@ function GeneratePageContent() {
     }
   };
 
-  // 重写（触发反馈弹窗）
-  const handleRegenerate = () => {
-    setShowFeedbackModal(true);
+  /** 滚到对话改稿并聚焦输入框（体感接近 Gemini 连续对话） */
+  const handleScrollToRefineChat = () => {
+    refineChatAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    setTimeout(() => refineInputRef.current?.focus(), 300);
   };
 
-  // 确认重写（反馈后执行）
-  const confirmRegenerate = async (reason: string, comment: string) => {
-    setShowFeedbackModal(false);
-    setIsRewriting(true);
-    
-    console.log('Regenerate with reason:', reason, 'comment:', comment);
-    
-    // 模拟重写过程
-    setTimeout(() => {
-      setIsRewriting(false);
-      loadContent();
-    }, 2000);
+  const handleRefineSend = async () => {
+    const text = refineInput.trim();
+    if (!id || !ipId || !text || !content) return;
+    setRefineLoading(true);
+    setError(null);
+    try {
+      await creatorApi.refineDraft({
+        draft_id: id,
+        ip_id: ipId,
+        user_feedback: text,
+        hook: content.hook,
+        story: content.story,
+        opinion: content.opinion,
+        cta: content.cta,
+      });
+      setRefineInput('');
+      await loadContent();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '按反馈改写失败，请稍后重试');
+    } finally {
+      setRefineLoading(false);
+    }
+  };
+
+  const handleRecordLearning = async () => {
+    if (!id || !ipId) return;
+    setLearningLoading(true);
+    setError(null);
+    try {
+      const r = await creatorApi.recordIterationLearning({
+        draft_id: id,
+        ip_id: ipId,
+        user_note: learningNote.trim() || undefined,
+      });
+      setLearningNote('');
+      setLearningToast(`已纳入 ${r.added} 条学习要点，后续生成将自动参考`);
+      refreshLearnings();
+      setTimeout(() => setLearningToast(null), 5000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '总结学习失败，请稍后重试');
+    } finally {
+      setLearningLoading(false);
+    }
   };
 
   const getComplianceStatus = () => {
@@ -466,10 +554,10 @@ function GeneratePageContent() {
               variant="secondary"
               className="w-full"
               leftIcon={<RefreshCw className="w-4 h-4" />}
-              onClick={handleRegenerate}
-              isLoading={isRewriting}
+              onClick={handleScrollToRefineChat}
+              disabled={refineLoading}
             >
-              {isRewriting ? '重写中...' : '重写内容'}
+              对话改稿
             </Button>
 
             {/* Sidebar */}
@@ -509,6 +597,123 @@ function GeneratePageContent() {
                   </div>
                 </Card>
               )}
+
+              {/* 迭代优化：多轮对话改稿（Gemini 体感）+ 满意后总结入库 */}
+              <Card>
+                <div className="p-4" ref={refineChatAnchorRef}>
+                  <h3 className="font-semibold text-foreground mb-1 flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-primary-400" />
+                    对话改稿
+                  </h3>
+                  <p className="text-xs text-foreground-tertiary mb-3">
+                    像和 Gemini 一样多轮说明：你写什么，模型就按你的意思改；左侧正文会同步更新。满意后再用下方「总结学习」写入 IP 长期偏好。
+                  </p>
+
+                  <div
+                    ref={refineChatScrollRef}
+                    className="mb-3 max-h-64 overflow-y-auto rounded-lg border border-border/80 bg-background-tertiary/50 p-2 space-y-2"
+                  >
+                    {refineChatMessages.length === 0 && !refineLoading && (
+                      <p className="text-xs text-foreground-muted px-2 py-2">
+                        在下方输入框直接说想怎么改，例如：「钩子先上数字」「故事换成我亲历的」「结尾别像广告」…
+                      </p>
+                    )}
+                    {refineChatMessages.map((m) => (
+                      <div
+                        key={m.id}
+                        className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div
+                          className={`max-w-[92%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${
+                            m.role === 'user'
+                              ? 'bg-primary-500/20 text-foreground border border-primary-500/30'
+                              : 'bg-background-elevated text-foreground-secondary border border-border'
+                          }`}
+                        >
+                          {m.content}
+                        </div>
+                      </div>
+                    ))}
+                    {refineLoading && (
+                      <div className="flex justify-start">
+                        <div className="rounded-2xl border border-border bg-background-elevated px-3 py-2 text-xs text-foreground-muted flex items-center gap-2">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          正在改稿…
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <textarea
+                    ref={refineInputRef}
+                    value={refineInput}
+                    onChange={(e) => setRefineInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        void handleRefineSend();
+                      }
+                    }}
+                    placeholder="说说想怎么改…（Enter 发送，Shift+Enter 换行）"
+                    rows={3}
+                    disabled={!ipId || refineLoading}
+                    className="w-full rounded-lg border border-border bg-background-tertiary px-3 py-2 text-sm text-foreground placeholder:text-foreground-muted focus:outline-none focus:ring-2 focus:ring-primary-500/40 resize-y mb-2"
+                  />
+                  <Button
+                    type="button"
+                    className="w-full mb-4"
+                    size="sm"
+                    disabled={!ipId || !refineInput.trim() || refineLoading}
+                    isLoading={refineLoading}
+                    onClick={() => void handleRefineSend()}
+                  >
+                    发送并改稿
+                  </Button>
+
+                  <div className="border-t border-border pt-3">
+                    <h4 className="text-sm font-medium text-foreground mb-1 flex items-center gap-2">
+                      <GraduationCap className="w-4 h-4 text-accent-yellow" />
+                      满意后：总结并纳入 IP 学习
+                    </h4>
+                    <textarea
+                      value={learningNote}
+                      onChange={(e) => setLearningNote(e.target.value)}
+                      placeholder="可选：你认为这次最大的问题是什么"
+                      rows={2}
+                      disabled={!ipId || learningLoading}
+                      className="w-full rounded-lg border border-border bg-background-tertiary px-3 py-2 text-xs text-foreground placeholder:text-foreground-muted focus:outline-none focus:ring-2 focus:ring-primary-500/40 resize-y mb-2"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      size="sm"
+                      disabled={!ipId || learningLoading}
+                      isLoading={learningLoading}
+                      onClick={() => void handleRecordLearning()}
+                    >
+                      总结学习并写入 IP
+                    </Button>
+                  </div>
+
+                  {styleLearnings.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-border">
+                      <p className="text-xs font-medium text-foreground-secondary mb-2">
+                        已沉淀要点（已写入配置并同步 Memory 向量库，检索与生成会参考）
+                      </p>
+                      <ul className="space-y-2 max-h-44 overflow-y-auto text-xs text-foreground-tertiary">
+                        {styleLearnings.map((item, idx) => (
+                          <li key={idx} className="flex gap-2">
+                            <span className="text-primary-400 shrink-0">•</span>
+                            <span>{item.text}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
               {/* Compliance Check */}
               <Card>
                 <div className="p-4">
@@ -676,14 +881,11 @@ function GeneratePageContent() {
       </AnimatePresence>
     </CreatorLayout>
 
-      <RewriteFeedbackModal
-        isOpen={showFeedbackModal}
-        onClose={() => setShowFeedbackModal(false)}
-        draftId={id || ''}
-        ipId="xiaomin1"
-        onConfirm={confirmRegenerate}
-        isLoading={isRewriting}
-      />
+      {learningToast && (
+        <div className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 max-w-md rounded-xl border border-accent-green/30 bg-background-elevated px-4 py-3 text-sm text-foreground shadow-lg">
+          {learningToast}
+        </div>
+      )}
     </>
   );
 }

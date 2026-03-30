@@ -23,6 +23,14 @@ from app.services.hybrid_retrieval_service import hybrid_search
 from app.services.langchain_integrator import LangChainIntegrator
 
 
+def _remix_user_learnings_block(ip_profile: Dict[str, Any]) -> str:
+    xs = ip_profile.get("style_feedback_learnings") or []
+    if not isinstance(xs, list) or not xs:
+        return "（暂无）"
+    lines = [str(x).strip() for x in xs[:20] if str(x).strip()]
+    return "\n".join(f"- {ln}" for ln in lines) if lines else "（暂无）"
+
+
 # ==================== 增强洗稿 Prompt ====================
 
 ENHANCED_REMIX_PROMPT = """你是一个资深的{ip_name}，擅长对竞品短视频口播稿进行结构化拆解，并用自己的人设和素材进行深度重构（Remix）。
@@ -32,6 +40,9 @@ ENHANCED_REMIX_PROMPT = """你是一个资深的{ip_name}，擅长对竞品短�
 - 词汇: {vocabulary}
 - 语气: {tone}
 - 口头禅: {catchphrases}
+
+## 用户历史反馈（必须规避并优先改进）
+{user_learning_notes}
 
 ## 竞品结构化拆解（你必须严格遵循这个结构进行重组）
 {competitor_structure}
@@ -213,6 +224,7 @@ class EnhancedRemixPipeline:
             vocabulary=style["vocabulary"],
             tone=style["tone"],
             catchphrases=style["catchphrases"],
+            user_learning_notes=_remix_user_learnings_block(self.ip_profile),
             competitor_structure=detailed_structure,
             emotion_curve=emotion_curve_text,
             elevation_result=elevation_summary,

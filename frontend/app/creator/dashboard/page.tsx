@@ -45,6 +45,9 @@ import { ThirdPartyExtractor } from '@/components/creator/ThirdPartyExtractor';
 /** 接口仍要求 style 字段；生成侧以 IP 风格画像为准 */
 const DEFAULT_WORKFLOW_STYLE: StyleType = 'angry';
 
+/** 仿写推荐卡片「填入」：当前链路未跑通，先隐藏；跑通后改为 true */
+const SHOW_REMIX_REC_FILL_BUTTON = false;
+
 // Agent配置状态组件
 function AgentStatusCard({ 
   name, 
@@ -327,6 +330,8 @@ export default function CreatorDashboardPage() {
   const [remixError, setRemixError] = useState<string | null>(null);
   const [remixRecs, setRemixRecs] = useState<RemixRecommendationItem[]>([]);
   const [remixRecLoading, setRemixRecLoading] = useState(false);
+  /** 推荐卡片内：第三方工具文案粘贴（与下方主链接二选一或配合手动模式） */
+  const [remixRecPaste, setRemixRecPaste] = useState<Record<number, string>>({});
   // 手动输入模式（当自动提取失败时使用）
   const [remixManualMode, setRemixManualMode] = useState(false);
   const [remixManualText, setRemixManualText] = useState('');
@@ -428,13 +433,23 @@ export default function CreatorDashboardPage() {
   const [remixStage, setRemixStage] = useState('');
 
   const handleRemix = async () => {
-    if (!ipId || !remixUrl.trim()) {
-      setRemixError('请输入有效的竞品链接');
+    if (!ipId) return;
+
+    const pasteEntries = Object.entries(remixRecPaste).filter(([, v]) => v?.trim());
+    let urlToSubmit = remixUrl.trim();
+    if (pasteEntries.length > 0) {
+      const lastIdx = Math.max(...pasteEntries.map(([k]) => Number(k)));
+      const pasted = remixRecPaste[lastIdx]?.trim();
+      if (pasted) urlToSubmit = `[MANUAL_TEXT]${pasted}`;
+    }
+
+    if (!urlToSubmit) {
+      setRemixError('请输入有效的竞品链接，或在推荐卡片中粘贴文案');
       return;
     }
-    
+
     // 基础链接格式校验（允许手动输入模式）
-    const url = remixUrl.trim();
+    const url = urlToSubmit;
     const isManualMode = url.startsWith('[MANUAL_TEXT]');
     if (!isManualMode && !url.startsWith('http://') && !url.startsWith('https://')) {
       setRemixError('链接格式不正确，必须以 http:// 或 https:// 开头');
@@ -450,7 +465,7 @@ export default function CreatorDashboardPage() {
     
     try {
       // 步骤1: 提交任务
-      const submitResult = await creatorApi.submitRemixTask(url, DEFAULT_WORKFLOW_STYLE, ipId);
+      const submitResult = await creatorApi.submitRemixTask(urlToSubmit, DEFAULT_WORKFLOW_STYLE, ipId);
       
       if (submitResult.status === 'failed') {
         throw new Error(submitResult.error || '提交仿写任务失败');
@@ -730,19 +745,56 @@ export default function CreatorDashboardPage() {
                                 <span className="truncate">{r.url}</span>
                               </a>
                             ) : null}
+                            <div className="mt-2 space-y-1.5 w-full">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-xs text-foreground-tertiary">
+                                  用第三方工具取文案后可粘贴到此处
+                                </span>
+                                <a
+                                  href="https://www.anytocopy.com"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 shrink-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  AnyToCopy
+                                  <ExternalLink className="w-3 h-3" aria-hidden />
+                                </a>
+                              </div>
+                              <textarea
+                                value={remixRecPaste[idx] ?? ''}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setRemixRecPaste((prev) => {
+                                    const next: Record<number, string> = { ...prev, [idx]: v };
+                                    if (v.trim()) {
+                                      Object.keys(next).forEach((k) => {
+                                        if (Number(k) !== idx) delete next[Number(k)];
+                                      });
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                placeholder="从第三方工具复制口播/文案后粘贴…"
+                                rows={3}
+                                className="w-full min-h-[4.5rem] px-2.5 py-2 text-xs bg-background-elevated border border-border rounded-lg text-foreground placeholder:text-foreground-muted resize-y focus:outline-none focus:border-primary-500/50"
+                              />
+                            </div>
                           </div>
                           <Badge variant={r.is_my_competitor ? 'info' : 'primary'} size="sm" className="shrink-0">
                             {r.platform === 'douyin' ? '抖音' : '小红书'}
                           </Badge>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="shrink-0"
-                            onClick={() => setRemixUrl(r.url)}
-                          >
-                            填入
-                          </Button>
+                          {SHOW_REMIX_REC_FILL_BUTTON && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              className="shrink-0"
+                              onClick={() => setRemixUrl(r.url)}
+                            >
+                              填入
+                            </Button>
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -930,7 +982,12 @@ export default function CreatorDashboardPage() {
                   leftIcon={isRemixing ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
                   onClick={handleRemix}
                   isLoading={isRemixing}
-                  disabled={!remixUrl.trim() || isRemixing || remixAgentsBlock}
+                  disabled={
+                    (!remixUrl.trim() &&
+                      !Object.values(remixRecPaste).some((v) => v?.trim())) ||
+                    isRemixing ||
+                    remixAgentsBlock
+                  }
                 >
                   {isRemixing ? '仿写中...' : '开始仿写'}
                 </Button>

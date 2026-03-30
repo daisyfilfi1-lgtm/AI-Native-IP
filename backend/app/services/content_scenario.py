@@ -17,6 +17,21 @@ from app.services.enhanced_remix_pipeline import create_enhanced_remix
 REMIX_V2_ENABLED = os.getenv("REMIX_V2_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _format_style_learnings_block(ip_profile: Dict[str, Any]) -> str:
+    """将用户在生成页迭代沉淀的要点注入提示词。"""
+    xs = ip_profile.get("style_feedback_learnings") or []
+    if not isinstance(xs, list) or not xs:
+        return ""
+    lines = [str(x).strip() for x in xs[:20] if str(x).strip()]
+    if not lines:
+        return ""
+    return (
+        "\n## 用户历史反馈（必须规避并优先改进）\n"
+        + "\n".join(f"- {ln}" for ln in lines)
+        + "\n"
+    )
+
+
 # ==================== 场景模型 ====================
 
 class FourDimWeights(BaseModel):
@@ -215,7 +230,7 @@ IP领域: {', '.join(ip_topics)}
 - 领域: {self.ip_profile.get('expertise', '')}
 - 风格: {self.ip_profile.get('content_direction', '')}
 - 目标受众: {self.ip_profile.get('target_audience', '')}
-
+{_format_style_learnings_block(self.ip_profile)}
 ## 热点话题
 话题: {topic}
 分类: {category}
@@ -430,7 +445,7 @@ class ScenarioThreeGenerator:
 
 ## 动态Few-shot样本（优先模仿结构与语感，不抄袭事实）
 {few_shot_text or "- （无）"}
-
+{_format_style_learnings_block(self.ip_profile)}
 {style_layer}
 
 ## 检索样本速览

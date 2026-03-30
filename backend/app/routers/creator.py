@@ -37,6 +37,13 @@ from app.services import (
 from app.services.semantic_topic_filter import filter_topics_by_similarity
 from app.services.style_corpus_service import StyleCorpusService
 from app.services.strategy_config_service import get_merged_config
+from app.services.style_refinement_service import (
+    get_style_learnings_texts,
+    record_rewrite_feedback,
+    refine_draft_with_feedback,
+    summarize_iteration_learning,
+)
+from app.services.vector_service import query_similar_assets as pg_query_similar_assets
 from app.services.topic_recommendation_v4 import get_recommendation_service_v4
 
 router = APIRouter(prefix="/creator", tags=["creator"])
@@ -110,6 +117,19 @@ def get_ip_profile(db: Session, ip_id: str) -> Optional[Dict[str, Any]]:
         "expertise": ip.expertise or "",
     }
     merged = {**base, **sp}
+
+    # 用户迭代沉淀的文案学习要点（注入后续生成提示词）
+    strat = ip.strategy_config if isinstance(ip.strategy_config, dict) else {}
+    _lr = strat.get("style_learnings") or []
+    _texts: List[str] = []
+    for item in _lr[-30:]:
+        if isinstance(item, dict) and item.get("text"):
+            t = str(item["text"]).strip()
+            if t:
+                _texts.append(t[:500])
+        elif isinstance(item, str) and item.strip():
+            _texts.append(item.strip()[:500])
+    merged["style_feedback_learnings"] = _texts
     
     # 兼容 EnhancedRemixPipeline 的字段命名
     # style_profile 可能存储的是旧字段名，需要映射到新字段名
@@ -398,6 +418,57 @@ def _build_dynamic_few_shots(db: Session, ip_id: str, topic: str, k: int = 3) ->
     return examples[:k]
 
 
+def _fetch_style_learning_memory_lines(
+    db: Session,
+    *,
+    ip_id: str,
+    topic: str,
+    emotion: str,
+    audience: str,
+    top_k: int = 3,
+) -> List[str]:
+    """从 pgvector 检索带 source=style_learning 的素材，与选题语义对齐的学习要点。"""
+    q = StyleCorpusService.build_retrieval_query(topic=topic, emotion=emotion, audience=audience)
+    if not q.strip():
+        return []
+    try:
+        hits = pg_query_similar_assets(
+            db, ip_id=ip_id, query=q, top_k=max(30, top_k * 10)
+        )
+    except Exception:
+        return []
+    if not hits:
+        return []
+    hit_ids = [str(h.get("asset_id") or "").strip() for h in hits if str(h.get("asset_id") or "").strip()]
+    if not hit_ids:
+        return []
+    rows = (
+        db.query(IPAsset)
+        .filter(
+            IPAsset.ip_id == ip_id,
+            IPAsset.asset_id.in_(hit_ids),
+            IPAsset.status == "active",
+        )
+        .all()
+    )
+    row_by_id = {r.asset_id: r for r in rows}
+    out: List[str] = []
+    for h in hits:
+        aid = str(h.get("asset_id") or "").strip()
+        row = row_by_id.get(aid)
+        if not row:
+            continue
+        meta = row.asset_meta if isinstance(row.asset_meta, dict) else {}
+        if str(meta.get("source") or "") != "style_learning":
+            continue
+        c = (row.content or "").strip()
+        if c:
+            out.append(c[:280])
+        if len(out) >= top_k:
+            break
+    return out
+
+
 def _build_style_context_from_vector(
     db: Session,
     *,
@@ -432,6 +503,17 @@ def _build_style_context_from_vector(
             f"rhythm={fp.get('sentence_rhythm', '')}; "
             f"hook={str(kf.get('golden_hook') or '')[:100]}"
         )
+    # Memory 向量库中的「学习要点」与当前话题对齐的片段
+    learn_lines = _fetch_style_learning_memory_lines(
+        db,
+        ip_id=ip_id,
+        topic=topic,
+        emotion=emotion,
+        audience=audience,
+        top_k=3,
+    )
+    for j, ln in enumerate(learn_lines, start=1):
+        sample_lines.append(f"- 学习要点{j}: {ln}")
     return {
         "style_constraint_layer": style_layer,
         "style_retrieved_examples_text": "\n".join(sample_lines),
@@ -1646,6 +1728,7 @@ async def get_generate_result(id: str, db: Session = Depends(get_db)):
             "story": wf.get("story") or "",
             "opinion": wf.get("opinion") or wf.get("body") or "",
             "cta": wf.get("cta") or "",
+            "refine_history": wf.get("refine_history") or [],
             "style": wf.get("style") or "angry",
             "viralElements": wf.get("viralElements") or [],
             "scriptTemplate": wf.get("scriptTemplate") or "",
@@ -1674,6 +1757,149 @@ async def get_generate_result(id: str, db: Session = Depends(get_db)):
             "sensitiveWords": [],
             "platformChecks": {"douyin": "passed", "xiaohongshu": "passed"},
         },
+    }
+
+
+# === 文案迭代反馈 & IP 风格学习（生成页闭环）===
+
+
+class RewriteFeedbackRequest(BaseModel):
+    draft_id: str
+    ip_id: str = "1"
+    rewrite_reason: str
+    user_comment: Optional[str] = None
+
+
+@router.post("/feedback/rewrite")
+async def post_rewrite_feedback(req: RewriteFeedbackRequest, db: Session = Depends(get_db)):
+    """记录「为什么想重写」类反馈，供后续总结学习。"""
+    try:
+        recorded = record_rewrite_feedback(
+            db,
+            draft_id=req.draft_id.strip(),
+            ip_id=req.ip_id or "1",
+            rewrite_reason=req.rewrite_reason,
+            user_comment=req.user_comment,
+        )
+        if not recorded:
+            return {
+                "ok": False,
+                "message": "草稿不存在或 IP 不匹配，反馈未写入",
+                "stats": {},
+            }
+        ip = db.query(IP).filter(IP.ip_id == (req.ip_id or "1")).first()
+        cfg = dict(ip.strategy_config or {}) if ip else {}
+        counts = dict(cfg.get("rewrite_reason_counts") or {})
+        key = (req.rewrite_reason or "unknown")[:64]
+        counts[key] = int(counts.get(key) or 0) + 1
+        cfg["rewrite_reason_counts"] = counts
+        if ip:
+            ip.strategy_config = cfg
+            flag_modified(ip, "strategy_config")
+            db.commit()
+        return {"ok": True, "message": "反馈已记录", "stats": counts}
+    except Exception as e:
+        logger.warning("post_rewrite_feedback: %s", e)
+        return {"ok": False, "message": str(e), "stats": {}}
+
+
+class RefineDraftRequest(BaseModel):
+    draft_id: str
+    ip_id: str = "1"
+    user_feedback: str
+    hook: Optional[str] = None
+    story: Optional[str] = None
+    opinion: Optional[str] = None
+    cta: Optional[str] = None
+
+
+@router.post("/generate/refine")
+async def post_refine_draft(req: RefineDraftRequest, db: Session = Depends(get_db)):
+    """根据自然语言反馈改写当前草稿四段结构（对话式优化）。"""
+    try:
+        out = refine_draft_with_feedback(
+            db,
+            draft_id=req.draft_id.strip(),
+            ip_id=req.ip_id or "1",
+            user_feedback=req.user_feedback,
+            client_hook=req.hook,
+            client_story=req.story,
+            client_opinion=req.opinion,
+            client_cta=req.cta,
+        )
+        return out
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("refine draft failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class LearningRecordRequest(BaseModel):
+    draft_id: str
+    ip_id: str = "1"
+    user_note: Optional[str] = None
+
+
+@router.post("/feedback/learning")
+async def post_iteration_learning(req: LearningRecordRequest, db: Session = Depends(get_db)):
+    """满意后总结本次迭代经验，写入 IP.strategy_config.style_learnings，供后续生成注入。"""
+    try:
+        out = summarize_iteration_learning(
+            db,
+            draft_id=req.draft_id.strip(),
+            ip_id=req.ip_id or "1",
+            user_note=req.user_note,
+        )
+        return out
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("learning record failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/feedback/learnings")
+async def get_ip_style_learnings(
+    ipId: str = Query("1", description="IP id"),
+    db: Session = Depends(get_db),
+):
+    """读取该 IP 已沉淀的文案学习要点（用于前端展示）。"""
+    items = get_style_learnings_texts(db, ipId, limit=30)
+    return {"ip_id": ipId, "items": [{"text": t} for t in items]}
+
+
+@router.post("/feedback/learnings/backfill-memory")
+async def backfill_style_learnings_to_memory(
+    ipId: str = Query("1", description="IP id"),
+    db: Session = Depends(get_db),
+):
+    """
+    将 strategy_config 中已有学习要点批量写入 Memory 向量库（历史数据补全）。
+    重复执行会为每条要点再建一条向量，仅建议在首次迁移或修复后使用。
+    """
+    from app.services.style_learning_memory_sync import sync_style_learning_after_commit
+
+    ip = db.query(IP).filter(IP.ip_id == ipId).first()
+    if not ip:
+        raise HTTPException(status_code=404, detail="IP not found")
+    cfg = dict(ip.strategy_config or {})
+    raw = cfg.get("style_learnings") or []
+    synced = 0
+    for item in raw:
+        text = ""
+        if isinstance(item, dict) and item.get("text"):
+            text = str(item["text"]).strip()
+        elif isinstance(item, str):
+            text = item.strip()
+        if len(text) >= 4:
+            sync_style_learning_after_commit(ipId, text)
+            synced += 1
+    return {
+        "ok": True,
+        "ip_id": ipId,
+        "synced": synced,
+        "warning": "重复调用可能产生重复向量条目",
     }
 
 

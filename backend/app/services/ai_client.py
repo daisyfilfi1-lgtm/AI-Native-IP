@@ -15,6 +15,27 @@ from app.config.ai_config import get_ai_config, get_feedback_llm_config
 
 logger = logging.getLogger(__name__)
 
+
+def _append_max_tokens(kwargs: dict[str, Any], cfg: dict[str, Any]) -> None:
+    """避免兼容 API 默认过低 max_tokens 导致长文（如仿写口播）中途截断。"""
+    mt = cfg.get("llm_max_output_tokens")
+    if isinstance(mt, int) and mt > 0:
+        kwargs["max_tokens"] = mt
+
+
+def _chat_completions_create(client: Any, kwargs: dict[str, Any]) -> Any:
+    """部分兼容接口不接受 max_tokens 或上限与模型不符，失败时去掉该参数重试一次。"""
+    try:
+        return client.chat.completions.create(**kwargs)
+    except Exception as e:
+        if kwargs.get("max_tokens"):
+            logger.warning(
+                "chat.completions failed, retrying without max_tokens: %s", e, exc_info=False
+            )
+            k2 = {k: v for k, v in kwargs.items() if k != "max_tokens"}
+            return client.chat.completions.create(**k2)
+        raise
+
 # Cohere 配置
 _COHERE_CONFIG = None
 
@@ -388,8 +409,17 @@ def chat(
         kwargs: dict[str, Any] = {"model": model, "messages": messages}
         if temperature is not None:
             kwargs["temperature"] = temperature
-        resp = client.chat.completions.create(**kwargs)
-        return (resp.choices[0].message.content or "").strip() or None
+        _append_max_tokens(kwargs, cfg)
+        resp = _chat_completions_create(client, kwargs)
+        ch = resp.choices[0]
+        text = (ch.message.content or "").strip() or None
+        if text and getattr(ch, "finish_reason", None) == "length":
+            logger.warning(
+                "LLM output truncated (finish_reason=length, max_tokens=%s). "
+                "Raise LLM_MAX_OUTPUT_TOKENS if scripts are cut off.",
+                kwargs.get("max_tokens"),
+            )
+        return text or None
     except Exception as e:
         logger.warning("LLM chat failed: %s", e, exc_info=False)
         return None
@@ -402,7 +432,7 @@ def chat_feedback(
 ) -> str | None:
     """
     多轮对话反馈链路专用（改写稿件、总结学习要点）。
-    配置了 FEEDBACK_LLM_MODEL 时使用专用 Key/Base；否则与 chat() 相同（主 LLM）。
+    配置了 FEEDBACK_LLM_* 时优先走专用端点；初始化失败、请求异常或空返回时回退主站 LLM（通常为 DeepSeek 等 OPENAI_* 配置）。
     """
     fb = get_feedback_llm_config()
     if not fb.get("llm_model"):
@@ -421,18 +451,32 @@ def chat_feedback(
     try:
         client = OpenAI(**kwargs_client)
     except Exception as e:
-        logger.warning("feedback LLM client init failed: %s", e)
+        logger.warning("feedback LLM client init failed: %s; falling back to main LLM", e)
         return chat(messages, model=model, temperature=temperature)
     use_model = model or fb.get("llm_model") or "gpt-4o-mini"
+    cfg_main = get_ai_config()
     try:
         kwargs: dict[str, Any] = {"model": use_model, "messages": messages}
         if temperature is not None:
             kwargs["temperature"] = temperature
-        resp = client.chat.completions.create(**kwargs)
-        return (resp.choices[0].message.content or "").strip() or None
+        _append_max_tokens(kwargs, cfg_main)
+        resp = _chat_completions_create(client, kwargs)
+        ch = resp.choices[0]
+        text = (ch.message.content or "").strip() or None
+        if text and getattr(ch, "finish_reason", None) == "length":
+            logger.warning(
+                "feedback LLM truncated (finish_reason=length, max_tokens=%s)",
+                kwargs.get("max_tokens"),
+            )
+        if text:
+            return text
+        logger.warning("feedback LLM returned empty; falling back to main LLM")
+        return chat(messages, model=model, temperature=temperature)
     except Exception as e:
-        logger.warning("feedback LLM chat failed: %s", e, exc_info=False)
-        return None
+        logger.warning(
+            "feedback LLM chat failed: %s; falling back to main LLM", e, exc_info=False
+        )
+        return chat(messages, model=model, temperature=temperature)
 
 
 def transcribe(audio_path: str) -> str | None:

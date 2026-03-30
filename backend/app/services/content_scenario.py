@@ -32,6 +32,24 @@ def _format_style_learnings_block(ip_profile: Dict[str, Any]) -> str:
     )
 
 
+def _coerce_str_list(val: Any, max_items: int) -> List[str]:
+    """IP 画像里 vocabulary/catchphrases 可能是 str 或 list，统一成字符串列表供 join。"""
+    if val is None:
+        return []
+    if isinstance(val, str):
+        s = val.strip()
+        return [s] if s else []
+    if isinstance(val, (list, tuple)):
+        out: List[str] = []
+        for x in val[:max_items]:
+            s = str(x).strip()
+            if s:
+                out.append(s)
+        return out
+    s = str(val).strip()
+    return [s] if s else []
+
+
 # ==================== 场景模型 ====================
 
 class FourDimWeights(BaseModel):
@@ -344,7 +362,7 @@ class ScenarioThreeGenerator:
         score = await self._score(content)
         
         return ContentResult(
-            content=content,
+            content=content or "",
             score=score,
             scenario="scenario_3",
             metadata={
@@ -416,6 +434,10 @@ class ScenarioThreeGenerator:
             f"- 样本{i+1}: {str(x)[:260]}" for i, x in enumerate(few_shot_examples[:3]) if str(x).strip()
         )
 
+        _vocab = _coerce_str_list(style.get("vocabulary"), 10)
+        _catch = _coerce_str_list(style.get("catchphrases"), 3)
+        _pats = _coerce_str_list(style.get("sentence_patterns"), 3)
+
         prompt = f"""你是一个资深的自媒体创作者。
 
 ## IP信息
@@ -426,9 +448,9 @@ class ScenarioThreeGenerator:
 
 ## 你的风格特征
 - 语气: {style.get('tone', '亲切专业')}
-- 常用词: {', '.join(style.get('vocabulary', [])[:10])}
-- 口头禅: {', '.join(style.get('catchphrases', [])[:3])}
-- 句式: {', '.join(style.get('sentence_patterns', [])[:3])}
+- 常用词: {', '.join(_vocab) if _vocab else '（无）'}
+- 口头禅: {', '.join(_catch) if _catch else '（无）'}
+- 句式: {', '.join(_pats) if _pats else '（无）'}
 
 ## 话题
 {topic}
@@ -514,9 +536,10 @@ class ScenarioThreeGenerator:
     async def _score(self, content: str) -> float:
         """质量评分"""
         
+        safe_content = (content or "")[:1000]
         prompt = f"""评估以下内容的质量（0-1）：
 
-{content[:1000]}
+{safe_content}
 
 评估维度：
 1. 原创度
@@ -532,8 +555,10 @@ class ScenarioThreeGenerator:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
             )
-            return float(result.strip())
-        except:
+            if not result or not str(result).strip():
+                return 0.7
+            return float(str(result).strip())
+        except Exception:
             return 0.7
 
 

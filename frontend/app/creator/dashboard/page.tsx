@@ -357,6 +357,7 @@ export default function CreatorDashboardPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [viralText, setViralText] = useState('');
   const [isGeneratingViral, setIsGeneratingViral] = useState(false);
+  const [viralError, setViralError] = useState<string | null>(null);
   const [viralConfig, setViralConfig] = useState({
     scriptTemplate: 'opinion', // opinion | process | knowledge | story | custom
     customScriptHint: '',
@@ -518,11 +519,11 @@ export default function CreatorDashboardPage() {
   const handleViralGenerate = async () => {
     if (!ipId || !viralText.trim()) return;
     setIsGeneratingViral(true);
+    setViralError(null);
     try {
       const useAutoElements =
         viralConfig.viralElements.includes('auto') ||
         viralConfig.viralElements.includes('system_auto');
-      // 调用工业化爆款生产流水线
       const result = await creatorApi.generateViralOriginal({
         ipId,
         input: viralText,
@@ -536,9 +537,18 @@ export default function CreatorDashboardPage() {
             ? viralConfig.customScriptHint.trim() || undefined
             : undefined,
       });
+      if (result.status === 'failed' || result.error) {
+        setViralError(result.error || '生成失败，请稍后重试');
+        setIsGeneratingViral(false);
+        return;
+      }
+      setIsGeneratingViral(false);
       router.push(`/creator/generate?id=${result.id}&type=original`);
     } catch (error) {
       console.error('Viral generate failed:', error);
+      const msg =
+        error instanceof Error ? error.message : '生成失败，请检查网络或稍后重试';
+      setViralError(msg);
       setIsGeneratingViral(false);
     }
   };
@@ -1020,6 +1030,25 @@ export default function CreatorDashboardPage() {
                 </div>
               </div>
             </div>
+
+            {viralError && (
+              <div
+                role="alert"
+                className="mb-4 rounded-xl border border-accent-red/30 bg-accent-red/10 px-4 py-3 text-sm text-foreground"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="whitespace-pre-wrap">{viralError}</span>
+                  <button
+                    type="button"
+                    className="shrink-0 text-foreground-tertiary hover:text-foreground"
+                    onClick={() => setViralError(null)}
+                    aria-label="关闭"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            )}
 
             <Card>
               <div className="p-6 space-y-6">

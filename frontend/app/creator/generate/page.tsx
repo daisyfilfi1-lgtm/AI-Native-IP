@@ -14,19 +14,15 @@ import {
   CheckCircle2, 
   AlertCircle,
   Edit3,
-  Save,
-  RefreshCw,
   ArrowLeft,
   Copy,
   Send,
   Loader2,
   Check,
   FileText,
-  Library,
-  Clock,
-  TrendingUp,
   GraduationCap,
-  MessageCircle
+  MessageCircle,
+  ChevronDown
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -113,6 +109,8 @@ function GeneratePageContent() {
   const [learningLoading, setLearningLoading] = useState(false);
   const [styleLearnings, setStyleLearnings] = useState<Array<{ text: string }>>([]);
   const [learningToast, setLearningToast] = useState<string | null>(null);
+  /** 改稿/总结失败时仅在侧栏提示，避免整页「出错了」 */
+  const [refinePanelError, setRefinePanelError] = useState<string | null>(null);
 
   useEffect(() => {
     const el = refineChatScrollRef.current;
@@ -254,17 +252,11 @@ function GeneratePageContent() {
     }
   };
 
-  /** 滚到对话改稿并聚焦输入框（体感接近 Gemini 连续对话） */
-  const handleScrollToRefineChat = () => {
-    refineChatAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    setTimeout(() => refineInputRef.current?.focus(), 300);
-  };
-
   const handleRefineSend = async () => {
     const text = refineInput.trim();
     if (!id || !ipId || !text || !content) return;
     setRefineLoading(true);
-    setError(null);
+    setRefinePanelError(null);
     try {
       await creatorApi.refineDraft({
         draft_id: id,
@@ -278,7 +270,9 @@ function GeneratePageContent() {
       setRefineInput('');
       await loadContent();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '按反馈改写失败，请稍后重试');
+      setRefinePanelError(
+        err instanceof Error ? err.message : '按反馈改写失败，请稍后重试'
+      );
     } finally {
       setRefineLoading(false);
     }
@@ -287,7 +281,7 @@ function GeneratePageContent() {
   const handleRecordLearning = async () => {
     if (!id || !ipId) return;
     setLearningLoading(true);
-    setError(null);
+    setRefinePanelError(null);
     try {
       const r = await creatorApi.recordIterationLearning({
         draft_id: id,
@@ -299,22 +293,12 @@ function GeneratePageContent() {
       refreshLearnings();
       setTimeout(() => setLearningToast(null), 5000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '总结学习失败，请稍后重试');
+      setRefinePanelError(
+        err instanceof Error ? err.message : '总结学习失败，请稍后重试'
+      );
     } finally {
       setLearningLoading(false);
     }
-  };
-
-  const getComplianceStatus = () => {
-    if (!content?.compliance) return { passed: false, label: '未知', color: 'gray' };
-    const { compliance } = content;
-    const allPassed = compliance.platformChecks.douyin === 'passed' && 
-                      compliance.platformChecks.xiaohongshu === 'passed';
-    return {
-      passed: allPassed,
-      label: allPassed ? '已通过' : '需修改',
-      color: allPassed ? 'green' : 'yellow'
-    };
   };
 
   if (error) {
@@ -454,10 +438,10 @@ function GeneratePageContent() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
-            className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+            className="space-y-8"
           >
-            {/* Content Editor */}
-            <div className="lg:col-span-2 space-y-4">
+            {/* 正文区（与下方对话改稿同宽对齐） */}
+            <div className="w-full max-w-3xl mx-auto px-2 sm:px-0 space-y-4">
               {Object.entries(sectionLabels).map(([key, config], index) => (
                 <motion.div
                   key={key}
@@ -522,6 +506,47 @@ function GeneratePageContent() {
                 </motion.div>
               ))}
 
+              {normalizedType === 'original' &&
+                (Boolean(content.viralElements?.length) || Boolean(content.scriptTemplate)) && (
+                  <details className="group rounded-xl border border-border bg-background-tertiary/25 overflow-hidden">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-foreground hover:bg-background-tertiary/40 [&::-webkit-details-marker]:hidden">
+                      <span>生成说明：爆款元素与脚本模板</span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-foreground-tertiary transition-transform group-open:rotate-180" />
+                    </summary>
+                    <div className="space-y-4 border-t border-border px-4 pb-4 pt-3">
+                      {content.viralElements && content.viralElements.length > 0 && (
+                        <div>
+                          <h4 className="mb-2 text-xs font-medium text-foreground-secondary">八大爆款元素</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {content.viralElements.map((element: string) => (
+                              <Badge key={element} variant="primary" size="sm">
+                                {element}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {content.scriptTemplate && (
+                        <div>
+                          <h4 className="mb-2 text-xs font-medium text-foreground-secondary">脚本模板</h4>
+                          <div className="text-sm text-foreground-secondary space-y-2">
+                            {content.scriptTemplate === 'opinion' && '说观点：钩子→论据→升华'}
+                            {content.scriptTemplate === 'process' && '晒过程：展示→情绪→结果'}
+                            {content.scriptTemplate === 'knowledge' && '教知识：问题→原因→解决'}
+                            {content.scriptTemplate === 'story' && '讲故事：困境→转折→方法→结果'}
+                            {content.scriptTemplate === 'custom' && '自定义：按你的结构说明与时间轴组织全文'}
+                            {content.scriptTemplate === 'custom' && content.customScriptHint?.trim() && (
+                              <p className="text-xs text-foreground-tertiary whitespace-pre-wrap border-t border-border pt-2">
+                                {content.customScriptHint.trim()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                )}
+
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4">
                 <Button
@@ -549,65 +574,36 @@ function GeneratePageContent() {
               </div>
             </div>
 
-            {/* 重写按钮 */}
-            <Button
-              variant="secondary"
-              className="w-full"
-              leftIcon={<RefreshCw className="w-4 h-4" />}
-              onClick={handleScrollToRefineChat}
-              disabled={refineLoading}
-            >
-              对话改稿
-            </Button>
-
-            {/* Sidebar */}
-            <div className="space-y-4">
-              {/* 爆款原创特殊展示 */}
-              {normalizedType === 'original' && content.viralElements && (
-                <Card>
-                  <div className="p-4">
-                    <h3 className="font-semibold text-foreground mb-3">🎯 八大爆款元素</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {content.viralElements.map((element: string) => (
-                        <Badge key={element} variant="primary" size="sm">
-                          {element}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                </Card>
-              )}
-              
-              {normalizedType === 'original' && content.scriptTemplate && (
-                <Card>
-                  <div className="p-4">
-                    <h3 className="font-semibold text-foreground mb-3">📝 脚本模板</h3>
-                    <div className="text-sm text-foreground-secondary space-y-2">
-                      {content.scriptTemplate === 'opinion' && '说观点：钩子→论据→升华'}
-                      {content.scriptTemplate === 'process' && '晒过程：展示→情绪→结果'}
-                      {content.scriptTemplate === 'knowledge' && '教知识：问题→原因→解决'}
-                      {content.scriptTemplate === 'story' && '讲故事：困境→转折→方法→结果'}
-                      {content.scriptTemplate === 'custom' && '自定义：按你的结构说明与时间轴组织全文'}
-                      {content.scriptTemplate === 'custom' && content.customScriptHint?.trim() && (
-                        <p className="text-xs text-foreground-tertiary whitespace-pre-wrap border-t border-border pt-2">
-                          {content.customScriptHint.trim()}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-              )}
-
-              {/* 迭代优化：多轮对话改稿（Gemini 体感）+ 满意后总结入库 */}
-              <Card>
-                <div className="p-4" ref={refineChatAnchorRef}>
+            {/* 发布区下方：仅对话改稿（全宽居中，避免挤在侧栏偏左） */}
+            <div ref={refineChatAnchorRef} className="w-full flex justify-center px-2 sm:px-0">
+              <Card className="w-full max-w-3xl border-border/80">
+                <div className="p-4 sm:p-5">
                   <h3 className="font-semibold text-foreground mb-1 flex items-center gap-2">
                     <MessageCircle className="w-4 h-4 text-primary-400" />
                     对话改稿
                   </h3>
                   <p className="text-xs text-foreground-tertiary mb-3">
-                    像和 Gemini 一样多轮说明：你写什么，模型就按你的意思改；左侧正文会同步更新。满意后再用下方「总结学习」写入 IP 长期偏好。
+                    像和 Gemini 一样多轮说明：你写什么，模型就按你的意思改；上方正文会同步更新。满意后再用下方「总结学习」写入 IP 长期偏好。
                   </p>
+
+                  {refinePanelError && (
+                    <div
+                      role="alert"
+                      className="mb-3 rounded-lg border border-accent-red/40 bg-accent-red/10 px-3 py-2 text-xs text-foreground"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="whitespace-pre-wrap">{refinePanelError}</span>
+                        <button
+                          type="button"
+                          className="shrink-0 text-foreground-tertiary hover:text-foreground"
+                          onClick={() => setRefinePanelError(null)}
+                          aria-label="关闭"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <div
                     ref={refineChatScrollRef}
@@ -711,168 +707,6 @@ function GeneratePageContent() {
                       </ul>
                     </div>
                   )}
-                </div>
-              </Card>
-
-              {/* Compliance Check */}
-              <Card>
-                <div className="p-4">
-                  <h3 className="font-semibold text-foreground mb-3">合规检查</h3>
-                  <div className="space-y-3">
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm text-foreground-secondary">原创度</span>
-                        <span className={cn(
-                          "text-sm font-medium",
-                          (content.compliance?.originalityScore || 0) >= 75 ? "text-accent-green" : "text-accent-yellow"
-                        )}>
-                          {content.compliance?.originalityScore || 0}%
-                        </span>
-                      </div>
-                      <div className="w-full h-1.5 bg-background-tertiary rounded-full overflow-hidden">
-                        <div 
-                          className={cn(
-                            "h-full rounded-full",
-                            (content.compliance?.originalityScore || 0) >= 75 ? "bg-accent-green" : "bg-accent-yellow"
-                          )}
-                          style={{ width: `${content.compliance?.originalityScore || 0}%` }}
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center justify-between pt-2">
-                      <span className="text-sm text-foreground-secondary">敏感词检测</span>
-                      {content.compliance?.sensitiveWords && content.compliance.sensitiveWords.length > 0 ? (
-                        <Badge variant="danger" size="sm">{content.compliance.sensitiveWords.length}个未通过</Badge>
-                      ) : (
-                        <Badge variant="success" size="sm">已通过</Badge>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-foreground-secondary">抖音平台</span>
-                      <Badge 
-                        variant={content.compliance?.platformChecks.douyin === 'passed' ? 'success' : 'warning'} 
-                        size="sm"
-                      >
-                        {content.compliance?.platformChecks.douyin === 'passed' ? '通过' : '需修改'}
-                      </Badge>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-foreground-secondary">小红书平台</span>
-                      <Badge 
-                        variant={content.compliance?.platformChecks.xiaohongshu === 'passed' ? 'success' : 'warning'} 
-                        size="sm"
-                      >
-                        {content.compliance?.platformChecks.xiaohongshu === 'passed' ? '通过' : '需修改'}
-                      </Badge>
-                    </div>
-
-                    <div className="pt-2 border-t border-border">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-foreground">整体状态</span>
-                        <Badge 
-                          variant={getComplianceStatus().passed ? 'success' : 'warning'} 
-                          size="sm"
-                        >
-                          {getComplianceStatus().label}
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-
-              {/* Agent Chain Info */}
-              <Card>
-                <div className="p-4">
-                  <h3 className="font-semibold text-foreground mb-3">Agent调用链</h3>
-                  <div className="space-y-2">
-                    {(content.agentChain || []).map((agent, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-sm">
-                        <div className="w-5 h-5 rounded-full bg-accent-green/20 text-accent-green flex items-center justify-center text-xs font-medium">
-                          {idx + 1}
-                        </div>
-                        <span className="text-foreground-secondary">{agent} Agent</span>
-                        <CheckCircle2 className="w-3 h-3 text-accent-green ml-auto" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </Card>
-
-              {/* 黄金发布时间建议 */}
-              <Card>
-                <div className="p-4">
-                  <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-primary-400" />
-                    黄金发布时间
-                  </h3>
-                  <div className="p-3 rounded-xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 mb-3">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-lg">💼</span>
-                      <span className="font-medium text-foreground">职场类内容</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { time: '8:00-9:00', label: '早高峰' },
-                        { time: '12:00-13:00', label: '午休' },
-                        { time: '20:00-22:00', label: '晚间' }
-                      ].map((slot) => (
-                        <button
-                          key={slot.time}
-                          className="px-3 py-1.5 rounded-lg bg-background-elevated hover:bg-primary-500/20 border border-border hover:border-primary-500/50 transition-all text-sm"
-                        >
-                          <span className="text-foreground">{slot.time}</span>
-                          <span className="text-foreground-tertiary text-xs ml-1">{slot.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <p className="text-xs text-foreground-tertiary">
-                    选择合适的发布时间可提升30%+的初始流量，建议提前5分钟发布
-                  </p>
-                </div>
-              </Card>
-
-              {/* Tips */}
-              <Card>
-                <div className="p-4">
-                  <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-accent-yellow" />
-                    数据优化建议
-                  </h3>
-                  <ul className="space-y-3 text-sm text-foreground-secondary">
-                    <li className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan mt-1.5 flex-shrink-0" />
-                      <span>
-                        <strong className="text-foreground">完播率优化：</strong>
-                        前3秒加入具体数字或争议观点，可提升20%完播率
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-accent-pink mt-1.5 flex-shrink-0" />
-                      <span>
-                        <strong className="text-foreground">点赞率优化：</strong>
-                        在内容中段增加价值密度，每15秒一个信息点
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-accent-yellow mt-1.5 flex-shrink-0" />
-                      <span>
-                        <strong className="text-foreground">评论率优化：</strong>
-                        CTA部分增加争议性话题或提问，引导互动
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-accent-green mt-1.5 flex-shrink-0" />
-                      <span>
-                        <strong className="text-foreground">转粉率优化：</strong>
-                        结尾强化人设记忆点，使用固定slogan或视觉符号
-                      </span>
-                    </li>
-                  </ul>
                 </div>
               </Card>
             </div>

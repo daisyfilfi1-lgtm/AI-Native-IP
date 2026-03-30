@@ -1624,11 +1624,8 @@ async def generate_viral_original(req: ViralGenerateRequest, db: Session = Depen
             "score": result.score,
         }
     except Exception as e:
-        return {
-            "id": "gen_viral_001",
-            "status": "failed",
-            "error": str(e),
-        }
+        logger.exception("generate viral failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # === 语音 / 文字快生成（走场景三）===
@@ -1707,11 +1704,8 @@ async def generate_from_original(req: OriginalGenerateRequest, db: Session = Dep
             "score": result.score,
         }
     except Exception as e:
-        return {
-            "id": "gen_original_001",
-            "status": "failed",
-            "error": str(e),
-        }
+        logger.exception("generate original failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # === 获取生成结果 ===

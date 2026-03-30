@@ -305,7 +305,12 @@ def refine_draft_with_feedback(
         temperature=0.68,
     )
     if not raw:
-        raise ValueError("模型暂时不可用，请稍后重试")
+        raise ValueError(
+            "模型调用失败（无有效返回）。请检查："
+            "1) Railway 已配置 OPENAI_API_KEY 或 GEMINI_API_KEY；"
+            "2) 若设置了 FEEDBACK_LLM_MODEL，需配置 FEEDBACK_LLM_API_KEY 且端点可访问；"
+            "3) 查看后端日志中的 LLM 报错详情。"
+        )
     sections = _parse_json_sections(raw)
 
     # 合并正文

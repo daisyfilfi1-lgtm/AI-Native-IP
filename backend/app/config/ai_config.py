@@ -11,6 +11,20 @@ from typing import Any
 # OpenAI 官方 API 默认 Base（仅用于转写独立客户端未显式填 base_url 时）
 _DEFAULT_OPENAI_TRANSCRIPTION_BASE = "https://api.openai.com/v1"
 
+# 主 LLM 单次补全最大输出 token；不设时部分兼容接口默认仅 1024～2048，长口播会被截断
+_DEFAULT_LLM_MAX_OUTPUT_TOKENS = 8192
+
+
+def _parse_positive_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        v = int(raw)
+        return v if v > 0 else default
+    except ValueError:
+        return default
+
 
 def get_ai_config() -> dict[str, Any]:
     """
@@ -48,11 +62,16 @@ def get_ai_config() -> dict[str, Any]:
     if not trans_key:
         trans_base = trans_base or base_url
 
+    llm_max_output_tokens = _parse_positive_int(
+        "LLM_MAX_OUTPUT_TOKENS", _DEFAULT_LLM_MAX_OUTPUT_TOKENS
+    )
+
     return {
         "api_key": api_key,
         "base_url": base_url,
         "embedding_model": embedding_model,
         "llm_model": llm_model,
+        "llm_max_output_tokens": llm_max_output_tokens,
         "auto_tag_enabled": auto_tag_enabled,
         "embedding_available": bool(api_key),
         "llm_available": bool(api_key),
@@ -83,6 +102,8 @@ def get_feedback_llm_config() -> dict[str, Any]:
     - FEEDBACK_LLM_MODEL=gemini-2.0-flash（或其它 gemini-*）
     - FEEDBACK_LLM_API_KEY=（Gemini API Key，可与 GEMINI_API_KEY 二选一）
     - FEEDBACK_LLM_BASE_URL=（可选；未填且模型名含 gemini 时自动使用 Google OpenAI 兼容端点）
+
+    实际调用见 ai_client.chat_feedback：专用端点失败或空返回时回退主站 LLM（如 DeepSeek）。
     """
     model = os.environ.get("FEEDBACK_LLM_MODEL", "").strip()
     if not model:

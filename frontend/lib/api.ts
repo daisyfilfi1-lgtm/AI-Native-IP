@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosInstance } from 'axios';
+import axios, { AxiosError, AxiosHeaders, AxiosInstance } from 'axios';
 
 import { getBrowserApiBaseUrl } from '@/lib/apiBaseUrl';
 import { getStoredToken } from '@/lib/auth';
@@ -75,9 +75,10 @@ class ApiClient {
           const token = getStoredToken();
           if (token) {
             cfg.__retried401 = true;
-            cfg.headers = cfg.headers || {};
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (cfg.headers as any).Authorization = `Bearer ${token}`;
+            cfg.headers = AxiosHeaders.from(cfg.headers ?? {}).set(
+              'Authorization',
+              `Bearer ${token}`,
+            );
             return this.client.request(cfg);
           }
         }

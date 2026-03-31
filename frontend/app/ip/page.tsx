@@ -41,14 +41,18 @@ export default function IPManagementPage() {
   const [ips, setIps] = useState<IP[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
+        setLoadError(null);
         const list = await api.listIPs();
         setIps(list);
       } catch (e) {
         console.error(e);
+        setIps([]);
+        setLoadError('加载失败：请确认已登录，或稍后重试。');
       } finally {
         setLoading(false);
       }
@@ -129,6 +133,40 @@ export default function IPManagementPage() {
       {loading ? (
         <div className="flex items-center justify-center py-12 gap-2 text-foreground-secondary">
           <Loader2 className="w-5 h-5 animate-spin" /> 加载中...
+        </div>
+      ) : loadError ? (
+        <div className="py-10">
+          <div className="max-w-xl mx-auto p-4 rounded-xl bg-accent-red/10 border border-accent-red/20 text-sm text-foreground">
+            <p className="font-medium mb-2">IP 列表加载失败</p>
+            <p className="text-foreground-secondary whitespace-pre-wrap">{loadError}</p>
+            <div className="mt-3 flex gap-2">
+              <Link href="/login">
+                <Button size="sm">去登录</Button>
+              </Link>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setLoading(true);
+                  (async () => {
+                    try {
+                      setLoadError(null);
+                      const list = await api.listIPs();
+                      setIps(list);
+                    } catch (e) {
+                      console.error(e);
+                      setIps([]);
+                      setLoadError('加载失败：请确认已登录，或稍后重试。');
+                    } finally {
+                      setLoading(false);
+                    }
+                  })();
+                }}
+              >
+                重试
+              </Button>
+            </div>
+          </div>
         </div>
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

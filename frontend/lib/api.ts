@@ -66,8 +66,21 @@ class ApiClient {
 
     this.client.interceptors.response.use(
       (response) => response,
-      (error: AxiosError) => {
-        const cfg = error.config;
+      async (error: AxiosError) => {
+        // 偶发：登录后立刻跳转/refresh，首个请求可能未带上 token 导致 401。
+        // 这里做一次轻量重试，避免用户感知为「点进去失败」。
+        const cfg = error.config as (typeof error.config & { __retried401?: boolean }) | undefined;
+        const status = error.response?.status;
+        if (status === 401 && cfg && !cfg.__retried401) {
+          const token = getStoredToken();
+          if (token) {
+            cfg.__retried401 = true;
+            cfg.headers = cfg.headers || {};
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (cfg.headers as any).Authorization = `Bearer ${token}`;
+            return this.client.request(cfg);
+          }
+        }
         if (!cfg?.silentErrorLog) {
           console.error('API Error:', error.response?.data || error.message);
         }

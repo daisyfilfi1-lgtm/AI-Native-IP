@@ -33,8 +33,12 @@ export function CreatorLayout({ children }: CreatorLayoutProps) {
       {/* Top Navigation */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-background/80 backdrop-blur-xl border-b border-border z-50">
         <div className="h-full px-4 lg:px-6 flex items-center justify-between">
-          {/* Logo */}
-          <Link href="/creator/dashboard" className="flex items-center gap-2">
+          {/* Logo：回主控制台（侧栏布局在 /、/ip 等）；创作台请用顶栏「今日工作台」 */}
+          <Link
+            href="/"
+            className="flex items-center gap-2"
+            title="返回主控制台（含侧栏导航）"
+          >
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-accent-cyan flex items-center justify-center">
               <Sparkles className="w-4 h-4 text-white" />
             </div>
